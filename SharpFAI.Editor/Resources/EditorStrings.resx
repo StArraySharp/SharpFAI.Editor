@@ -1,0 +1,362 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="MenuFile" xml:space="preserve"><value>File</value></data>
+  <data name="MenuEdit" xml:space="preserve"><value>Edit</value></data>
+  <data name="MenuView" xml:space="preserve"><value>View</value></data>
+  <data name="Chart" xml:space="preserve"><value>Chart</value></data>
+  <data name="MenuTools" xml:space="preserve"><value>Tools</value></data>
+  <data name="MenuHelp" xml:space="preserve"><value>Help</value></data>
+  <data name="Language" xml:space="preserve"><value>Language</value></data>
+  <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
+  <data name="Settings" xml:space="preserve"><value>Level settings</value></data>
+  <data name="Decorations" xml:space="preserve"><value>Decoration manager</value></data>
+  <data name="Inspector" xml:space="preserve"><value>Event properties</value></data>
+  <data name="Palette" xml:space="preserve"><value>Event palette</value></data>
+  <data name="ParticleEditor" xml:space="preserve"><value>Particle editor</value></data>
+  <data name="ParticleGeneral" xml:space="preserve"><value>General</value></data>
+  <data name="ParticleShape" xml:space="preserve"><value>Shape</value></data>
+  <data name="ParticleTransform" xml:space="preserve"><value>Transform</value></data>
+  <data name="Shortcuts" xml:space="preserve"><value>Keyboard shortcuts</value></data>
+  <data name="New" xml:space="preserve"><value>New</value></data>
+  <data name="Open" xml:space="preserve"><value>Open…</value></data>
+  <data name="OpenLevel" xml:space="preserve"><value>Open level</value></data>
+  <data name="ChooseArchiveLevel" xml:space="preserve"><value>Choose a level from the ZIP</value></data>
+  <data name="NoArchiveLevels" xml:space="preserve"><value>The ZIP contains no .adofai levels other than backup.adofai.</value></data>
+  <data name="ArchiveNeedsSingleLevel" xml:space="preserve"><value>This mode needs one level. Choose an extracted file from {0}.</value></data>
+  <data name="Save" xml:space="preserve"><value>Save</value></data>
+  <data name="SaveLevel" xml:space="preserve"><value>Save level</value></data>
+  <data name="SaveAs" xml:space="preserve"><value>Save as…</value></data>
+  <data name="Exit" xml:space="preserve"><value>Exit</value></data>
+  <data name="Undo" xml:space="preserve"><value>Undo</value></data>
+  <data name="Redo" xml:space="preserve"><value>Redo</value></data>
+  <data name="DeleteSelection" xml:space="preserve"><value>Delete selection</value></data>
+  <data name="ResetLayout" xml:space="preserve"><value>Reset layout</value></data>
+  <data name="FloorNumbers" xml:space="preserve"><value>Show tile numbers</value></data>
+  <data name="FindFloorCommand" xml:space="preserve"><value>Find tile…</value></data>
+  <data name="FindFloor" xml:space="preserve"><value>Find tile</value></data>
+  <data name="FindCommentCommand" xml:space="preserve"><value>Find comment…</value></data>
+  <data name="FindComment" xml:space="preserve"><value>Find comment</value></data>
+  <data name="SearchComment" xml:space="preserve"><value>Search comments</value></data>
+  <data name="FloorNumber" xml:space="preserve"><value>Tile number</value></data>
+  <data name="Locate" xml:space="preserve"><value>Go to</value></data>
+  <data name="GoToStart" xml:space="preserve"><value>Go to start</value></data>
+  <data name="GoToEnd" xml:space="preserve"><value>Go to end</value></data>
+  <data name="ChartPreview" xml:space="preserve"><value>Scene preview</value></data>
+  <data name="PlayFromTile" xml:space="preserve"><value>Play from selected tile</value></data>
+  <data name="ManualFromTile" xml:space="preserve"><value>Play manually from selected tile</value></data>
+  <data name="ManualTooltip" xml:space="preserve"><value>Play manually from selected tile</value></data>
+  <data name="ConfiguredSpeed" xml:space="preserve"><value>Play at configured speed</value></data>
+  <data name="HalfSpeed" xml:space="preserve"><value>Play at half the configured speed</value></data>
+  <data name="Autoplay" xml:space="preserve"><value>Autoplay</value></data>
+  <data name="NoFail" xml:space="preserve"><value>No Fail</value></data>
+  <data name="ReturnToEdit" xml:space="preserve"><value>Back to editor</value></data>
+  <data name="Preview" xml:space="preserve"><value>Preview</value></data>
+  <data name="Play" xml:space="preserve"><value>Play</value></data>
+  <data name="Pause" xml:space="preserve"><value>Pause</value></data>
+  <data name="Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Reset" xml:space="preserve"><value>Reset</value></data>
+  <data name="Manual" xml:space="preserve"><value>Play manually</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Ok" xml:space="preserve"><value>OK</value></data>
+  <data name="Unsaved" xml:space="preserve"><value>Unsaved changes</value></data>
+  <data name="SavePrompt" xml:space="preserve"><value>Save changes to the current level?</value></data>
+  <data name="Discard" xml:space="preserve"><value>Discard changes</value></data>
+  <data name="Error" xml:space="preserve"><value>Operation failed</value></data>
+  <data name="Untitled" xml:space="preserve"><value>Untitled level</value></data>
+  <data name="Grid" xml:space="preserve"><value>Grid</value></data>
+  <data name="DirectionGuide" xml:space="preserve"><value>Direction guide</value></data>
+  <data name="Angle" xml:space="preserve"><value>Angle</value></data>
+  <data name="AddTile" xml:space="preserve"><value>Add tile</value></data>
+  <data name="CenterSelection" xml:space="preserve"><value>Focus selection</value></data>
+  <data name="LocateDecoration" xml:space="preserve"><value>Focus decoration</value></data>
+  <data name="EditParticle" xml:space="preserve"><value>Edit particles…</value></data>
+  <data name="AddDecoration" xml:space="preserve"><value>Add decoration…</value></data>
+  <data name="SearchDecorations" xml:space="preserve"><value>Filter by tile, type or tag</value></data>
+  <data name="HideAll" xml:space="preserve"><value>Hide all</value></data>
+  <data name="ShowAll" xml:space="preserve"><value>Restore visibility</value></data>
+  <data name="LockAll" xml:space="preserve"><value>Lock all</value></data>
+  <data name="UnlockAll" xml:space="preserve"><value>Restore locks</value></data>
+  <data name="Show" xml:space="preserve"><value>Show</value></data>
+  <data name="Hide" xml:space="preserve"><value>Hide</value></data>
+  <data name="Lock" xml:space="preserve"><value>Lock</value></data>
+  <data name="Unlock" xml:space="preserve"><value>Unlock</value></data>
+  <data name="AddEventHint" xml:space="preserve"><value>Add an event from the palette below</value></data>
+  <data name="EventEnabled" xml:space="preserve"><value>Event enabled</value></data>
+  <data name="DeleteEvent" xml:space="preserve"><value>Delete event</value></data>
+  <data name="SearchEvents" xml:space="preserve"><value>Search events</value></data>
+  <data name="OtherFields" xml:space="preserve"><value>Other properties</value></data>
+  <data name="ChooseAsset" xml:space="preserve"><value>Choose asset</value></data>
+  <data name="Syncing" xml:space="preserve"><value>Syncing chart…</value></data>
+  <data name="SyncStage" xml:space="preserve"><value>Syncing chart · {0}</value></data>
+  <data name="TileStatus" xml:space="preserve"><value>Tile {0} / {1}</value></data>
+  <data name="TileRangeStatus" xml:space="preserve"><value>Tiles {0}–{1} / {2}</value></data>
+  <data name="ParticlePreviewStatus" xml:space="preserve"><value>Particle preview · {0:F2} s</value></data>
+  <data name="PlayTooltip" xml:space="preserve"><value>Space · Play / pause</value></data>
+  <data name="NoChineseFont" xml:space="preserve"><value>No font with Chinese glyphs was found.</value></data>
+  <data name="ImGuiInitError" xml:space="preserve"><value>The ImGui OpenGL backend could not initialize.</value></data>
+  <data name="MalformedSchema" xml:space="preserve"><value>Unrecognized LevelEditorProperties.txt structure.</value></data>
+  <data name="EmptySchema" xml:space="preserve"><value>The imported event list has no visible categories.</value></data>
+  <data name="PreviewBufferError" xml:space="preserve"><value>The preview framebuffer could not be created.</value></data>
+  <data name="HelpTiles" xml:space="preserve"><value>Direction keys place tiles · Tab midspin · Shift+Space full turn · F5/F7 polygons</value></data>
+  <data name="HelpSelect" xml:space="preserve"><value>← / → select a tile · Shift extends selection · Home / End first or last tile</value></data>
+  <data name="HelpDelete" xml:space="preserve"><value>Backspace deletes the current tile · Delete deletes the next · Ctrl deletes to one side</value></data>
+  <data name="HelpClipboard" xml:space="preserve"><value>Ctrl+C/X/V copy/cut/paste · Shift acts on events</value></data>
+  <data name="HelpTransforms" xml:space="preserve"><value>Ctrl+L flips · Shift changes axis · Ctrl+comma/period/slash rotates</value></data>
+  <data name="HelpEvents" xml:space="preserve"><value>↑ / ↓ cycle event types · Shift cycles event instances</value></data>
+  <data name="HelpEventPages" xml:space="preserve"><value>[ / ] page through events of the same type · Shift jumps to either end</value></data>
+  <data name="HelpPalette" xml:space="preserve"><value>1–0 add events · Ctrl+number switches categories</value></data>
+  <data name="HelpCamera" xml:space="preserve"><value>Wheel or - / = to zoom · left-drag to pan</value></data>
+  <data name="HelpPlay" xml:space="preserve"><value>Ctrl+wheel adjusts speed · Ctrl+Space plays at set speed · Ctrl+P half speed · Alt+A autoplay · Alt+N No Fail</value></data>
+  <data name="HelpReturn" xml:space="preserve"><value>Esc returns to the original selection · Shift+Esc goes to the current playback tile</value></data>
+  <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B toggles bookmark · Alt+← / → jumps between bookmarks</value></data>
+  <data name="HelpLocate" xml:space="preserve"><value>Alt+; find tile · Alt+F find comment</value></data>
+  <data name="HelpFile" xml:space="preserve"><value>Ctrl+O / S open / save</value></data>
+  <data name="HelpUndo" xml:space="preserve"><value>Ctrl+Z / Y undo / redo</value></data>
+  <data name="PhaseLoading" xml:space="preserve"><value>Starting</value></data>
+  <data name="PhaseParse" xml:space="preserve"><value>Reading chart</value></data>
+  <data name="PhaseFloors" xml:space="preserve"><value>Generating tiles</value></data>
+  <data name="PhaseTimeline" xml:space="preserve"><value>Building timeline</value></data>
+  <data name="PhaseAudio" xml:space="preserve"><value>Preparing audio</value></data>
+  <data name="PhaseDecorations" xml:space="preserve"><value>Loading decorations and backgrounds</value></data>
+  <data name="PhaseVisibility" xml:space="preserve"><value>Indexing visible tiles</value></data>
+  <data name="PhaseBaking" xml:space="preserve"><value>Baking meshes</value></data>
+  <data name="PhaseUpload" xml:space="preserve"><value>Uploading to GPU</value></data>
+  <data name="Option_Bpm" xml:space="preserve"><value>BPM</value></data>
+  <data name="Option_Multiplier" xml:space="preserve"><value>Multiplier</value></data>
+  <data name="Option_Grayscale" xml:space="preserve"><value>Grayscale</value></data>
+  <data name="Option_Invert" xml:space="preserve"><value>Invert</value></data>
+  <data name="Option_Linear" xml:space="preserve"><value>Linear</value></data>
+  <data name="Option_Local" xml:space="preserve"><value>Local</value></data>
+  <data name="Option_World" xml:space="preserve"><value>World</value></data>
+  <data name="Option_Circle" xml:space="preserve"><value>Circle</value></data>
+  <data name="Option_Rectangle" xml:space="preserve"><value>Rectangle</value></data>
+  <data name="Option_Random" xml:space="preserve"><value>Random</value></data>
+  <data name="Option_Loop" xml:space="preserve"><value>Loop</value></data>
+  <data name="Option_PingPong" xml:space="preserve"><value>Ping Pong</value></data>
+  <data name="Option_Start" xml:space="preserve"><value>Start</value></data>
+  <data name="Option_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Option_Clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="Option_TwoPlanets" xml:space="preserve"><value>Two Planets</value></data>
+  <data name="Option_ThreePlanets" xml:space="preserve"><value>Three Planets</value></data>
+  <data name="Option_Backward" xml:space="preserve"><value>Backward</value></data>
+  <data name="Option_None" xml:space="preserve"><value>None</value></data>
+  <data name="Option_Forward" xml:space="preserve"><value>Forward</value></data>
+  <data name="Option_Kick" xml:space="preserve"><value>Kick</value></data>
+  <data name="Option_ThisTile" xml:space="preserve"><value>This Tile</value></data>
+  <data name="Option_End" xml:space="preserve"><value>End</value></data>
+  <data name="Name_SongSettings" xml:space="preserve"><value>Song</value></data>
+  <data name="Name_LevelSettings" xml:space="preserve"><value>Level</value></data>
+  <data name="Name_TrackSettings" xml:space="preserve"><value>Track</value></data>
+  <data name="Name_BackgroundSettings" xml:space="preserve"><value>Background</value></data>
+  <data name="Name_CameraSettings" xml:space="preserve"><value>Camera</value></data>
+  <data name="Name_MiscSettings" xml:space="preserve"><value>Other</value></data>
+  <data name="Name_Gameplay" xml:space="preserve"><value>Gameplay</value></data>
+  <data name="Name_TrackFx" xml:space="preserve"><value>Track</value></data>
+  <data name="Name_DecorationFx" xml:space="preserve"><value>Decorations</value></data>
+  <data name="Name_VisualFx" xml:space="preserve"><value>Visuals</value></data>
+  <data name="Name_FxModifiers" xml:space="preserve"><value>Event modifiers</value></data>
+  <data name="Name_Conveniences" xml:space="preserve"><value>Utilities</value></data>
+  <data name="Name_Jank" xml:space="preserve"><value>Special</value></data>
+  <data name="Name_SetSpeed" xml:space="preserve"><value>Set Speed</value></data>
+  <data name="Name_Twirl" xml:space="preserve"><value>Twirl</value></data>
+  <data name="Name_Pause" xml:space="preserve"><value>Pause</value></data>
+  <data name="Name_Hold" xml:space="preserve"><value>Hold</value></data>
+  <data name="Name_MultiPlanet" xml:space="preserve"><value>Multi Planet</value></data>
+  <data name="Name_ScaleRadius" xml:space="preserve"><value>Planet radius</value></data>
+  <data name="Name_SetHitsound" xml:space="preserve"><value>Set Hitsound</value></data>
+  <data name="Name_Bookmark" xml:space="preserve"><value>Bookmark</value></data>
+  <data name="Name_PositionTrack" xml:space="preserve"><value>Position Track</value></data>
+  <data name="Name_ColorTrack" xml:space="preserve"><value>Color Track</value></data>
+  <data name="Name_AnimateTrack" xml:space="preserve"><value>Animate Track</value></data>
+  <data name="Name_MoveTrack" xml:space="preserve"><value>Move Track</value></data>
+  <data name="Name_RecolorTrack" xml:space="preserve"><value>Recolor Track</value></data>
+  <data name="Name_MoveDecorations" xml:space="preserve"><value>Move Decorations</value></data>
+  <data name="Name_SetText" xml:space="preserve"><value>Set Text</value></data>
+  <data name="Name_SetParticle" xml:space="preserve"><value>Set Particle</value></data>
+  <data name="Name_EmitParticle" xml:space="preserve"><value>Emit Particle</value></data>
+  <data name="Name_CustomBackground" xml:space="preserve"><value>Custom Background</value></data>
+  <data name="Name_MoveCamera" xml:space="preserve"><value>Move Camera</value></data>
+  <data name="Name_Flash" xml:space="preserve"><value>Flash</value></data>
+  <data name="Name_SetFilter" xml:space="preserve"><value>Preset filter</value></data>
+  <data name="Name_SetFilterAdvanced" xml:space="preserve"><value>Advanced filter</value></data>
+  <data name="Name_Bloom" xml:space="preserve"><value>Bloom</value></data>
+  <data name="Name_HallOfMirrors" xml:space="preserve"><value>Hall Of Mirrors</value></data>
+  <data name="Name_RepeatEvents" xml:space="preserve"><value>Repeat Events</value></data>
+  <data name="Name_AddDecoration" xml:space="preserve"><value>Image</value></data>
+  <data name="Name_AddText" xml:space="preserve"><value>Text</value></data>
+  <data name="Name_AddObject" xml:space="preserve"><value>Object</value></data>
+  <data name="Name_AddParticle" xml:space="preserve"><value>Particle</value></data>
+  <data name="Name_songFilename" xml:space="preserve"><value>Audio file</value></data>
+  <data name="Name_bpm" xml:space="preserve"><value>BPM</value></data>
+  <data name="Name_volume" xml:space="preserve"><value>Volume</value></data>
+  <data name="Name_offset" xml:space="preserve"><value>Offset (ms)</value></data>
+  <data name="Name_pitch" xml:space="preserve"><value>Pitch</value></data>
+  <data name="Name_hitsound" xml:space="preserve"><value>Hitsound</value></data>
+  <data name="Name_hitsoundVolume" xml:space="preserve"><value>Hitsound volume</value></data>
+  <data name="Name_countdownTicks" xml:space="preserve"><value>Countdown Ticks</value></data>
+  <data name="Name_song" xml:space="preserve"><value>Song title</value></data>
+  <data name="Name_author" xml:space="preserve"><value>Author</value></data>
+  <data name="Name_artist" xml:space="preserve"><value>Artist</value></data>
+  <data name="Name_duration" xml:space="preserve"><value>Duration</value></data>
+  <data name="Name_angleOffset" xml:space="preserve"><value>Angle Offset</value></data>
+  <data name="Name_ease" xml:space="preserve"><value>Ease</value></data>
+  <data name="Name_tag" xml:space="preserve"><value>Tag</value></data>
+  <data name="Name_eventTag" xml:space="preserve"><value>Event Tag</value></data>
+  <data name="Name_position" xml:space="preserve"><value>Position</value></data>
+  <data name="Name_positionOffset" xml:space="preserve"><value>Position Offset</value></data>
+  <data name="Name_floor" xml:space="preserve"><value>Floor</value></data>
+  <data name="Name_scale" xml:space="preserve"><value>Scale</value></data>
+  <data name="Name_rotation" xml:space="preserve"><value>Rotation</value></data>
+  <data name="Name_color" xml:space="preserve"><value>Color</value></data>
+  <data name="Name_opacity" xml:space="preserve"><value>Opacity</value></data>
+  <data name="Name_depth" xml:space="preserve"><value>Depth</value></data>
+  <data name="Name_decorationImage" xml:space="preserve"><value>Decoration Image</value></data>
+  <data name="Name_decText" xml:space="preserve"><value>Text</value></data>
+  <data name="Name_filter" xml:space="preserve"><value>Filter</value></data>
+  <data name="Name_enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Name_intensity" xml:space="preserve"><value>Intensity</value></data>
+  <data name="Name_disableOthers" xml:space="preserve"><value>Disable Others</value></data>
+  <data name="Name_beatsPerMinute" xml:space="preserve"><value>BPM</value></data>
+  <data name="Name_speedType" xml:space="preserve"><value>Speed Type</value></data>
+  <data name="Name_bpmMultiplier" xml:space="preserve"><value>BPM multiplier</value></data>
+  <data name="Name_maxParticles" xml:space="preserve"><value>Max Particles</value></data>
+  <data name="Name_simulationSpace" xml:space="preserve"><value>Simulation Space</value></data>
+  <data name="Name_simulationSpeed" xml:space="preserve"><value>Simulation Speed</value></data>
+  <data name="Name_playDuration" xml:space="preserve"><value>Play Duration</value></data>
+  <data name="Name_loop" xml:space="preserve"><value>Loop</value></data>
+  <data name="Name_randomSeed" xml:space="preserve"><value>Random Seed</value></data>
+  <data name="Name_shapeType" xml:space="preserve"><value>Shape Type</value></data>
+  <data name="Name_shapeRadius" xml:space="preserve"><value>Shape Radius</value></data>
+  <data name="Name_emissionRate" xml:space="preserve"><value>Emission Rate</value></data>
+  <data name="Name_particleLifetime" xml:space="preserve"><value>Particle Lifetime</value></data>
+  <data name="Name_particleSize" xml:space="preserve"><value>Particle Size</value></data>
+  <data name="Name_startRotation" xml:space="preserve"><value>Start Rotation</value></data>
+  <data name="Name_velocity" xml:space="preserve"><value>Velocity</value></data>
+  <data name="Name_rotationOverTime" xml:space="preserve"><value>Rotation Over Time</value></data>
+  <data name="Name_sizeOverLifetime" xml:space="preserve"><value>Size over lifetime</value></data>
+  <data name="Name_colorOverLifetime" xml:space="preserve"><value>Color over lifetime</value></data>
+  <data name="Name_arc" xml:space="preserve"><value>Arc</value></data>
+  <data name="Name_arcMode" xml:space="preserve"><value>Arc Mode</value></data>
+  <data name="Name_EditorComment" xml:space="preserve"><value>Editor comment</value></data>
+  <data name="Name_comment" xml:space="preserve"><value>Comment</value></data>
+  <data name="Name_AutoPlayTiles" xml:space="preserve"><value>Autoplay tiles</value></data>
+  <data name="Name_Checkpoint" xml:space="preserve"><value>Checkpoint</value></data>
+  <data name="Name_SetPlanetRotation" xml:space="preserve"><value>Set planet rotation</value></data>
+  <data name="Name_SetHoldSound" xml:space="preserve"><value>Set hold sound</value></data>
+  <data name="Name_PlaySound" xml:space="preserve"><value>Play sound</value></data>
+  <data name="Name_ScalePlanets" xml:space="preserve"><value>Scale planets</value></data>
+  <data name="Name_TileDimensions" xml:space="preserve"><value>Tile dimensions</value></data>
+  <data name="Name_SetFloorIcon" xml:space="preserve"><value>Set tile icon</value></data>
+  <data name="Name_SetObject" xml:space="preserve"><value>Set object</value></data>
+  <data name="Name_SetDefaultText" xml:space="preserve"><value>Set default text</value></data>
+  <data name="Name_ShakeScreen" xml:space="preserve"><value>Shake screen</value></data>
+  <data name="Name_ScreenTile" xml:space="preserve"><value>Tile screen</value></data>
+  <data name="Name_ScreenScroll" xml:space="preserve"><value>Scroll screen</value></data>
+  <data name="Name_SetFrameRate" xml:space="preserve"><value>Set frame rate</value></data>
+  <data name="Name_SetConditionalEvents" xml:space="preserve"><value>Set conditional events</value></data>
+  <data name="Name_SetInputEvent" xml:space="preserve"><value>Set input event</value></data>
+  <data name="Name_ScaleMargin" xml:space="preserve"><value>Scale hit margin</value></data>
+  <data name="Name_FreeRoam" xml:space="preserve"><value>Free roam</value></data>
+  <data name="Name_FreeRoamTwirl" xml:space="preserve"><value>Free-roam twirl</value></data>
+  <data name="Name_FreeRoamRemove" xml:space="preserve"><value>Remove free roam</value></data>
+  <data name="Name_FreeRoamWarning" xml:space="preserve"><value>Free-roam warning</value></data>
+  <data name="Name_Hide" xml:space="preserve"><value>Hide</value></data>
+  <data name="Name_CallMethod" xml:space="preserve"><value>Call method</value></data>
+  <data name="Name_AddComponent" xml:space="preserve"><value>Add component</value></data>
+  <data name="Name_relativeTo" xml:space="preserve"><value>Relative to</value></data>
+  <data name="Name_pivotOffset" xml:space="preserve"><value>Pivot offset</value></data>
+  <data name="Name_rotationOffset" xml:space="preserve"><value>Rotation offset</value></data>
+  <data name="Name_startTile" xml:space="preserve"><value>Start tile</value></data>
+  <data name="Name_endTile" xml:space="preserve"><value>End tile</value></data>
+  <data name="Name_distanceMultiplier" xml:space="preserve"><value>Distance multiplier</value></data>
+  <data name="Name_landingAnimation" xml:space="preserve"><value>Landing animation</value></data>
+  <data name="Name_angleCorrectionDir" xml:space="preserve"><value>Angle correction direction</value></data>
+  <data name="Name_stickToFloors" xml:space="preserve"><value>Stick to floors</value></data>
+  <data name="Name_justThisTile" xml:space="preserve"><value>Only this tile</value></data>
+  <data name="Name_editorOnly" xml:space="preserve"><value>Editor only</value></data>
+  <data name="Name_tileShape" xml:space="preserve"><value>Tile shape</value></data>
+  <data name="Name_trackStyle" xml:space="preserve"><value>Track style</value></data>
+  <data name="Name_trackColor" xml:space="preserve"><value>Track color</value></data>
+  <data name="Name_secondaryTrackColor" xml:space="preserve"><value>Secondary track color</value></data>
+  <data name="Name_trackColorType" xml:space="preserve"><value>Track color type</value></data>
+  <data name="Name_trackTexture" xml:space="preserve"><value>Track texture</value></data>
+  <data name="Name_trackTextureScale" xml:space="preserve"><value>Track texture scale</value></data>
+  <data name="Name_trackAnimation" xml:space="preserve"><value>Track animation</value></data>
+  <data name="Name_trackDisappearAnimation" xml:space="preserve"><value>Track disappear animation</value></data>
+  <data name="Name_beatsAhead" xml:space="preserve"><value>Beats ahead</value></data>
+  <data name="Name_beatsBehind" xml:space="preserve"><value>Beats behind</value></data>
+  <data name="Name_bgImage" xml:space="preserve"><value>Background image</value></data>
+  <data name="Name_backgroundColor" xml:space="preserve"><value>Background color</value></data>
+  <data name="Name_bgImageColor" xml:space="preserve"><value>Background image color</value></data>
+  <data name="Name_parallax" xml:space="preserve"><value>Parallax</value></data>
+  <data name="Name_parallaxOffset" xml:space="preserve"><value>Parallax offset</value></data>
+  <data name="Name_bgDisplayMode" xml:space="preserve"><value>Background display mode</value></data>
+  <data name="Name_bgVideo" xml:space="preserve"><value>Background video</value></data>
+  <data name="Name_previewImage" xml:space="preserve"><value>Preview image</value></data>
+  <data name="Name_levelDesc" xml:space="preserve"><value>Level description</value></data>
+  <data name="Name_levelTags" xml:space="preserve"><value>Level tags</value></data>
+  <data name="Name_difficulty" xml:space="preserve"><value>Difficulty</value></data>
+  <data name="Name_zoom" xml:space="preserve"><value>Zoom</value></data>
+  <data name="Name_plane" xml:space="preserve"><value>Plane</value></data>
+  <data name="Name_randomTextureTiling" xml:space="preserve"><value>Random texture tiling</value></data>
+  <data name="Name_velocityLimitOverLifetime" xml:space="preserve"><value>Velocity limit over lifetime</value></data>
+  <data name="Name_font" xml:space="preserve"><value>Font</value></data>
+  <data name="Name_landOn" xml:space="preserve"><value>Landing</value></data>
+  <data name="Name_loopBG" xml:space="preserve"><value>Loop background</value></data>
+  <data name="Name_loopVideo" xml:space="preserve"><value>Loop video</value></data>
+  <data name="Name_vidOffset" xml:space="preserve"><value>Video offset</value></data>
+  <data name="Name_pulseOnFloor" xml:space="preserve"><value>Pulse on tile</value></data>
+  <data name="Name_floorIconOutlines" xml:space="preserve"><value>Icon outlines</value></data>
+  <data name="Name_planetEase" xml:space="preserve"><value>Planet easing</value></data>
+  <data name="Name_planetEaseParts" xml:space="preserve"><value>Easing segments</value></data>
+  <data name="Name_separateCountdownTime" xml:space="preserve"><value>Separate countdown</value></data>
+  <data name="Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="Cut" xml:space="preserve"><value>Cut</value></data>
+  <data name="Paste" xml:space="preserve"><value>Paste</value></data>
+  <data name="HudRetryCheckpoint"><value>Press any key to retry from #{0:N0}</value></data>
+  <data name="HudRetry"><value>Press any key to restart</value></data>
+  <data name="HudSummary" xml:space="preserve"><value>Total {0:N0}   {1:P2}</value></data>
+  <data name="Hud_Perfect"><value>Perfect</value></data>
+  <data name="Hud_EarlyPerfect"><value>Early Perfect</value></data>
+  <data name="Hud_LatePerfect"><value>Late Perfect</value></data>
+  <data name="Hud_VeryEarly"><value>Very early</value></data>
+  <data name="Hud_VeryLate"><value>Very late</value></data>
+  <data name="Hud_TooEarly"><value>Too early</value></data>
+  <data name="Hud_TooLate"><value>Too late</value></data>
+  <data name="Hud_Miss"><value>Miss</value></data>
+  <data name="Hud_Overload"><value>Overload</value></data>
+  <data name="Hud_Auto"><value>Auto</value></data>
+  <data name="InvalidNumber" xml:space="preserve"><value>Enter a finite number within the allowed range. Escape cancels.</value></data>
+  <data name="HexColor" xml:space="preserve"><value>RRGGBB or RRGGBBAA</value></data>
+  <data name="InvalidColor" xml:space="preserve"><value>Use six or eight hexadecimal digits.</value></data>
+  <data name="UnknownFilter" xml:space="preserve"><value>No generated parameter metadata; existing values are preserved.</value></data>
+  <data name="UnknownGradient" xml:space="preserve"><value>Unknown gradient data is preserved until explicitly replaced.</value></data>
+  <data name="InitializeGradient" xml:space="preserve"><value>Initialize gradient</value></data>
+  <data name="ColorKeys" xml:space="preserve"><value>Color keys</value></data>
+  <data name="AlphaKeys" xml:space="preserve"><value>Alpha keys</value></data>
+  <data name="AddKey" xml:space="preserve"><value>Add key</value></data>
+  <data name="RemoveKey" xml:space="preserve"><value>Remove key</value></data>
+  <data name="Name_color1" xml:space="preserve"><value>First color</value></data>
+  <data name="Name_color2" xml:space="preserve"><value>Second color</value></data>
+  <data name="Name_time" xml:space="preserve"><value>Time (0–1)</value></data>
+  <data name="Name_alpha" xml:space="preserve"><value>Alpha (0–1)</value></data>
+  <data name="Name_mode" xml:space="preserve"><value>Mode</value></data>
+  <data name="Option_Color" xml:space="preserve"><value>Color</value></data>
+  <data name="Option_TwoColors" xml:space="preserve"><value>Two colors</value></data>
+  <data name="Option_Gradient" xml:space="preserve"><value>Gradient</value></data>
+  <data name="Option_TwoGradients" xml:space="preserve"><value>Two gradients</value></data>
+  <data name="Option_RandomColor" xml:space="preserve"><value>Random color</value></data>
+  <data name="Option_Blend" xml:space="preserve"><value>Blend</value></data>
+  <data name="Option_Fixed" xml:space="preserve"><value>Fixed</value></data>
+  <data name="LockPath" xml:space="preserve"><value>Lock path</value></data>
+  <data name="PlaybackSpeedHelp" xml:space="preserve"><value>Ctrl+wheel: 10 percentage points · Ctrl+Shift+wheel: 1 point · Ctrl+Space: play at configured speed</value></data>
+  <data name="ResetPlaybackSpeed" xml:space="preserve"><value>Reset playback speed to 100%</value></data>
+  <data name="TilesOnly" xml:space="preserve"><value>Tiles only</value></data>
+  <data name="EditSceneModeHelp" xml:space="preserve"><value>Switch between tiles only and effects preview without changing playback</value></data>
+  <data name="InlineNumberHelp" xml:space="preserve"><value>Click to type; drag left or right to adjust</value></data>
+</root>

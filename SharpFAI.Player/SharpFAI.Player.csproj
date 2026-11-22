@@ -1,0 +1,171 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Single-file publish: shaders and textures are embedded, so the bundle stays self-contained -->
+    <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(PublishSingleFile)' == 'true'">true</SelfContained>
+    <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ImGui4NET" Version="1.93.0.5" />
+    <PackageReference Include="ImGui4NET.Backend.OpenGL3" Version="1.93.0.5" />
+    <PackageReference Include="MethodTimer.Fody" Version="3.2.3" PrivateAssets="All" />
+    <PackageReference Include="NativeFileDialog" Version="1.0.0" />
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+
+    <!--
+      UGLSLAdapter 用 ANTLR4 的 GLSL 语法做结构化改写，运行时依赖这个包。
+      UGLSLAdapter parses GLSL with ANTLR4, so its runtime package is required.
+    -->
+    <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
+  </ItemGroup>
+
+  <!--
+    imgui.dll 与 imgui_backend_opengl3.dll 是 MinGW 构建的，导入表里有 libwinpthread-1.dll。
+    NuGet 包只带了 imgui.dll 本身，所以目标机器上缺少这个运行库时，加载 imgui 会直接报“无效的 DLL”。
+    这里随程序一起发布，单文件构建会把它内嵌并在运行时解压。
+    imgui.dll and imgui_backend_opengl3.dll are MinGW builds whose import table requires
+    libwinpthread-1.dll. The NuGet package only ships imgui.dll itself, so a machine without the
+    MinGW runtime fails to load it with "invalid DLL". Ship it alongside; a single-file build embeds
+    and extracts it at startup.
+  -->
+  <ItemGroup>
+    <None Include="native\libwinpthread-1.dll" Link="libwinpthread-1.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Shaders\**\*.vert" />
+    <EmbeddedResource Include="Resources\Shaders\**\*.frag" />
+    <EmbeddedResource Include="Resources\kick.wav" />
+    <EmbeddedResource Include="Resources\planet.png" />
+    <EmbeddedResource Include="Resources\particle.png" />
+    <EmbeddedResource Include="Resources\DefaultNullDecoration.png" />
+    <EmbeddedResource Include="Resources\Floor\*.png" />
+    <EmbeddedResource Include="Resources\PlayerIcons\*.png" />
+  </ItemGroup>
+
+  <!-- 图标与贴图按文件复制到输出目录，方便替换 / Icons and textures are copied for easy swapping -->
+  <ItemGroup>
+    <None Include="Resources\PlayerIcons\*.png" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="Resources\Floor\*.png" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    着色器同时复制一份到输出目录，供热重载使用：改这些文件即可即时看到效果。
+    引擎库只从磁盘读取，所以这些文件必须随程序一起发布。
+    The shaders are also copied to the output folder for hot reload: edit them there to see changes
+    without restarting. The engine library only reads from disk, so these files must ship with the
+    executable.
+  -->
+  <ItemGroup>
+    <None Include="Resources\Shaders\**\*.*" LinkBase="Resources\Shaders" CopyToOutputDirectory="Always" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    OpenAL.Soft 的 props 依赖 $(PlatformTarget)，SDK 项目下该值为空导致原生 DLL 不会被复制。
+    这里直接按 RID 复制，保证跨平台构建都能拿到 OpenAL32。
+    OpenAL.Soft's props relies on $(PlatformTarget) which is empty for SDK projects,
+    so copy the native DLL by RID here instead.
+  -->
+  <ItemGroup>
+    <None Include="$(NuGetPackageRoot)openal.soft\1.23.1\runtimes\win-x64\native\Release\OpenAL32.dll" Condition="Exists('$(NuGetPackageRoot)openal.soft\1.23.1\runtimes\win-x64\native\Release\OpenAL32.dll')" Link="OpenAL32.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharpFAI\SharpFAI\SharpFAI.csproj" />
+    <ProjectReference Include="..\Thrust\Thrust.csproj" />
+    <ProjectReference Include="..\SharpFAI.SourceGenerator\SharpFAI.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <InternalsVisibleTo Include="SharpFAI.Player.Tests" />
+    <InternalsVisibleTo Include="SharpFAI.Editor.Tests" />
+    <InternalsVisibleTo Include="SharpFAI.Editor" />
+  </ItemGroup>
+
+  <Import Project="Adofai.props.user" Condition="Exists('Adofai.props.user')" />
+  <Import Project="Build/AdofaiFilterResources.targets" />
+
+  <Target Name="PrepareAdofaiFilterInputs" BeforeTargets="AssignTargetPaths;GenerateMSBuildEditorConfigFile;CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup Condition="'$(AdofaiGameDir)' != ''">
+      <AdofaiFilterAssetsDir Condition="'$(AdofaiFilterAssetsDir)' == '' And Exists('$(AdofaiGameDir)/Bundles_Ripped/Assets')">$(AdofaiGameDir)/Bundles_Ripped/Assets</AdofaiFilterAssetsDir>
+      <_AdofaiManaged>$(AdofaiGameDir)/A Dance of Fire and Ice_Data/Managed</_AdofaiManaged>
+      <_AdofaiManaged Condition="!Exists('$(_AdofaiManaged)')">$(AdofaiGameDir)/ADanceOfFireAndIce_Data/Managed</_AdofaiManaged>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(AdofaiGameDir)' != ''">
+      <_AdofaiAssembly Include="$(_AdofaiManaged)/Assembly-CSharp-firstpass.dll;$(_AdofaiManaged)/Assembly-CSharp.dll" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_AdofaiAssembly.Identity)') And '@(_AdofaiAssembly)' != ''" Text="ADOFAI filter input missing: %(_AdofaiAssembly.FullPath). Check AdofaiGameDir." />
+    <GetFileHash Files="@(_AdofaiAssembly)" Condition="'@(_AdofaiAssembly)' != ''">
+      <Output TaskParameter="Items" ItemName="_AdofaiHashedAssembly" />
+    </GetFileHash>
+    <CollectAdofaiFilterResources ShaderAssets="$(AdofaiFilterAssetsDir)" UnityAssets="$(AdofaiUnityAssetsDir)" TextureDirectory="$(AdofaiFilterTexturesDir)" Condition="'$(AdofaiGameDir)' != '' And ('$(AdofaiFilterAssetsDir)' != '' Or '$(AdofaiUnityAssetsDir)' != '' Or '$(AdofaiFilterTexturesDir)' != '')">
+      <Output TaskParameter="Resources" ItemName="_AdofaiFilterResource" />
+    </CollectAdofaiFilterResources>
+    <ItemGroup>
+      <EmbeddedResource Include="@(_AdofaiFilterResource)" />
+    </ItemGroup>
+    <GetFileHash Files="@(_AdofaiFilterResource)" Condition="'@(_AdofaiFilterResource)' != ''">
+      <Output TaskParameter="Items" ItemName="_AdofaiHashedResource" />
+    </GetFileHash>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)AdofaiFilters.inputs" Lines="@(_AdofaiHashedAssembly->'A|%(FullPath)|%(FileHash)');@(_AdofaiHashedResource->'R|%(LogicalName)|%(FullPath)|%(FileHash)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <AdditionalFiles Include="$(IntermediateOutputPath)AdofaiFilters.inputs" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    UGLSLAdapter 把 Unity（hlslcc）导出的 GLSL 转成裸 OpenGL 可直接编译的顶点/片元着色器。
+    它只有一个自包含的 DLL，随项目一起提交，构建时不依赖对方工程。
+    UGLSLAdapter turns Unity's hlslcc GLSL into plain OpenGL shaders. It is a single self-contained
+    DLL committed alongside this project, so the build does not depend on the other repository.
+  -->
+  <ItemGroup>
+    <Reference Include="UGLSLAdapter">
+      <HintPath>lib\UGLSLAdapter.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    openal.soft 的包里同时带 Debug 和 Release 两份 OpenAL32.lib，单文件发布时两者相对路径相同
+    会触发 NETSDK1152。这些 .lib 只在链接阶段使用，运行时用不到，直接排除。
+    The openal.soft package ships OpenAL32.lib for both Debug and Release; publishing as a single
+    file then hits NETSDK1152 because the two share a relative path. Import libraries are only
+    needed at link time, so drop them from the publish output.
+  -->
+  <ItemGroup>
+    <None Remove="$(NuGetPackageRoot)openal.soft\**\*.lib" />
+    <Content Remove="$(NuGetPackageRoot)openal.soft\**\*.lib" />
+    <None Remove="$(NuGetPackageRoot)openal.soft\**\*.pdb" />
+  </ItemGroup>
+
+  <Target Name="ExcludeOpenAlImportLibraries" BeforeTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.lib'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="$([System.String]::Copy('%(Identity)').Contains('openal.soft')) AND '%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    The publish list of a referenced project is computed before ours runs, so also drop the duplicate
+    import libraries from the native asset list of every project in the graph.
+    OpenAL32.lib 有两份相对路径相同，只能在解析发布项时排除。
+  -->
+  <Target Name="DropDuplicateNativeAssets" BeforeTargets="ResolveReferences">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="'%(Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

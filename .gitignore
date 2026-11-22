@@ -1,0 +1,16 @@
+bin/
+obj/
+publish/
+*.user
+.vscode/
+.idea/
+
+/docs/
+/testlevels/
+/tools/
+/tmp-compare/
+**/TestResults/
+.vs/
+debug.log
+/snapshot.ps1
+/AGENTS.md

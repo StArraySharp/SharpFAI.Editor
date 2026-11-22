@@ -1,0 +1,117 @@
+<Project>
+  <UsingTask TaskName="CollectAdofaiFilterResources" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ShaderAssets ParameterType="System.String" />
+      <UnityAssets ParameterType="System.String" />
+      <TextureDirectory ParameterType="System.String" />
+      <Resources ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var imports = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var shaderName = new Regex("^[ \t]*Shader\\s*\"(CameraFilterPack(?:Legacy)?/[^\"]+|ADOFAI/Screen(?:Tile|Scroll)|Sprites/Tile|Hidden/VideoBloom)\"", RegexOptions.Multiline);
+        var exportNumber = new Regex(@"^([1-9]\d*)_glsl\.orig\.glsl$");
+        var names = new Regex(@"^[A-Za-z0-9_ .-]+(/[A-Za-z0-9_ .-]+)+$");
+
+        foreach (string root in new[] { ShaderAssets, UnityAssets }.Where(Directory.Exists)
+            .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var candidates = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ambiguous = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string subfolder in new[] { "Shader", "Resources" })
+            {
+                string folder = Path.Combine(root, subfolder);
+                if (!Directory.Exists(folder))
+                    continue;
+
+                foreach (string file in Directory.EnumerateFiles(folder, "*.shader", SearchOption.AllDirectories)
+                    .OrderBy(path => path, StringComparer.Ordinal))
+                {
+                    var match = shaderName.Match(File.ReadAllText(file));
+                    if (!match.Success)
+                        continue;
+                    string name = match.Groups[1].Value;
+                    if (!names.IsMatch(name))
+                        continue;
+                    string stages = Path.Combine(Path.GetDirectoryName(file), name.Replace('/', '_'));
+                    string first = name == "Sprites/Tile" ? "4_glsl.orig.glsl" : "1_glsl.orig.glsl";
+                    if (!Directory.Exists(stages) || !File.Exists(Path.Combine(stages, first)))
+                        continue;
+                    // ShaderRipper changed "half" inside these two ShaderLab names.
+                    if (name == "CameraFilterPack/Distortion_float_Sphere")
+                        name = "CameraFilterPack/Distortion_Half_Sphere";
+                    if (name == "CameraFilterPack/Drawing_floattone")
+                        name = "CameraFilterPack/Drawing_Halftone";
+                    string previous;
+                    if (candidates.TryGetValue(name, out previous) &&
+                        !StringComparer.OrdinalIgnoreCase.Equals(previous, stages))
+                        ambiguous.Add(name);
+                    else
+                        candidates[name] = stages;
+                }
+            }
+
+            foreach (var candidate in candidates)
+            {
+                string key = "Resources.Shaders.Filters/" + candidate.Key;
+                if (imports.ContainsKey(key + ".glsl"))
+                    continue;
+                if (ambiguous.Contains(candidate.Key))
+                {
+                    Log.LogWarning("Multiple GLSL exports for filter {0} under {1}.", candidate.Key, root);
+                    continue;
+                }
+
+                foreach (string path in Directory.EnumerateFiles(candidate.Value, "*_glsl.orig.glsl"))
+                {
+                    var match = exportNumber.Match(Path.GetFileName(path));
+                    if (!match.Success)
+                        continue;
+                    string number = match.Groups[1].Value;
+                    bool passLayout = candidate.Key.StartsWith("CameraFilterPack/BlurTiltShift", StringComparison.Ordinal)
+                        || candidate.Key == "CameraFilterPack/Glow_Glow" || candidate.Key == "CameraFilterPack/Glow_Glow_Color";
+                    // These five shaders' ShaderLab passes are exported as 1, 3, 4 and optionally 6.
+                    string suffix = number == "1" || (candidate.Key == "Sprites/Tile" && number == "4") ? ".glsl" :
+                        candidate.Key == "Hidden/VideoBloom" && number == "3" ? ".pass-1.glsl" :
+                        candidate.Key == "Hidden/VideoBloom" && number == "5" ? ".pass-2.glsl" :
+                        candidate.Key == "Hidden/VideoBloom" && number == "7" ? ".pass-3.glsl" :
+                        candidate.Key == "Hidden/VideoBloom" && number == "8" ? ".pass-4.glsl" :
+                        passLayout && number == "3" ? ".pass-1.glsl" :
+                        passLayout && number == "4" ? ".pass-2.glsl" :
+                        passLayout && number == "6" ? ".pass-3.glsl" : ".export-" + number + ".glsl";
+                    imports.Add(key + suffix, path);
+                }
+            }
+        }
+
+        string gameResources = string.IsNullOrWhiteSpace(UnityAssets) ? null : Path.Combine(UnityAssets, "Resources");
+        foreach (string folder in new[] { TextureDirectory, gameResources }.Where(Directory.Exists)
+            .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (string file in Directory.EnumerateFiles(folder, "CameraFilterPack*.png", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.Ordinal))
+            {
+                string key = "Resources.Filters." + file.Substring(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length + 1)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                if (imports.ContainsKey(key))
+                    continue;
+                imports.Add(key, file);
+                if (File.Exists(file + ".meta"))
+                    imports.Add(key + ".meta", file + ".meta");
+            }
+        }
+
+        Resources = imports.Select(entry =>
+        {
+            var item = new Microsoft.Build.Utilities.TaskItem(entry.Value);
+            item.SetMetadata("LogicalName", entry.Key);
+            return (ITaskItem)item;
+        }).ToArray();
+      ]]></Code>
+    </Task>
+  </UsingTask>
+</Project>

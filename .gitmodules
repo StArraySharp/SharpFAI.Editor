@@ -1,0 +1,6 @@
+[submodule "Thrust"]
+	path = Thrust
+	url = https://github.com/StArraySharp/Thrust.git
+[submodule "SharpFAI"]
+	path = SharpFAI
+	url = https://github.com/adofaiex/SharpFAI.git

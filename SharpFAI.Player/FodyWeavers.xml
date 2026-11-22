@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
+  <!-- [Time] attributes emit stopwatch logging so hot paths can be profiled without
+       hand-rolled Stopwatch bookkeeping. -->
+  <MethodTimer />
+</Weavers>

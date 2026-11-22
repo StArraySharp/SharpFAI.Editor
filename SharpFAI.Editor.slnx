@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="SharpFAI/SharpFAI/SharpFAI.csproj" />
+  <Project Path="Thrust/Thrust.csproj" />
+  <Project Path="SharpFAI.Player/SharpFAI.Player.csproj" />
+  <Project Path="SharpFAI.Editor/SharpFAI.Editor.csproj" />
+  <Project Path="SharpFAI.Editor.Tests/SharpFAI.Editor.Tests.csproj" />
+  <Project Path="SharpFAI.SourceGenerator/SharpFAI.SourceGenerator.csproj" />
+  <Project Path="SharpFAI.Player.Tests/SharpFAI.Player.Tests.csproj" />
+</Solution>

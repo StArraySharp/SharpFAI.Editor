@@ -1,0 +1,153 @@
+#version 330 core
+#extension GL_ARB_explicit_attrib_location : require
+#ifdef GL_ARB_shader_bit_encoding
+#extension GL_ARB_shader_bit_encoding : enable
+#endif
+
+uniform 	vec4 _TileTex_ST;
+uniform 	vec4 _Tint;
+uniform 	vec4 _Color;
+uniform 	vec4 _ShadowColor;
+uniform 	vec4 _IconColor;
+uniform 	vec4 _CommentColor;
+uniform 	float _Flash;
+uniform 	float _Alpha;
+uniform 	vec4 _UV2Offset;
+uniform 	float _IconAngle;
+uniform 	int _Active;
+uniform 	float _TileScale;
+uniform 	float _Inset;
+uniform 	int _AbsoluteInset;
+uniform 	float _PerlinStrength;
+uniform 	float _ShadowTune;
+uniform 	float _PerlinScale;
+uniform 	float _TextureRatio;
+uniform 	float _IconScale;
+uniform 	int _IconFlipped;
+uniform 	int _Sprite;
+uniform  sampler2D _MainTex;
+uniform  sampler2D _PerlinTex;
+uniform  sampler2D _TileTex;
+uniform  sampler2D _IconTex;
+uniform  sampler2D _IconOutlineTex;
+in  vec4 vs_COLOR0;
+in  vec2 vs_TEXCOORD0;
+in  vec2 vs_TEXCOORD1;
+layout(location = 0) out vec4 SV_Target0;
+vec4 u_xlat0;
+bool u_xlatb0;
+vec4 u_xlat1;
+vec4 u_xlat2;
+vec4 u_xlat3;
+vec4 u_xlat4;
+vec4 u_xlat5;
+float u_xlat6;
+float u_xlat7;
+vec2 u_xlat8;
+vec2 u_xlat12;
+bool u_xlatb12;
+vec2 u_xlat13;
+bvec2 u_xlatb13;
+float u_xlat18;
+bool u_xlatb18;
+float u_xlat19;
+float u_xlat20;
+void main()
+{
+    u_xlatb0 = 1.0<vs_TEXCOORD0.y;
+    if(u_xlatb0){
+        u_xlat0.x = (-vs_TEXCOORD0.y) + 2.0;
+        u_xlat0.x = log2(u_xlat0.x);
+        u_xlat0.x = u_xlat0.x * 1.29999995;
+        u_xlat0.x = exp2(u_xlat0.x);
+        u_xlat1.xyz = _Color.xyz * _ShadowColor.xyz;
+        u_xlat1.w = 1.0;
+        u_xlat0 = u_xlat0.xxxx * u_xlat1;
+        u_xlat0 = u_xlat0 * _ShadowColor.wwww;
+        u_xlat0 = u_xlat0 * vec4(vec4(_Alpha, _Alpha, _Alpha, _Alpha));
+        u_xlat1.x = float(_Active);
+        u_xlat0 = u_xlat0 * u_xlat1.xxxx;
+        SV_Target0 = u_xlat0 * vs_COLOR0.wwww;
+        return;
+    }
+    u_xlat0.xy = (int(_Sprite) != 0) ? vec2(0.5, 0.5) : _TileTex_ST.zw;
+    u_xlat1.xyz = (int(_Sprite) != 0) ? vec3(0.0, 0.0, 0.0) : _UV2Offset.xyz;
+    u_xlat12.x = (_Sprite != 0) ? 1.0 : _TileScale;
+    u_xlat18 = u_xlat1.z * 3.14152908;
+    u_xlat2.x = sin(u_xlat18);
+    u_xlat3.x = cos(u_xlat18);
+    u_xlat13.xy = u_xlat2.xx * vs_TEXCOORD1.yx;
+    u_xlat2.x = vs_TEXCOORD1.x * u_xlat3.x + (-u_xlat13.x);
+    u_xlat2.y = vs_TEXCOORD1.y * u_xlat3.x + u_xlat13.y;
+    u_xlat0.xy = u_xlat0.xy + u_xlat1.xy;
+    u_xlat12.xy = u_xlat2.xy / u_xlat12.xx;
+    u_xlat1.xy = u_xlat0.xy + u_xlat12.xy;
+    u_xlat1.z = u_xlat1.y * _TextureRatio;
+    u_xlatb12 = _Inset<vs_TEXCOORD0.y;
+    u_xlatb18 = _AbsoluteInset!=0;
+    u_xlatb12 = u_xlatb18 || u_xlatb12;
+    if(u_xlatb12){
+        u_xlat2 = texture(_MainTex, vs_TEXCOORD0.xy);
+        u_xlat2 = u_xlat2 * _Tint;
+    } else {
+        u_xlat2.x = float(1.0);
+        u_xlat2.y = float(1.0);
+        u_xlat2.z = float(1.0);
+        u_xlat2.w = float(1.0);
+    }
+    u_xlat3.xyz = u_xlat2.xyz * vec3(vec3(_ShadowTune, _ShadowTune, _ShadowTune));
+    u_xlat12.xy = vs_TEXCOORD1.xy / vec2(vec2(_PerlinScale, _PerlinScale));
+    u_xlat0.xy = u_xlat0.xy + u_xlat12.xy;
+    u_xlat0 = texture(_PerlinTex, u_xlat0.xy);
+    u_xlat0.x = u_xlat0.x * _PerlinStrength;
+    u_xlat6 = u_xlat0.x * u_xlat0.x;
+    u_xlat0.xyz = vec3(u_xlat6) * u_xlat0.xxx + u_xlat3.xyz;
+    u_xlat2.xyz = min(u_xlat0.xyz, vec3(1.0, 1.0, 1.0));
+    u_xlat0 = texture(_TileTex, u_xlat1.xz);
+    u_xlat1 = u_xlat0 * vs_COLOR0;
+    u_xlat0.x = (-u_xlat0.w) * vs_COLOR0.w + 1.0;
+    u_xlat0.w = _CommentColor.w * u_xlat0.x + u_xlat1.w;
+    u_xlat19 = (-_CommentColor.w) + 1.0;
+    u_xlat1.xyz = vec3(u_xlat19) * u_xlat1.xyz;
+    u_xlat0.xyz = _CommentColor.xyz * _CommentColor.www + u_xlat1.xyz;
+    u_xlat0 = u_xlat2 * u_xlat0;
+    u_xlat1.x = float(_Active);
+    u_xlat7 = u_xlat0.w * u_xlat1.x;
+    u_xlat2.x = sin(_IconAngle);
+    u_xlat3.x = cos(_IconAngle);
+    u_xlat13.xy = u_xlat2.xx * vs_TEXCOORD1.yx;
+    u_xlat8.x = vs_TEXCOORD1.x * u_xlat3.x + (-u_xlat13.x);
+    u_xlat8.y = vs_TEXCOORD1.y * u_xlat3.x + u_xlat13.y;
+    u_xlat13.xy = u_xlat8.xy / vec2(vec2(_IconScale, _IconScale));
+    u_xlat2.yz = u_xlat13.xy + vec2(0.5, 0.5);
+    u_xlat13.x = (-u_xlat2.y) + 1.0;
+    u_xlat20 = float(_IconFlipped);
+    u_xlat13.x = (-u_xlat2.y) + u_xlat13.x;
+    u_xlat2.x = u_xlat20 * u_xlat13.x + u_xlat2.y;
+    u_xlat13.x = u_xlat2.x + -0.5;
+    u_xlatb13.xy = lessThan(vec4(0.5, 0.5, 0.5, 0.5), abs(u_xlat13.xyxy)).xy;
+    u_xlatb13.x = u_xlatb13.y || u_xlatb13.x;
+    u_xlat3 = texture(_IconTex, u_xlat2.xz);
+    u_xlat3 = u_xlat3 * _IconColor;
+    u_xlat13.x = (u_xlatb13.x) ? 0.0 : 1.0;
+    u_xlat4 = u_xlat13.xxxx * u_xlat3;
+    u_xlat2 = texture(_IconOutlineTex, u_xlat2.xz);
+    u_xlat5 = u_xlat13.xxxx * u_xlat2;
+    u_xlat19 = (-u_xlat2.w) * u_xlat13.x + 1.0;
+    u_xlat19 = u_xlat4.w * u_xlat19 + u_xlat5.w;
+    u_xlat13.x = (-u_xlat3.w) * u_xlat13.x + 1.0;
+    u_xlat2.xyz = u_xlat13.xxx * u_xlat5.xyz;
+    u_xlat2.xyz = u_xlat4.xyz * u_xlat4.www + u_xlat2.xyz;
+    u_xlat18 = (-u_xlat0.w) * u_xlat1.x + 1.0;
+    u_xlat18 = u_xlat19 * u_xlat18 + u_xlat7;
+    u_xlat1.x = (-u_xlat19) + 1.0;
+    u_xlat0.xyz = u_xlat0.xyz * u_xlat1.xxx;
+    u_xlat0.xyz = u_xlat2.xyz * vec3(u_xlat19) + u_xlat0.xyz;
+    u_xlat1.x = vs_COLOR0.w * _Alpha;
+    u_xlat18 = u_xlat18 * u_xlat1.x;
+    u_xlat1.xyz = (-u_xlat0.xyz) + vec3(1.0, 1.0, 1.0);
+    u_xlat0.xyz = vec3(_Flash) * u_xlat1.xyz + u_xlat0.xyz;
+    SV_Target0.xyz = vec3(u_xlat18) * u_xlat0.xyz;
+    SV_Target0.w = u_xlat18;
+    return;
+}
