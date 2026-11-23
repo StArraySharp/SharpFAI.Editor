@@ -118,33 +118,98 @@ internal sealed class SceneEffectTimeline : IDisposable
             (index >= 0 && _scroll[index].Speed != Vector2.Zero);
     }
 
+    public IEnumerable<string> ShaderNames()
+    {
+        if (_bloom.Exists(sample => sample.Enabled))
+            yield return VideoBloomPass.ShaderName;
+        if (_tile.Exists(sample => sample.To != Vector2.One))
+            yield return "ADOFAI/ScreenTile";
+        if (_scroll.Exists(sample => sample.Speed != Vector2.Zero))
+            yield return "ADOFAI/ScreenScroll";
+    }
+
+    /// <summary>
+    /// Creates and exercises the screen passes this chart can use, so their first live frame does not
+    /// pay for material setup and shader JIT.
+    /// </summary>
+    public void Prewarm(OpenGlFilterBackend backend)
+    {
+        IFilterTarget? source = null;
+        IFilterTarget? destination = null;
+        try
+        {
+            source = backend.RentTarget(8, 8, 0);
+            destination = backend.RentTarget(8, 8, 0);
+            if (_bloom.Count > 0)
+            {
+                var bloom = BloomPass(backend);
+                float intensity = bloom.Intensity;
+                bloom.Intensity = 1f;
+                try
+                {
+                    bloom.Render(source, destination);
+                }
+                finally
+                {
+                    bloom.Intensity = intensity;
+                }
+            }
+            if (_tile.Count > 0)
+                TilePass(backend).Render(source, destination);
+            if (_scroll.Count > 0)
+                ScrollPass(backend).Render(source, destination);
+        }
+        catch (Exception)
+        {
+            // Warmup is best effort: the live path reports its own resource errors.
+        }
+        finally
+        {
+            if (source is not null)
+                backend.ReleaseTarget(source);
+            if (destination is not null)
+                backend.ReleaseTarget(destination);
+        }
+    }
+
+    private VideoBloomPass BloomPass(OpenGlFilterBackend backend)
+    {
+        _bloomPass ??= new FilterTimeline.Entry(VideoBloomPass.ShaderName, new VideoBloomPass(backend),
+            CameraPassOrder.Legacy(VideoBloomPass.ShaderName, 0));
+        return (VideoBloomPass)_bloomPass.Filter;
+    }
+
+    private ScreenPass TilePass(OpenGlFilterBackend backend) =>
+        _tilePass ??= new ScreenPass(backend, "ADOFAI/ScreenTile", "_TileX", "_TileY");
+
+    private ScreenPass ScrollPass(OpenGlFilterBackend backend) =>
+        _scrollPass ??= new ScreenPass(backend, "ADOFAI/ScreenScroll", "_OffsetX", "_OffsetY");
+
     public void AppendScreenPasses(OpenGlFilterBackend backend, double time, List<FilterTimeline.Entry> active)
     {
         if (FindBloom(time) is { Enabled: true } bloom)
         {
-            _bloomPass ??= new FilterTimeline.Entry(VideoBloomPass.ShaderName, new VideoBloomPass(backend),
-                CameraPassOrder.Legacy(VideoBloomPass.ShaderName, 0));
-            var filter = (VideoBloomPass)_bloomPass.Filter;
+            var filter = BloomPass(backend);
             Vector2 amount = bloom.Amount.At(time);
             filter.Threshold = amount.X;
             filter.Intensity = amount.Y;
             filter.Tint = bloom.Tint.Evaluate(time);
-            active.Add(_bloomPass);
+            active.Add(_bloomPass!);
         }
         Vector2 tile = Read(_tile, time, Vector2.One);
         if (tile != Vector2.One)
         {
-            _tilePass ??= new ScreenPass(backend, "ADOFAI/ScreenTile", "_TileX", "_TileY");
-            _tilePass.Value = tile;
-            active.Add(_tilePass.Entry);
+            var pass = TilePass(backend);
+            pass.Value = tile;
+            active.Add(pass.Entry);
         }
 
         int index = IndexAt(_scroll, time, item => item.Start);
         if (index >= 0 && _scroll[index].Speed != Vector2.Zero)
         {
-            _scrollPass ??= new ScreenPass(backend, "ADOFAI/ScreenScroll", "_OffsetX", "_OffsetY");
-            _scrollPass.Value = _scroll[index].At(time);
-            active.Add(_scrollPass.Entry);
+            var pass = ScrollPass(backend);
+            pass.Value = _scroll[index].At(time);
+            active.Add(pass.Entry);
         }
     }
 

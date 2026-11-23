@@ -87,6 +87,27 @@ public class TestLevelPlaybackSettings
     }
 
     [Test]
+    public void ExportMixDoesNotResampleHitsoundsAlreadyOnTheOutputClock()
+    {
+        byte[] pcm = new byte[8];
+        Buffer.BlockCopy(new short[] { 0, 9000, -5000, 2500 }, 0, pcm, 0, pcm.Length);
+        DecodedAudio source = new() { Pcm = pcm, SampleRate = 48000, Channels = 1 };
+        string path = Path.GetTempFileName();
+        try
+        {
+            VideoExporter.WriteMixedWav(null, source, 0f, 1f, 4.0 / 48000.0, path,
+                playbackRate: .5, hitsoundRate: 1.0);
+            byte[] wav = File.ReadAllBytes(path);
+            for (int i = 0; i < 4; i++)
+                Assert.That(BitConverter.ToInt16(wav, 44 + 4 * i), Is.EqualTo(BitConverter.ToInt16(pcm, 2 * i)).Within(1));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Test]
     public void ExportMixStartsBothTracksAtTheUncalibratedOrigin()
     {
         short[] music = [1000, 2000, 3000, 4000, 5000, 6000];
@@ -105,12 +126,33 @@ public class TestLevelPlaybackSettings
         {
             File.Delete(path);
         }
+    }
 
-        static DecodedAudio Clip(short[] samples)
+    [TestCase(0f, 2000)]
+    [TestCase(.25f, 2250)]
+    [TestCase(1f, 3000)]
+    public void ExportMixDoublesOnlyTheChartHitsoundGain(float hitsoundVolume, int expected)
+    {
+        using LevelRenderer renderer = new() { MusicVolume = 1f, HitsoundVolume = hitsoundVolume };
+        string path = Path.GetTempFileName();
+        try
         {
-            byte[] pcm = new byte[samples.Length * sizeof(short)];
-            Buffer.BlockCopy(samples, 0, pcm, 0, pcm.Length);
-            return new DecodedAudio { Pcm = pcm, SampleRate = 48000, Channels = 1 };
+            VideoExporter.WriteMixedWav(Clip([1000, 2000]), Clip([0, 500]), renderer.MusicVolumeExport,
+                renderer.HitsoundVolumeExport, 2.0 / 48000.0, path);
+            byte[] wav = File.ReadAllBytes(path);
+            Assert.That(BitConverter.ToInt16(wav, 44), Is.EqualTo(1000).Within(1));
+            Assert.That(BitConverter.ToInt16(wav, 48), Is.EqualTo(expected).Within(1));
         }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static DecodedAudio Clip(short[] samples)
+    {
+        byte[] pcm = new byte[samples.Length * sizeof(short)];
+        Buffer.BlockCopy(samples, 0, pcm, 0, pcm.Length);
+        return new DecodedAudio { Pcm = pcm, SampleRate = 48000, Channels = 1 };
     }
 }

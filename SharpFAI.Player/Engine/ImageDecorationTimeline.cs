@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
 using OpenTK.Mathematics;
 using SharpFAI.Framework;
@@ -65,7 +66,13 @@ internal sealed class ImageDecorationTimeline
         Vector2 Parallax, Vector2 ParallaxOffset, Vector4 Tint, float Rotation, float Opacity, int Depth, bool Visible,
         bool Smoothing, string RelativeTo, DecorationBlendMode Blend = DecorationBlendMode.None,
         bool SyncFloorDepth = false, DecorationMasking Masking = DecorationMasking.None,
-        string MaskingTarget = "NO TAG", DecorationMaskRange MaskRange = default);
+        string MaskingTarget = "NO TAG", DecorationMaskRange MaskRange = default, Vector2 CropPivotOffset = default)
+    {
+        // Untargeted visible masks can use the original sprite mask even without a custom range.
+        public bool UsesDepthMask(bool legacy) => Masking == DecorationMasking.Mask &&
+            (legacy || ((MaskRange.Enabled || Opacity > 0f) &&
+                (string.IsNullOrWhiteSpace(MaskingTarget) || MaskingTarget == "NO TAG")));
+    }
 
     internal readonly record struct Axes(float? X, float? Y)
     {
@@ -82,6 +89,7 @@ internal sealed class ImageDecorationTimeline
         public double Beat { get; } = beat;
         public readonly Axes Position = new(item.Enabled("positionOffset", item.Position));
         public readonly Axes Pivot = new(item.Enabled("pivotOffset", item.Pivot));
+        public readonly Axes CropPivotOffset = new(item.Enabled("cropPivotOffset", item.CropPivotOffset));
         public readonly Axes Scale = new(item.Enabled("scale", item.Scale));
         public readonly Axes Parallax = new(item.Enabled("parallax", item.Parallax));
         public readonly Axes ParallaxOffset = new(item.Enabled("parallaxOffset", item.ParallaxOffset));
@@ -101,6 +109,12 @@ internal sealed class ImageDecorationTimeline
         public readonly bool? Visible = item.Enabled("visible", item.Visible);
         public readonly bool? Smoothing = item.Enabled("imageSmoothing", item.Smoothing);
         public readonly bool ChangesText = item is SetTextDecoration;
+        public readonly Vector4? TrackTint = item is SetObjectDecoration floor
+            ? FloorTrackStateResolver.ParseColor(floor.Enabled("trackColor", floor.TrackColor)) : null;
+        public readonly float? TrackOpacity = item is SetObjectDecoration obj
+            ? obj.Enabled("trackOpacity", obj.TrackOpacity) : null;
+        public readonly Vector4? PlanetTint = item is SetObjectDecoration planet
+            ? FloorTrackStateResolver.ParseColor(planet.Enabled("planetColor", planet.PlanetColor)) : null;
         private double _sampleTime = double.NaN;
         private float _progress;
 
@@ -137,6 +151,7 @@ internal sealed class ImageDecorationTimeline
         private Pose _cachedPose;
         private double _cachedAt = double.NaN;
         private double _cachedUntil;
+        private int _cachedFirstChange;
 
         public Pose Initial { get; private set; } = initial;
         public int SourceIndex => source.SourceIndex;
@@ -148,17 +163,19 @@ internal sealed class ImageDecorationTimeline
         public bool LockScale => source.LockScale == true;
         public float ScaleMultiplier => source.ScaleMultiplier ?? 1f;
         public bool IsText => source is AddTextDecoration;
+        public bool IsObject => source is AddObjectDecoration;
+        public bool IsPlayerBubble => source is AddObjectDecoration { ObjectType: "PlayerBubble" };
+        public ParticleDecorationTimeline? Particles { get; } = source is AddParticleDecoration particle ? new(particle, index, tileSize) : null;
         public string? Font => (source as AddTextDecoration)?.Font;
         public Vector2 Tile { get; private set; } = tile;
         public string[] Tags { get; } = Tags(source.Tag).Distinct(StringComparer.Ordinal).ToArray();
         public DecorationHitbox? Hitbox { get; } = DecorationHitbox.From(source);
-        public FilterTimeline? Filters { get; set; }
         public int TimingVersion { get; private set; }
 
-        public void Add(MoveImageDecoration item, TrackTiming timing, IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images)
+        public void Add(MoveImageDecoration item, TrackTiming timing, IReadOnlyDictionary<string, DecorationImage> images)
             => Add(new Motion(item, timing), images);
 
-        public void Add(Motion move, IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images)
+        public void Add(Motion move, IReadOnlyDictionary<string, DecorationImage> images)
         {
             // The game completes the previous tween when a new event takes over a channel.
             int count = ChangeCount;
@@ -169,17 +186,29 @@ internal sealed class ImageDecorationTimeline
                 ? At(move.Timing.Start).Position : Initial.Position;
             float positionUnits = targetPlacement is "Camera" or "CameraAspect" ? tileSize / 100f : 1f;
             Vector2? scale = move.Scale.Read(current.Scale * 100f);
-            bool hasImage = (!IsText || move.ChangesText) && move.Image is not null;
+            bool hasImage = !IsObject && Particles is null && (!IsText || move.ChangesText) && move.Image is not null;
             string image = hasImage ? move.Image! : current.Image;
+            Vector4? tint = source is AddObjectDecoration obj
+                ? (obj.ObjectType ?? "Floor") switch
+                {
+                    "Floor" => move.TrackTint ?? move.Tint,
+                    "Planet" => move.PlanetTint ?? move.Tint,
+                    _ => move.Tint,
+                }
+                : move.Tint;
+            float? opacity = source is AddObjectDecoration { ObjectType: null or "Floor" }
+                ? move.TrackOpacity ?? move.Opacity : move.Opacity;
             var target = current with
             {
                 Position = new Vector2(move.Position.X is { } x ? anchor.X + x * positionUnits : current.Position.X,
                     move.Position.Y is { } y ? anchor.Y + y * positionUnits : current.Position.Y),
                 Pivot = move.Pivot.Read(current.Pivot) ?? current.Pivot,
+                CropPivotOffset = IsText ? current.CropPivotOffset :
+                    move.CropPivotOffset.Read(current.CropPivotOffset) ?? current.CropPivotOffset,
                 Rotation = move.Rotation is { } rotation ? Initial.Rotation + rotation : current.Rotation,
                 Scale = scale is { } percent ? percent / 100f : current.Scale,
-                Tint = move.Tint ?? current.Tint,
-                Opacity = move.Opacity is { } opacity ? Math.Clamp(opacity / 100f, 0f, 1f) : current.Opacity,
+                Tint = tint ?? current.Tint,
+                Opacity = opacity is { } percentOpacity ? Math.Clamp(percentOpacity / 100f, 0f, 1f) : current.Opacity,
                 Depth = move.Depth ?? current.Depth,
                 Masking = !IsText && move.MaskingType is { } masking ? ParseMasking(masking) : current.Masking,
                 MaskingTarget = !IsText && move.MaskingTarget is { } maskTag ? MaskTag(maskTag) : current.MaskingTarget,
@@ -202,8 +231,8 @@ internal sealed class ImageDecorationTimeline
                 move.Parallax.X.HasValue, move.Parallax.Y.HasValue,
                 move.ParallaxOffset.X.HasValue, move.ParallaxOffset.Y.HasValue,
                 move.Rotation.HasValue,
-                move.HasColor,
-                move.Opacity.HasValue,
+                move.HasColor || tint.HasValue,
+                opacity.HasValue,
                 move.Visible.HasValue,
                 move.Smoothing.HasValue,
                 placement is not (null or "LastPosition"),
@@ -216,7 +245,7 @@ internal sealed class ImageDecorationTimeline
             _cachedAt = double.NaN;
         }
 
-        public void InsertTriggered(Motion motion, IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images)
+        public void InsertTriggered(Motion motion, IReadOnlyDictionary<string, DecorationImage> images)
         {
             TimingVersion++;
             _authoredChanges ??= _changes.ToArray();
@@ -247,7 +276,7 @@ internal sealed class ImageDecorationTimeline
             TimingVersion++;
         }
 
-        public void EditInitial(AddImageDecoration replacement, IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images)
+        public void EditInitial(AddImageDecoration replacement, IReadOnlyDictionary<string, DecorationImage> images)
         {
             Motion[] motions = _changes.Select(change => change.Motion).ToArray();
             source = replacement;
@@ -261,7 +290,7 @@ internal sealed class ImageDecorationTimeline
         }
 
         public bool EditMotions(IReadOnlyDictionary<int, MoveImageDecoration> replacements,
-            IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images, Dictionary<Motion, Motion> compiled)
+            IReadOnlyDictionary<string, DecorationImage> images, Dictionary<Motion, Motion> compiled)
         {
             int first = _changes.FindIndex(change => replacements.ContainsKey(change.Motion.SourceIndex));
             if (first < 0)
@@ -306,6 +335,78 @@ internal sealed class ImageDecorationTimeline
 
         public Pose At(double time) => At(time, out _);
 
+        internal void CollectStaticTextureUses(bool legacy, Dictionary<DecorationTextureStream.Key, double> uses,
+            Dictionary<(DecorationTextureStream.Key Key, double Bucket), double> activations,
+            IReadOnlyDictionary<string, DecorationImage> images)
+        {
+            bool repeatX = legacy && Tile.X != 1f;
+            bool repeatY = legacy && Tile.Y != 1f;
+            AddUse(Initial, 0, false);
+            foreach (var change in _changes)
+                AddUse(change.Target, change.Motion.Timing.Start,
+                    !CanDraw(change.From) || change.From.Image != change.Target.Image ||
+                    change.From.Smoothing != change.Target.Smoothing);
+
+            bool CanDraw(Pose pose) => pose.Visible &&
+                (!(pose.Opacity <= 0f) || pose.UsesDepthMask(legacy));
+
+            void AddUse(Pose pose, double time, bool activation)
+            {
+                if (!CanDraw(pose))
+                    return;
+                var key = new DecorationTextureStream.Key(pose.Image, pose.Smoothing, repeatX, repeatY);
+                if (!uses.TryGetValue(key, out double first) || time < first)
+                    uses[key] = time;
+                // Large backgrounds may leave the streaming cache between visible intervals.
+                if (activation && images.TryGetValue(key.Image, out var image) &&
+                    image.TextureBytes > 16L * 1024 * 1024)
+                {
+                    var bucket = (key, Math.Floor(time / 2));
+                    if (!activations.TryGetValue(bucket, out double earliest) || time < earliest)
+                        activations[bucket] = time;
+                }
+            }
+        }
+
+        internal void CollectAnimationFrames(HashSet<string> images, List<AnimationFrame> frames, bool legacy)
+        {
+            // Short runs of distinct image changes are usually flipbooks. A few reused
+            // images can stay in the ordinary texture cache, even if they change every frame.
+            const double maxFrameGap = .25;
+            const int minDistinctFrames = 8;
+            if (_changes.Count < minDistinctFrames)
+                return;
+            HashSet<string> distinct = new(StringComparer.Ordinal);
+            List<AnimationFrame> run = [];
+            double last = double.NegativeInfinity;
+            foreach (var change in _changes)
+            {
+                if (!change.HasImage || change.Target.Image == change.From.Image)
+                    continue;
+                double time = change.Motion.Timing.Start;
+                if (time - last > maxFrameGap)
+                {
+                    Commit();
+                    run.Clear();
+                    distinct.Clear();
+                }
+                distinct.Add(change.Target.Image);
+                if (change.Target.Visible)
+                    run.Add(new AnimationFrame(time, change.Target.Image, change.Target.Smoothing,
+                        legacy && Tile.X != 1f, legacy && Tile.Y != 1f));
+                last = time;
+            }
+            Commit();
+
+            void Commit()
+            {
+                if (distinct.Count < minDistinctFrames)
+                    return;
+                images.UnionWith(distinct);
+                frames.AddRange(run);
+            }
+        }
+
         // A deadline equal to time indicates an in-progress tween.
         internal Pose At(double time, out double next)
         {
@@ -315,16 +416,17 @@ internal sealed class ImageDecorationTimeline
                 next = double.PositiveInfinity;
                 return Initial;
             }
-            double start = _changes[0].Motion.Timing.Start;
+            ReadOnlySpan<Change> changes = CollectionsMarshal.AsSpan(_changes)[..count];
+            double start = changes[0].Motion.Timing.Start;
             if (time < start)
             {
                 next = start;
                 return Initial;
             }
-            if (time >= _changes[count - 1].PrefixEnd)
+            if (time >= changes[^1].PrefixEnd)
             {
                 next = double.PositiveInfinity;
-                return _changes[count - 1].Target;
+                return changes[^1].Target;
             }
             if (time == _cachedAt || (time > _cachedAt && time < _cachedUntil))
             {
@@ -334,24 +436,32 @@ internal sealed class ImageDecorationTimeline
 
             // Skip the history whose tweens have all completed; its last target is a
             // complete pose. A prefix maximum also accounts for overlapping durations.
-            int first = 0;
-            int end = count;
-            while (first < end)
+            int first = time > _cachedAt ? _cachedFirstChange : 0;
+            if (changes[first].PrefixEnd <= time)
+                first++;
+            if (changes[first].PrefixEnd <= time)
             {
-                int middle = first + (end - first) / 2;
-                if (_changes[middle].PrefixEnd <= time)
-                    first = middle + 1;
-                else
-                    end = middle;
+                // Forward playback normally advances only a single event. Bound
+                // the work for larger jumps with the same binary search as a seek.
+                first++;
+                int end = count;
+                while (first < end)
+                {
+                    int middle = first + (end - first) / 2;
+                    if (changes[middle].PrefixEnd <= time)
+                        first = middle + 1;
+                    else
+                        end = middle;
+                }
             }
 
             // Evaluate each authored channel independently so a second event can change opacity
             // while an earlier position tween is still running.
-            Pose result = first == 0 ? Initial : _changes[first - 1].Target;
+            Pose result = first == 0 ? Initial : changes[first - 1].Target;
             double until = double.PositiveInfinity;
             for (int i = first; i < count; i++)
             {
-                var change = _changes[i];
+                ref readonly Change change = ref changes[i];
                 var timing = change.Motion.Timing;
                 if (timing.Start > time)
                 {
@@ -371,6 +481,7 @@ internal sealed class ImageDecorationTimeline
                     Pivot = new Vector2(
                         change.HasPivotX ? Mix(from.Pivot.X, to.Pivot.X, p) : result.Pivot.X,
                         change.HasPivotY ? Mix(from.Pivot.Y, to.Pivot.Y, p) : result.Pivot.Y),
+                    CropPivotOffset = to.CropPivotOffset,
                     Scale = new Vector2(
                         change.HasScaleX ? Mix(from.Scale.X, to.Scale.X, p) : result.Scale.X,
                         change.HasScaleY ? Mix(from.Scale.Y, to.Scale.Y, p) : result.Scale.Y),
@@ -396,6 +507,7 @@ internal sealed class ImageDecorationTimeline
             }
             _cachedAt = time;
             _cachedUntil = until;
+            _cachedFirstChange = first;
             _cachedPose = result;
             next = until;
             return result;
@@ -405,7 +517,12 @@ internal sealed class ImageDecorationTimeline
     }
 
     public List<Item> Items { get; } = [];
-    public Dictionary<string, ImageDecoder.RgbaImage> Images { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, DecorationImage> Images { get; } = new(StringComparer.Ordinal);
+    internal HashSet<string> AnimationFrames { get; } = new(StringComparer.Ordinal);
+    internal readonly record struct AnimationFrame(double Start, string Image, bool Smoothing, bool RepeatX, bool RepeatY);
+    internal AnimationFrame[] AnimationUploads { get; private set; } = [];
+    internal (DecorationTextureStream.Key Key, double Start)[] StaticTextureUploads { get; private set; } = [];
+    internal (DecorationTextureStream.Key Key, double Start)[] StaticTexturePrefetches { get; private set; } = [];
     public bool LegacyMasks { get; private init; }
     public HashSet<Item> ChangedItems { get; } = [];
     private Dictionary<int, HashSet<Item>>? _editorMoveTargets;
@@ -415,12 +532,15 @@ internal sealed class ImageDecorationTimeline
     private readonly Dictionary<string, List<TriggerAction>> _collisionActions = new(StringComparer.Ordinal);
     private readonly Dictionary<(int Floor, int Outcome), List<TriggerAction>> _conditionalActions = [];
     private int[] _conditionFloors = [];
-    private readonly record struct TriggerAction(Action<double> Apply, double Offset);
+    private Dictionary<int, string?[]> _conditions = [];
+    private HashSet<string> _collisionTags = new(StringComparer.Ordinal);
+    private double _baseBpm;
+    private readonly record struct TriggerAction(Action<double> Apply, double Offset, bool CameraFilter);
 
     public bool HasConditions => _conditionalActions.Count > 0;
 
     private static Pose InitialPose(AddImageDecoration item, string image,
-        IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images, float tileSize)
+        IReadOnlyDictionary<string, DecorationImage> images, float tileSize)
     {
         Vector2 parallax = Read(item.Parallax, Vector2.Zero) ?? Vector2.Zero;
         Vector2 pivot = Read(item.Pivot, Vector2.Zero) ?? Vector2.Zero;
@@ -437,7 +557,8 @@ internal sealed class ImageDecorationTimeline
             Math.Clamp((item.Opacity ?? 100f) / 100f, 0f, 1f), item.Depth ?? -1, item.Visible ?? true,
             item.Smoothing ?? true, item.RelativeTo ?? "Global", ParseBlendMode(item.BlendMode),
             item.SyncFloorDepth == true, ParseMasking(item.MaskingType), MaskTag(item.MaskingTarget),
-            default(DecorationMaskRange).WithChanges(item.UseMaskingDepth, item.MaskingFrontDepth, item.MaskingBackDepth));
+            default(DecorationMaskRange).WithChanges(item.UseMaskingDepth, item.MaskingFrontDepth, item.MaskingBackDepth),
+            item is AddTextDecoration ? Vector2.Zero : Read(item.CropPivotOffset, Vector2.Zero) ?? Vector2.Zero);
     }
 
     internal Item? EditableDecoration(int sourceIndex, bool decoration) => Items.FirstOrDefault(item =>
@@ -533,18 +654,87 @@ internal sealed class ImageDecorationTimeline
         _triggeredFilters.Clear();
     }
 
-    public void ReleaseFilters()
+    public void BindCameraFilters(IReadOnlyList<Floor> floors, double[]? bpms,
+        FilterTimeline? foreground, FilterTimeline? background)
     {
-        foreach (var item in Items)
-            item.Filters?.Dispose();
+        ClearBindings(_conditionalActions);
+        ClearBindings(_collisionActions);
+        Bind(foreground);
+        Bind(background);
+
+        static void ClearBindings<TKey>(Dictionary<TKey, List<TriggerAction>> bindings) where TKey : notnull
+        {
+            foreach (var actions in bindings.Values)
+                actions.RemoveAll(action => action.CameraFilter);
+            foreach (var key in bindings.Where(pair => pair.Value.Count == 0).Select(pair => pair.Key).ToArray())
+                bindings.Remove(key);
+        }
+
+        void Bind(FilterTimeline? filters)
+        {
+            if (filters is null)
+                return;
+            if (_conditions.Count == 0 && _collisionTags.Count == 0)
+            {
+                filters.SetAutomaticSchedule(null);
+                return;
+            }
+            List<ScheduledEvent<CameraFilterEvent>> automatic = [];
+            HashSet<CameraFilterEvent> boundConditions = [];
+            foreach (var entry in filters.AuthoredSchedule)
+            {
+                var (outcomes, collision) = TriggerTags(entry.Event);
+                if (outcomes.Length == 0 && collision.Length == 0)
+                    automatic.Add(entry);
+                else if (outcomes.Length == 0 || boundConditions.Add(entry.Event))
+                    RegisterTrigger(entry.Event.Floor, bpms?[entry.Anchor] ?? floors[entry.Anchor].bpm,
+                        entry.AngleOffset, outcomes, collision, start =>
+                        {
+                            filters.InsertTriggered(entry with { Timing = entry.Timing with { Start = start } });
+                            _triggeredFilters.Add(filters);
+                        }, cameraFilter: true);
+            }
+            filters.SetAutomaticSchedule(automatic.ToArray());
+        }
+    }
+
+    private (int[] Outcomes, string[] Collision) TriggerTags(TimedEvent item)
+    {
+        if (item.Enabled("eventTag", item.EventTag) is not { Length: > 0 } eventTag)
+            return ([], []);
+        int[] outcomes = _conditions.TryGetValue(item.Floor, out var tags)
+            ? Enumerable.Range(0, tags.Length).Where(index => tags[index] == eventTag).ToArray() : [];
+        string[] collision = _collisionTags.Count == 0 ? [] :
+            Tags(eventTag).Where(_collisionTags.Contains).Distinct().ToArray();
+        return (outcomes, collision);
+    }
+
+    private void RegisterTrigger(int floor, double targetBpm, double offset, int[] outcomes, string[] collision,
+        Action<double> apply, bool cameraFilter = false)
+    {
+        var action = new TriggerAction(apply,
+            _baseBpm > 0 ? Math.Max(0, offset * 60.0 * targetBpm / (_baseBpm * _baseBpm)) : 0, cameraFilter);
+        foreach (int outcome in outcomes)
+        {
+            var key = (floor, outcome);
+            if (!_conditionalActions.TryGetValue(key, out var actions))
+                _conditionalActions.Add(key, actions = []);
+            actions.Add(action);
+        }
+        foreach (string tag in collision)
+        {
+            if (!_collisionActions.TryGetValue(tag, out var actions))
+                _collisionActions.Add(tag, actions = []);
+            actions.Add(action);
+        }
     }
 
     public static ImageDecorationTimeline? Build(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors,
         double[] times, double[]? bpms, string? directory, List<string> warnings, CancellationToken token,
         bool legacyMasks = false, float tileSize = 150f, bool editable = false,
-        IReadOnlyDictionary<string, ImageDecoder.RgbaImage>? cachedImages = null)
+        IReadOnlyDictionary<string, DecorationImage>? cachedImages = null)
     {
-        if (!events.Any(item => item is AddImageDecoration))
+        if (!events.Any(item => item is AddImageDecoration or ConditionalDecorationEvent))
             return null;
 
         var timeline = new ImageDecorationTimeline
@@ -587,6 +777,15 @@ internal sealed class ImageDecorationTimeline
             if (!item.IsActive)
                 continue;
             string image = (item is AddTextDecoration text ? LoadText(text.Font, text.Text) : item.Image) ?? "";
+            (string Key, Vector4 Tint, float Opacity)? objectArt = item is AddObjectDecoration obj
+                ? ObjectDecorationArt.Resolve(obj, timeline.Images) : null;
+            if (objectArt is { } art)
+                image = art.Key;
+            if (image.Length == 0 && item is AddParticleDecoration)
+            {
+                image = "\0default-particle";
+                timeline.Images.TryAdd(image, ObjectDecorationArt.Particle);
+            }
             if (image.Length == 0 && item is not AddTextDecoration)
             {
                 image = DefaultImage;
@@ -594,6 +793,8 @@ internal sealed class ImageDecorationTimeline
                     timeline.Images.Add(image, DefaultSprite.Value);
             }
             var pose = InitialPose(item, image, timeline.Images, tileSize);
+            if (objectArt is { } visual)
+                pose = pose with { Tint = visual.Tint, Opacity = pose.Opacity * visual.Opacity };
             var decoration = new Item(item, pose, Read(item.Tile, Vector2.One) ?? Vector2.One,
                 timeline.Items.Count, tileSize);
             timeline.Items.Add(decoration);
@@ -604,20 +805,31 @@ internal sealed class ImageDecorationTimeline
                 decorations.Add(decoration);
             }
         }
+        foreach (var entry in TimedEventSchedule.Build<ParticleControlEvent>(events, floors, times, bpms, preserveChartOrder: true))
+        {
+            token.ThrowIfCancellationRequested();
+            foreach (var decoration in Tags(entry.Event.Enabled("tag", entry.Event.Tag))
+                .Where(tagged.ContainsKey).SelectMany(tag => tagged[tag]).Distinct())
+                decoration.Particles?.Add(entry.Event, entry.Timing.Start);
+        }
         timeline.Hitboxes = timeline.Items.Where(item => item.Hitbox is not null).ToArray();
-        var collisionTags = timeline.Hitboxes.SelectMany(item => item.Hitbox!.EventTags).ToHashSet(StringComparer.Ordinal);
-        var conditions = events.OfType<ConditionalDecorationEvent>().Where(item => item.IsActive)
+        timeline._collisionTags = timeline.Hitboxes.SelectMany(item => item.Hitbox!.EventTags).ToHashSet(StringComparer.Ordinal);
+        timeline._conditions = events.OfType<ConditionalDecorationEvent>().Where(item => item.IsActive)
             .GroupBy(item => item.Floor).ToDictionary(group => group.Key, group => group.Last().Tags());
-        timeline._conditionFloors = conditions.Keys.Order().ToArray();
+        timeline._conditionFloors = timeline._conditions.Keys.Order().ToArray();
+        timeline._baseBpm = floors.Count > 0 ? bpms?[0] ?? floors[0].bpm : 0;
         var boundConditions = new HashSet<TimedEvent>();
-        double baseBpm = floors.Count > 0 ? bpms?[0] ?? floors[0].bpm : 0;
         var moveSchedule = TimedEventSchedule.Build<MoveImageDecoration>(events, floors, times, bpms, preserveChartOrder: true);
+        // A same-tick MoveDecorations reveal sets the floor opacity before the SetObject tween samples it.
+        var orderedMoves = moveSchedule.Any(entry => entry.Event is SetObjectDecoration)
+            ? moveSchedule.OrderBy(entry => entry.Timing.Start).ThenBy(entry => entry.Event is SetObjectDecoration)
+            : (IEnumerable<ScheduledEvent<MoveImageDecoration>>)moveSchedule;
         var matching = new HashSet<Item>();
-        foreach (var entry in moveSchedule)
+        foreach (var entry in orderedMoves)
         {
             token.ThrowIfCancellationRequested();
             var item = entry.Event;
-            var (outcomes, collision) = TriggerTags(item);
+            var (outcomes, collision) = timeline.TriggerTags(item);
             if (outcomes.Length != 0 && !boundConditions.Add(item))
                 continue;
             matching.Clear();
@@ -626,6 +838,7 @@ internal sealed class ImageDecorationTimeline
                 if (tagged.TryGetValue(tag, out var decorations))
                     matching.UnionWith(decorations);
             }
+            double bpm = bpms?[entry.Anchor] ?? floors[entry.Anchor].bpm;
             if (item is SetTextDecoration text)
             {
                 foreach (var decoration in matching.Where(entry => entry.IsText))
@@ -633,11 +846,13 @@ internal sealed class ImageDecorationTimeline
                     if (LoadText(decoration.Font, text.Text) is not { } key)
                         continue;
                     // Changing the text changes its bounds without stretching the glyphs.
-                    Register(decoration, new Motion(new SetTextDecoration { Image = key }, entry.Timing));
+                    Register(decoration, new Motion(new SetTextDecoration { Image = key }, entry.Timing), bpm);
                 }
                 continue;
             }
 
+            if (item is SetObjectDecoration)
+                matching.RemoveWhere(static decoration => !decoration.IsObject || decoration.IsPlayerBubble);
             if (HasNonText(matching) && item.Enabled("decorationImage", item.Image) is { Length: > 0 } image)
                 LoadImage(image);
             if (timeline._editorMoveTargets is { } editorTargets && item.SourceIndex >= 0 &&
@@ -649,19 +864,18 @@ internal sealed class ImageDecorationTimeline
             }
             if (matching.Count == 0)
                 continue;
-            double bpm = bpms?[entry.Anchor] ?? floors[entry.Anchor].bpm;
             var motion = new Motion(item, entry.Timing, bpm > 1e-6 ? 60.0 / bpm : .5);
             foreach (var decoration in matching)
-                Register(decoration, motion);
+                Register(decoration, motion, bpm);
 
-            void Register(Item decoration, Motion move)
+            void Register(Item decoration, Motion move, double targetBpm)
             {
                 if (outcomes.Length == 0 && collision.Length == 0)
                 {
                     decoration.Add(move, timeline.Images);
                     return;
                 }
-                RegisterTrigger(item.Floor, entry.Anchor, entry.AngleOffset, outcomes, collision, start =>
+                timeline.RegisterTrigger(item.Floor, targetBpm, entry.AngleOffset, outcomes, collision, start =>
                 {
                     decoration.InsertTriggered(move.TriggerAt(start), timeline.Images);
                     timeline._triggeredItems.Add(decoration);
@@ -670,48 +884,22 @@ internal sealed class ImageDecorationTimeline
             }
         }
 
-        if (GeneratedFilterRegistry.Factories.Count != 0 &&
-            events.OfType<CameraFilterEvent>().Any(IsDecorationFilter))
-        {
-            Dictionary<Item, List<ScheduledEvent<CameraFilterEvent>>> byDecoration = [];
-            var filterOrder = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var filter in events.OfType<CameraFilterEvent>().Where(IsDecorationFilter))
-                if (filter.Filter is { Length: > 0 } name)
-                    filterOrder.TryAdd(name, filterOrder.Count);
-            foreach (var entry in TimedEventSchedule.Build<CameraFilterEvent>(events, floors, times, bpms,
-                         preserveChartOrder: true))
-            {
-                if (!IsDecorationFilter(entry.Event))
-                    continue;
-                var (outcomes, collision) = TriggerTags(entry.Event);
-                if (outcomes.Length != 0 && !boundConditions.Add(entry.Event))
-                    continue;
-                matching.Clear();
-                foreach (string tag in Tags(entry.Event.Enabled("targetTag", entry.Event.TargetTag)))
-                    if (tagged.TryGetValue(tag, out var items))
-                        matching.UnionWith(items);
-                foreach (var item in matching)
-                {
-                    if (item.IsText)
-                        continue;
-                    if (!byDecoration.TryGetValue(item, out var schedule))
-                        byDecoration.Add(item, schedule = []);
-                    if (outcomes.Length == 0 && collision.Length == 0)
-                        schedule.Add(entry);
-                    else
-                        RegisterTrigger(entry.Event.Floor, entry.Anchor, entry.AngleOffset, outcomes, collision, start =>
-                        {
-                            var filters = item.Filters!;
-                            filters.InsertTriggered(entry with { Timing = entry.Timing with { Start = start } });
-                            timeline._triggeredFilters.Add(filters);
-                        });
-                }
-            }
-            foreach (var (item, schedule) in byDecoration)
-                item.Filters = FilterTimeline.ForDecoration(schedule, filterOrder, legacyMasks);
-        }
-
-        return timeline.Items.Count == 0 ? null : timeline;
+        List<AnimationFrame> frames = [];
+        foreach (Item item in timeline.Items)
+            item.CollectAnimationFrames(timeline.AnimationFrames, frames, legacyMasks);
+        timeline.AnimationUploads = frames.Distinct().OrderBy(frame => frame.Start).ToArray();
+        Dictionary<DecorationTextureStream.Key, double> staticUses = [];
+        Dictionary<(DecorationTextureStream.Key Key, double Bucket), double> activations = [];
+        foreach (Item item in timeline.Items)
+            item.CollectStaticTextureUses(legacyMasks, staticUses, activations, timeline.Images);
+        timeline.StaticTextureUploads = staticUses.OrderBy(use => use.Value)
+            .Where(use => timeline.Images.ContainsKey(use.Key.Image) && !timeline.AnimationFrames.Contains(use.Key.Image))
+            .Select(use => (use.Key, use.Value)).ToArray();
+        timeline.StaticTexturePrefetches = timeline.StaticTextureUploads.Concat(activations
+                .Where(use => !timeline.AnimationFrames.Contains(use.Key.Key.Image))
+                .Select(use => (Key: use.Key.Key, Start: use.Value)))
+            .Distinct().OrderBy(use => use.Start).ToArray();
+        return timeline.Items.Count != 0 || timeline._conditions.Count != 0 ? timeline : null;
 
         void QueueImage(string image)
         {
@@ -733,41 +921,6 @@ internal sealed class ImageDecorationTimeline
                 return;
             pendingTexts.Add(textKey, TextImageKey(font, value));
         }
-
-        (int[] Outcomes, string[] Collision) TriggerTags(TimedEvent item)
-        {
-            if (item.Enabled("eventTag", item.EventTag) is not { Length: > 0 } eventTag)
-                return ([], []);
-            int[] outcomes = conditions.TryGetValue(item.Floor, out var tags)
-                ? Enumerable.Range(0, tags.Length).Where(index => tags[index] == eventTag).ToArray() : [];
-            string[] collision = collisionTags.Count == 0 ? [] :
-                Tags(eventTag).Where(collisionTags.Contains).Distinct().ToArray();
-            return (outcomes, collision);
-        }
-
-        void RegisterTrigger(int floor, int anchor, double offset, int[] outcomes, string[] collision, Action<double> apply)
-        {
-            double targetBpm = bpms?[anchor] ?? floors[anchor].bpm;
-            var action = new TriggerAction(apply,
-                baseBpm > 0 ? Math.Max(0, offset * 60.0 * targetBpm / (baseBpm * baseBpm)) : 0);
-            foreach (int outcome in outcomes)
-            {
-                var key = (floor, outcome);
-                if (!timeline._conditionalActions.TryGetValue(key, out var actions))
-                    timeline._conditionalActions.Add(key, actions = []);
-                actions.Add(action);
-            }
-            foreach (string tag in collision)
-            {
-                if (!timeline._collisionActions.TryGetValue(tag, out var actions))
-                    timeline._collisionActions.Add(tag, actions = []);
-                actions.Add(action);
-            }
-        }
-
-        static bool IsDecorationFilter(CameraFilterEvent item) => item.IsActive &&
-            item.EventType == SharpFAI.Serialization.EventType.SetFilterAdvanced &&
-            item.Enabled("targetType", item.TargetType) is "Decoration" or "1";
 
         static bool HasNonText(HashSet<Item> matching)
         {
@@ -810,7 +963,7 @@ internal sealed class ImageDecorationTimeline
                     return;
                 var pixels = ImageDecoder.Decode(File.ReadAllBytes(fullPath));
                 ImageDecoder.FlipVertically(pixels.Pixels, pixels.Width, pixels.Height);
-                timeline.Images[name] = pixels;
+                timeline.Images[name] = DecorationImage.Pack(pixels);
             }            catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
                 SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
             {
@@ -825,15 +978,15 @@ internal sealed class ImageDecorationTimeline
     /// </summary>
     private static void RasterizePendingTexts(
         Dictionary<(string? Font, string Value), string> pending,
-        Dictionary<string, ImageDecoder.RgbaImage> images,
-        IReadOnlyDictionary<string, ImageDecoder.RgbaImage>? cachedImages,
+        Dictionary<string, DecorationImage> images,
+        IReadOnlyDictionary<string, DecorationImage>? cachedImages,
         List<string> warnings,
         CancellationToken token)
     {
         if (pending.Count == 0)
             return;
 
-        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, ImageDecoder.RgbaImage>(
+        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, DecorationImage>(
             StringComparer.Ordinal);
         var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(
             StringComparer.Ordinal);
@@ -871,7 +1024,7 @@ internal sealed class ImageDecorationTimeline
     /// decoration-heavy levels, and PNG decoding is independent per file.
     /// </summary>
     private static void DecodePendingImages(List<string> pending, string? directory,
-        Dictionary<string, ImageDecoder.RgbaImage> images, List<string> warnings, CancellationToken token)
+        Dictionary<string, DecorationImage> images, List<string> warnings, CancellationToken token)
     {
         if (pending.Count == 0 || string.IsNullOrEmpty(directory))
             return;
@@ -894,7 +1047,7 @@ internal sealed class ImageDecorationTimeline
                     return false;
                 var pixels = ImageDecoder.Decode(File.ReadAllBytes(fullPath));
                 ImageDecoder.FlipVertically(pixels.Pixels, pixels.Width, pixels.Height);
-                images[name] = pixels;
+                images[name] = DecorationImage.Pack(pixels);
                 return true;
             }
             catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
@@ -905,7 +1058,7 @@ internal sealed class ImageDecorationTimeline
             }
         }
 
-        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, ImageDecoder.RgbaImage>(
+        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, DecorationImage>(
             StringComparer.Ordinal);
         var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         Parallel.ForEach(pending, new ParallelOptions
@@ -923,7 +1076,7 @@ internal sealed class ImageDecorationTimeline
                     return;
                 var pixels = ImageDecoder.Decode(File.ReadAllBytes(fullPath));
                 ImageDecoder.FlipVertically(pixels.Pixels, pixels.Width, pixels.Height);
-                results[name] = pixels;
+                results[name] = DecorationImage.Pack(pixels);
             }
             catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
                 SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
@@ -962,7 +1115,7 @@ internal sealed class ImageDecorationTimeline
         _ => DecorationBlendMode.None,
     };
 
-    private static Vector2 ResolveTextureScale(IReadOnlyDictionary<string, ImageDecoder.RgbaImage> images,
+    private static Vector2 ResolveTextureScale(IReadOnlyDictionary<string, DecorationImage> images,
         string name, Vector2? original, Vector2 current)
     {
         if (original is { X: > 0, Y: > 0 } size &&

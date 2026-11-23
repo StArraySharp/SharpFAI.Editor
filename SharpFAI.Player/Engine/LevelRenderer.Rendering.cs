@@ -58,6 +58,8 @@ public sealed unsafe partial class LevelRenderer
         _trail.Clear();
         _previousCurrentIndex = -1;
         _previousPlayTime = _playTime;
+        _offlineTrailTime = double.NaN;
+        _offlineTrailFloor = -1;
     }
 
     /// <summary>Pan by a screen-space pixel delta.</summary>
@@ -69,8 +71,24 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
-        // Hand the camera over while paused so the timeline stops overwriting it and the user can
-        // inspect the whole level freely
+        PanFreely(screenDelta);
+    }
+
+    internal bool CanNavigateEditorPlayback => _isPlaying && _editorEvents is not null && !_editorHasCameraMotion;
+
+    internal void NavigateEditorPlayback(Vector2 screenDelta, float scroll, Vector2 cursor)
+    {
+        if (!CanNavigateEditorPlayback)
+            return;
+
+        if (screenDelta != Vector2.Zero)
+            PanFreely(screenDelta);
+        // Zoom on the follow target until the user explicitly pans away.
+        Zoom(scroll, _cameraFree ? cursor : new Vector2(_camera.ViewportWidth, _camera.ViewportHeight) * 0.5f);
+    }
+
+    private void PanFreely(Vector2 screenDelta)
+    {
         _cameraFree = true;
         _camera.Position += _camera.ScreenToWorld(Vector2.Zero) - _camera.ScreenToWorld(screenDelta);
         _camera.MarkDirty();
@@ -125,6 +143,8 @@ public sealed unsafe partial class LevelRenderer
         // Commit a finished background load on the main thread
         PumpLoad();
 
+        PumpEffectWarmup();
+
         // Shader hot reload: rebuild on the next frame
         if (_shaderReloadPending)
         {
@@ -171,6 +191,15 @@ public sealed unsafe partial class LevelRenderer
     /// <summary>Submit the draw calls.</summary>
     public void Render()
     {
+        UpdateFilterClock();
+        if (_preparingLevelEffects)
+        {
+            DrawCalls = 0;
+            DrawnTriangles = 0;
+            _filterBackend?.ObserveCameraFrame(_playTime);
+            return;
+        }
+
         float neutralZoom = _camera.Zoom;
         Vector2 neutralPosition = _camera.Position;
         bool shake = !_cameraFree && _cameraShake != Vector2.Zero;
@@ -189,36 +218,59 @@ public sealed unsafe partial class LevelRenderer
         try
         {
             SceneColorHistory? history = null;
-            if (_backdrop?.HistoryAt(_playTime) == true)
+            if (_backdrop?.UsesHistory == true)
                 history = _colorHistory ??= new SceneColorHistory();
             else
                 _colorHistory?.Reset();
+            if (_backdrop?.HistoryAt(_playTime) == true)
+                history?.Restore(_playTime);
 
-            bool filtersDue = _filterTimeline?.HasDueEvent(_playTime) == true;
-            bool screenActive = _sceneEffects?.HasScreenEffect(_playTime) == true;
-            if (filtersDue || screenActive)
+            DrawCalls = 0;
+            DrawnTriangles = 0;
+            _chunkDrawCalls = 0;
+            // Observe OFF frames too, so a seek or resize cannot revive stale filter output.
+            _filterBackend?.ObserveCameraFrame(_playTime);
+            bool mainCamera = !_cameraRenderDisabled || _cameraFree;
+            bool filtersDue = mainCamera && _filterTimeline?.HasDueEvent(_playTime) == true;
+            bool backgroundDue = _backgroundFilterTimeline?.HasDueEvent(_playTime) == true;
+            bool screenActive = mainCamera && _sceneEffects?.HasScreenEffect(_playTime) == true;
+            _scenePasses.Clear();
+            _backgroundPasses = [];
+            _fallingPetals = null;
+            if (filtersDue || backgroundDue || screenActive)
             {
                 var backend = _filterBackend ??= new Filters.OpenGlFilterBackend();
-                _scenePasses.Clear();
+                backend.CameraView = _camera.ViewProjection;
                 if (filtersDue)
-                    _scenePasses.AddRange(_filterTimeline!.Evaluate(backend, _playTime));
+                    foreach (var entry in _filterTimeline!.Evaluate(backend, _playTime))
+                    {
+                        if (entry.Filter is Filters.FallingPetalsFilter petals)
+                            _fallingPetals = petals;
+                        else
+                            _scenePasses.Add(entry);
+                    }
+                if (backgroundDue)
+                    _backgroundPasses = _backgroundFilterTimeline!.Evaluate(backend, _playTime);
                 if (screenActive)
                 {
                     _sceneEffects!.AppendScreenPasses(backend, _playTime, _scenePasses);
                     _scenePasses.Sort(static (left, right) => left.Order.CompareTo(right.Order));
                 }
-                float delta = double.IsFinite(_lastFilterTime) ? (float)Math.Max(0, _playTime - _lastFilterTime) : 0;
-                _lastFilterTime = _playTime;
-                if (_scenePasses.Count > 0)
-                {
-                    backend.Draw(_playTime, delta, _scenePasses, RenderScene);
-                    // The game's depth-only background clear leaves the previous
-                    // camera output, including all post-processing, on the target.
-                    history?.Capture(_playTime);
-                    return;
-                }
             }
-            RenderScene();
+
+            // Only the background image and flash belong to the background camera.
+            if (_backgroundPasses.Count > 0)
+                _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _backgroundPasses, DrawBackgroundPlane, background: true);
+            else
+                DrawBackgroundPlane();
+
+            if (mainCamera)
+            {
+                if (_scenePasses.Count > 0)
+                    _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _scenePasses, RenderMainCamera);
+                else
+                    RenderMainCamera();
+            }
             history?.Capture(_playTime);
         }
         finally
@@ -236,65 +288,42 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    private void RenderScene()
+    private Filters.FallingPetalsFilter? _fallingPetals;
+
+    private void UpdateFilterClock()
     {
-        _colorHistory?.Restore(_playTime);
-        RenderSceneContents();
+        if (_offlineSubSample)
+        {
+            double step = (_playTime - _lastFilterTime) / _pitch;
+            _filterDelta = double.IsFinite(step) && step >= 0 ? (float)step : 0f;
+            _filterClock = double.IsFinite(step) && step >= 0 ? _filterClock + step : 0;
+        }
+        else
+        {
+            double step = _lastFrameTime - _lastFilterWallTime;
+            _filterDelta = !_filterClockPaused && double.IsFinite(step) ? (float)Math.Clamp(step, 0, 1.0 / 3) : 0f;
+            _liveFilterClock += _filterDelta;
+            _filterClock = _liveFilterClock;
+        }
+        _lastFilterWallTime = _lastFrameTime;
+        _lastFilterTime = _playTime;
     }
+
+    private void RenderMainCamera() => RenderMainCameraContents();
 
     internal void RenderEditorTiles()
     {
         _colorHistory?.Reset();
         _lastFilterTime = double.NaN;
-        RenderSceneContents(tilesOnly: true);
-    }
-
-    private void RenderSceneContents(bool tilesOnly = false)
-    {
         DrawCalls = 0;
         DrawnTriangles = 0;
-        if (!tilesOnly && _background is { } background && _backdrop is { } backdrop)
-        {
-            var state = backdrop.BackgroundAt(_playTime);
-            var settings = state.Settings;
-            if (_uploadedBackdrop != state)
-            {
-                background.SetImage(state.Pixels, settings.ImageSmoothing,
-                    settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled);
-                _uploadedBackdrop = state;
-            }
-            if (state.Pixels is not null || settings.DefaultPattern)
-            {
-                background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
-                DrawCalls++;
-            }
-        }
-
         _chunkDrawCalls = 0;
-        ImageDecorationRenderer? syncedSprites = null;
-        if (!tilesOnly && ShowDecorations && _imageDecorations is { } decorations && !_decorationShaderFailed)
-        {
-            try
-            {
-                if (DecorationShader() is { } sprites)
-                {
-                    _decorationParentStates.Clear();
-                    sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
-                        AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
-                        CollectDecorationQuads, DecorationFloorOpacity);
-                    DrawDecorations(background: true);
-                    if (sprites.SyncedCount != 0)
-                        syncedSprites = sprites;
-                }
-            }
-            catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
-            {
-                _decorationShaderFailed = true;
-                _warnings.Add($"装饰着色器不可用：{error.Message}");
-            }
-        }
-        if (!tilesOnly)
-            DrawFlash(foreground: false);
+        RenderMainCameraContents(tilesOnly: true);
+    }
+
+    private void RenderMainCameraContents(bool tilesOnly = false)
+    {
+        ImageDecorationRenderer? syncedSprites = tilesOnly ? null : PrepareAndDrawBackDecorations();
 
         EnsureVisibleFloors();
         if (_activeFloorChunks is null && _officialRenderer is not { HasGeometry: true })
@@ -315,6 +344,7 @@ public sealed unsafe partial class LevelRenderer
         {
             UpdateTrackVisuals();
         }
+        _officialRenderer?.PrepareLevelDraw(viewProjection, _camera.Position, (int)_camera.ViewportWidth, (int)_camera.ViewportHeight);
 
         int nextSynced = 0;
         if (_activeFloorChunks is { } chunks)
@@ -349,6 +379,8 @@ public sealed unsafe partial class LevelRenderer
 
         if (ShowDecorations && !_decorationShaderFailed && _imageDecorations is not null && _decorationRenderer is not null)
             DrawDecorations(background: false);
+        if (_fallingPetals is { } petals && _spriteRenderer is { } particleSprites)
+            DrawCalls += petals.Draw(particleSprites, _camera, _playTime, _pitch);
         DrawFlash(foreground: true);
 
         int DrawFloorsWithDecorations(OfficialFloorRenderer renderer, int firstFloor)
@@ -384,6 +416,51 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
+    private void DrawBackgroundPlane()
+    {
+        if (_background is { } background && _backdrop is { } backdrop)
+        {
+            var state = backdrop.BackgroundAt(_playTime);
+            var settings = state.Settings;
+            if (_uploadedBackdrop != state)
+            {
+                background.SetImage(state.Pixels, settings.ImageSmoothing,
+                    settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled);
+                _uploadedBackdrop = state;
+            }
+            if (state.Pixels is not null || settings.DefaultPattern)
+            {
+                background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
+                DrawCalls++;
+            }
+        }
+        DrawFlash(foreground: false);
+    }
+
+    private ImageDecorationRenderer? PrepareAndDrawBackDecorations()
+    {
+        if (!ShowDecorations || _imageDecorations is not { } decorations || _decorationShaderFailed)
+            return null;
+        try
+        {
+            if (DecorationShader() is { } sprites)
+            {
+                _decorationParentStates.Clear();
+                sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
+                    AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
+                    CollectDecorationQuads, DecorationFloorOpacity);
+                DrawDecorations(background: true);
+                return sprites.SyncedCount > 0 ? sprites : null;
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
+        {
+            _decorationShaderFailed = true;
+            _warnings.Add($"装饰着色器不可用：{error.Message}");
+        }
+        return null;
+    }
+
     private ImageDecorationRenderer? DecorationShader()
     {
         if (_decorationShaderFailed)
@@ -417,9 +494,15 @@ public sealed unsafe partial class LevelRenderer
 
     public bool CollectDecorationQuads { get; set; }
 
+    private bool CanReadDecorationQuads => CollectDecorationQuads && ShowDecorations && !_decorationShaderFailed &&
+        !_preparingLevelEffects && (!_cameraRenderDisabled || _cameraFree);
+
+    internal IEnumerable<int> VisibleDecorationIndices => CanReadDecorationQuads && _decorationRenderer is { } renderer
+        ? renderer.VisibleEditorDecorations : [];
+
     public bool TryGetDecorationQuad(int index, Span<Vector2> pixels)
     {
-        if (pixels.Length < 4 || !CollectDecorationQuads || !ShowDecorations ||
+        if (pixels.Length < 4 || !CanReadDecorationQuads ||
             _decorationRenderer is not { } renderer || !renderer.TryGetEditorQuad(index, out Matrix4 clip))
             return false;
         Project(-0.5f, -0.5f, out pixels[0]);
@@ -436,13 +519,14 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    private (Vector2 Center, Vector2 Scale, float Rotation) DecorationFloor(int index, bool dynamic)
+    internal (Vector2 Center, Vector2 Scale, float Rotation) DecorationFloor(int index, bool dynamic)
     {
         if (_floors.Count == 0)
             return (Vector2.Zero, Vector2.One, 0f);
         index = Math.Clamp(index, 0, _floors.Count - 1);
         var position = _floors[index].position;
-        var transform = dynamic ? DecorationParentState(index).Transform : _trackStates[index].Transform;
+        var baseline = _runtimeTrackActive && _trackRuntime is { } runtime ? runtime.Baseline : _trackStates;
+        var transform = dynamic ? DecorationParentState(index).Transform : baseline[index].Transform;
         return (new Vector2(position.X, position.Y) + transform.Offset, transform.Scale, transform.Rotation);
     }
 
@@ -534,10 +618,15 @@ public sealed unsafe partial class LevelRenderer
         // tile changes.
         if (_playTime > _previousPlayTime)
         {
-            RecordTrailSamples(primary, onOrbit);
+            if (!_offlineSubSample)
+                RecordTrailPose(_currentIndex, _planetCenter, _secondaryCenter, _thirdCenter, _playTime,
+                    ref _previousCurrentIndex, preserveHistory: false);
+            _previousCurrentIndex = _currentIndex;
+            _previousPlayTime = _playTime;
         }
 
-        ReadOnlySpan<PlanetTrail.Sample> samples = _trail.Build(_playTime);
+        FloorRegion view = FloorRegion.FromView(_camera).Expand(Vector2.One);
+        ReadOnlySpan<PlanetTrail.Sample> samples = _trail.Build(_playTime, view);
 
         if (!samples.IsEmpty)
         {
@@ -545,28 +634,19 @@ public sealed unsafe partial class LevelRenderer
             {
                 _trailParticles = new SpriteRenderer.Particle[Math.Max(samples.Length, _trailParticles.Length * 2)];
             }
-            FloorRegion view = FloorRegion.FromView(_camera).Expand(Vector2.One);
-            int written = 0;
-            foreach (PlanetTrail.Sample sample in samples)
+            for (int i = 0; i < samples.Length; i++)
             {
-                Vector2 particleHalfSize = new(sample.Size * 0.5f);
-                if (!view.Intersects(new FloorRegion(sample.Center - particleHalfSize, sample.Center + particleHalfSize)))
-                {
-                    continue;
-                }
-                _trailParticles[written++] = new SpriteRenderer.Particle
+                ref readonly PlanetTrail.Sample sample = ref samples[i];
+                _trailParticles[i] = new SpriteRenderer.Particle
                 {
                     Center = sample.Center,
-                    HalfSize = particleHalfSize,
+                    HalfSize = new Vector2(sample.Size * .5f),
                     Tint = sample.Tint,
                 };
             }
 
-            if (written > 0)
-            {
-                sprites.DrawParticles(viewProjection, _trailParticles.AsSpan(0, written));
-                DrawCalls += 1;
-            }
+            sprites.DrawParticles(viewProjection, _trailParticles.AsSpan(0, samples.Length));
+            DrawCalls += 1;
         }
 
         // The planets themselves
@@ -626,73 +706,6 @@ public sealed unsafe partial class LevelRenderer
 
         float time = (float)_playTime;
         return (int)(time * PlanetAnimationFps) % _spriteRenderer.FrameCount;
-    }
-
-    /// <summary>Records each planet's own path, with extra arc samples within an offline frame.</summary>
-    private void RecordTrailSamples(Vector4 primaryTint, Vector4 secondaryTint)
-    {
-        PlanetTrackFloor track = _planetTrack[_currentIndex];
-        bool crossed = _previousCurrentIndex != _currentIndex;
-        if (crossed && (uint)_previousCurrentIndex < (uint)_planetTrack.Length)
-        {
-            int joined = ActivePlanets(track) & ~ActivePlanets(_planetTrack[_previousCurrentIndex]);
-            for (int id = 0; id < 3; id++)
-            {
-                if ((joined & (1 << id)) != 0)
-                {
-                    _trail.ResetPlanet(id);
-                }
-            }
-        }
-
-        if (!_offlineSubSample || crossed)
-        {
-            Record(_planetCenter, _secondaryCenter, _thirdCenter, _playTime);
-        }
-        else
-        {
-            float previousRadius = Vector2.Distance(_previousSecondaryCenter, _previousPlanetCenter);
-            float radius = Vector2.Distance(_secondaryCenter, _planetCenter);
-            double delta = _sweepAngleNow - _previousAngleContinuous;
-            int steps = Math.Clamp((int)(Math.Abs(delta) / TrailAngleStepDegrees) + 1, 1, 48);
-            for (int step = 1; step <= steps; step++)
-            {
-                float fraction = step / (float)steps;
-                Vector2 pivot = Vector2.Lerp(_previousPlanetCenter, _planetCenter, fraction);
-                float orbitRadius = float.Lerp(previousRadius, radius, fraction);
-                double time = _previousPlayTime + (_playTime - _previousPlayTime) * fraction;
-                double angle = _previousAngleContinuous + delta * fraction;
-                Vector2 orbit = pivot + PlanetTrackFloor.Direction(angle) * orbitRadius;
-                Vector2 third = track.Count == 3
-                    ? pivot + PlanetTrackFloor.Direction(angle + PlanetTrackFloor.ThirdAngle(_isCw)) * orbitRadius
-                    : default;
-                Record(pivot, orbit, third, time);
-            }
-        }
-
-        SaveTrailFrame();
-
-        void Record(Vector2 pivot, Vector2 orbit, Vector2 third, double time)
-        {
-            _trail.RecordPlanet(track.Pivot, pivot, primaryTint, time);
-            _trail.RecordPlanet(track.Orbit, orbit, secondaryTint, time);
-            if (track.Count == 3)
-            {
-                _trail.RecordPlanet(track.Third, third, PlanetTint(track.Third), time);
-            }
-        }
-    }
-
-    private static int ActivePlanets(PlanetTrackFloor track) =>
-        (1 << track.Pivot) | (1 << track.Orbit) | (track.Count == 3 ? 1 << track.Third : 0);
-
-    private void SaveTrailFrame()
-    {
-        _previousPlanetCenter = _planetCenter;
-        _previousSecondaryCenter = _secondaryCenter;
-        _previousAngleContinuous = _sweepAngleNow;
-        _previousCurrentIndex = _currentIndex;
-        _previousPlayTime = _playTime;
     }
 
     /// <summary>

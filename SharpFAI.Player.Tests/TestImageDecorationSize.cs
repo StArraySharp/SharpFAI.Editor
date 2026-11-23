@@ -13,6 +13,33 @@ namespace SharpFAI.Player.Tests;
 public sealed class TestImageDecorationSize
 {
     [Test]
+    public void OnlyDenseSequencesOfDistinctDecorationImagesAreStreamed()
+    {
+        var item = new ImageDecorationTimeline.Item(new AddImageDecoration(),
+            CreatePose() with { Image = "base", Visible = true, Smoothing = true }, new Vector2(2, 1), 0);
+        var decoded = new Dictionary<string, DecorationImage>();
+        for (int frame = 0; frame < 10; frame++)
+        {
+            item.Add(new MoveImageDecoration { Image = $"frame-{frame}" },
+                new TrackTiming(frame * .04, 0, EventEnums.Ease.Linear), decoded);
+        }
+        item.Add(new MoveImageDecoration { Image = "interlude" },
+            new TrackTiming(1, 0, EventEnums.Ease.Linear), decoded);
+        for (int frame = 0; frame < 10; frame++)
+        {
+            item.Add(new MoveImageDecoration { Image = $"repeat-{frame % 2}" },
+                new TrackTiming(2 + frame * .04, 0, EventEnums.Ease.Linear), decoded);
+        }
+
+        HashSet<string> images = [];
+        List<ImageDecorationTimeline.AnimationFrame> uploads = [];
+        item.CollectAnimationFrames(images, uploads, legacy: true);
+        Assert.That(images, Is.EquivalentTo(Enumerable.Range(0, 10).Select(frame => $"frame-{frame}")));
+        Assert.That(uploads.Select(frame => frame.Image), Is.EqualTo(Enumerable.Range(0, 10).Select(frame => $"frame-{frame}")));
+        Assert.That(uploads.All(frame => frame.Smoothing && frame.RepeatX && !frame.RepeatY), Is.True);
+    }
+
+    [Test]
     public void PixelSizeUsesPlayerWorldUnitsAndAuthoredScale()
     {
         var pose = CreatePose();
@@ -72,7 +99,7 @@ public sealed class TestImageDecorationSize
         var pose = CreatePose();
         var item = new ImageDecorationTimeline.Item(new AddImageDecoration { ScaleMultiplier = 2f }, pose, Vector2.One, 0);
         var timings = new TrackTiming(1, 1, EventEnums.Ease.Linear);
-        var images = new Dictionary<string, ImageDecoder.RgbaImage>
+        var images = new Dictionary<string, DecorationImage>
         {
             ["large.png"] = new(200, 160, []),
         };
@@ -120,7 +147,7 @@ public sealed class TestImageDecorationSize
     public void DecorationSeekKeepsIndependentOverlappingTweens()
     {
         var item = new ImageDecorationTimeline.Item(new AddImageDecoration(), CreatePose(), Vector2.One, 0);
-        var images = new Dictionary<string, ImageDecoder.RgbaImage>();
+        var images = new Dictionary<string, DecorationImage>();
         item.Add(new MoveImageDecoration { Rotation = 90 }, new TrackTiming(1, 0, EventEnums.Ease.Linear), images);
         item.Add(new MoveImageDecoration { Position = new JArray(10, 0) }, new TrackTiming(2, 10, EventEnums.Ease.Linear), images);
         item.Add(new MoveImageDecoration { Opacity = 0 }, new TrackTiming(3, 1, EventEnums.Ease.Linear), images);
@@ -140,7 +167,7 @@ public sealed class TestImageDecorationSize
     public void LastPositionCapturesTheSampleBeforeCompletingThePreviousAxisTween()
     {
         var item = new ImageDecorationTimeline.Item(new AddImageDecoration(), CreatePose(), Vector2.One, 0);
-        var images = new Dictionary<string, ImageDecoder.RgbaImage>();
+        var images = new Dictionary<string, DecorationImage>();
         item.Add(new MoveImageDecoration { Position = new JArray(10, 20) },
             new TrackTiming(0, 2, EventEnums.Ease.Linear), images);
         item.Add(new MoveImageDecoration { Position = new JArray(2, JValue.CreateNull()), RelativeTo = "LastPosition" },
@@ -190,6 +217,80 @@ public sealed class TestImageDecorationSize
         Assert.That(frame.Repeat("new.png"), Is.EqualTo((true, false)));
         frame.Update(timeline, 0, false);
         Assert.That(frame.Repeat("old.png"), Is.EqualTo((true, false)));
+    }
+
+    [TestCase(2, true)]
+    [TestCase(12, true)]
+    [TestCase(13, false)]
+    public void LegacyActionDecorationsUseTheSameMigrationAsTheDecorationArray(int version, bool locksCamera)
+    {
+        const string decoration = """
+            {"floor":0,"eventType":"AddDecoration","decText":"old.png","tag":"art","scale":[100,100],
+             "components":"\"scrLockToCamera\":{\"lockPos\":true,\"lockRot\":true,\"lockScale\":true}"}
+            """;
+        var item = BuildTimeline(decoration, version: version, decorationInActions: true)!.Items.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(item.Initial.Image, Is.EqualTo("old.png"));
+            Assert.That(item.Initial.Parallax, Is.EqualTo(locksCamera ? new Vector2(100f) : Vector2.Zero));
+            Assert.That(item.LockRotation, Is.EqualTo(locksCamera));
+            Assert.That(item.LockScale, Is.EqualTo(locksCamera));
+            Assert.That(item.ScaleMultiplier, Is.EqualTo(locksCamera ? .5f : 1f));
+        });
+    }
+
+    [TestCase(7, false)]
+    [TestCase(8, true)]
+    public void LegacyEnabledOnlyAffectsDecorationMovesInVersionSeven(int version, bool moves)
+    {
+        var item = BuildTimeline("""
+            {"floor":0,"eventType":"AddDecoration","decorationImage":"","tag":"art"}
+            """, move: """
+            {"floor":1,"eventType":"MoveDecorations","tag":"art","positionOffset":[3,0],"enabled":false}
+            """, version: version)!.Items.Single();
+        Assert.That(item.At(1).Position.X, Is.EqualTo(moves ? 3f : 0f));
+    }
+
+    [Test]
+    public void CropPivotMovesInstantlyWithoutChangingTheAuthoredPivotTween()
+    {
+        var item = BuildTimeline("""
+            {"floor":0,"eventType":"AddDecoration","decorationImage":"","tag":"art","cropPivotOffset":[12,-8]}
+            """, moves: JArray.Parse("""
+            [
+              {"floor":1,"eventType":"MoveDecorations","tag":"art","cropPivotOffset":[32,4],
+               "pivotOffset":[2,0],"duration":2,"ease":"Linear"},
+              {"floor":1,"eventType":"MoveDecorations","tag":"art","cropPivotOffset":[99,99],
+               "disabled":{"cropPivotOffset":true},"angleOffset":90}
+            ]
+            """), version: 19)!.Items.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(item.At(0).CropPivotOffset, Is.EqualTo(new Vector2(12f, -8f)));
+            Assert.That(item.At(.5).CropPivotOffset, Is.EqualTo(new Vector2(32f, 4f)));
+            Assert.That(item.At(.5).Pivot, Is.EqualTo(Vector2.Zero));
+            Assert.That(item.At(1).CropPivotOffset, Is.EqualTo(new Vector2(32f, 4f)));
+            Assert.That(item.At(1).Pivot.X, Is.EqualTo(1f).Within(.001f));
+            Assert.That(item.At(0).CropPivotOffset, Is.EqualTo(new Vector2(12f, -8f)));
+        });
+    }
+
+    [Test]
+    public void CropPivotShiftsInSpriteUnitsBeforeRotationWithoutTextureScaling()
+    {
+        var pose = CreatePose() with
+        {
+            CropPivotOffset = new Vector2(12f, -8f), Scale = new Vector2(2f, .5f),
+            TextureScale = new Vector2(.25f, 3f), Rotation = 90f,
+        };
+        var item = new ImageDecorationTimeline.Item(new AddImageDecoration { ScaleMultiplier = 3f }, pose, Vector2.One, 0);
+        var model = ImageDecorationRenderer.ModelFor(new Vector2(100f, 80f), item, pose, new Camera2D(), 180f, 1f,
+            static (_, _) => default, static _ => Vector2.Zero);
+        Assert.Multiple(() =>
+        {
+            Assert.That(model.Row3.X, Is.EqualTo(4f).Within(.001f));
+            Assert.That(model.Row3.Y, Is.EqualTo(24f).Within(.001f));
+        });
     }
 
     [Test]
@@ -435,6 +536,31 @@ public sealed class TestImageDecorationSize
         });
     }
 
+    [TestCase("", true, false, true)]
+    [TestCase("NO TAG", true, false, true)]
+    [TestCase("", false, false, false)]
+    [TestCase("receiver", true, false, false)]
+    [TestCase("receiver", false, true, true)]
+    public void ZeroOpacityMaskKeepsExplicitDepthCompatibility(string target, bool useRange, bool legacy, bool expected)
+    {
+        var timeline = BuildTimeline($$"""
+            {"floor":0,"eventType":"AddDecoration","opacity":0,"maskingType":"Mask","maskingTarget":"{{target}}",
+             "useMaskingDepth":{{useRange.ToString().ToLowerInvariant()}},"maskingFrontDepth":-1000,"maskingBackDepth":-1000}
+            """, legacyMasks: legacy)!;
+        Assert.That(new DecorationFrameState().Update(timeline, 0, false).Count, Is.EqualTo(expected ? 1 : 0));
+    }
+
+    [TestCase("", true)]
+    [TestCase("NO TAG", true)]
+    [TestCase("receiver", false)]
+    public void VisibleMaskWithoutCustomDepthUsesLegacyClippingOnlyWithoutATarget(string target, bool expected)
+    {
+        var timeline = BuildTimeline($$"""
+            {"floor":0,"eventType":"AddDecoration","opacity":25,"maskingType":"Mask","maskingTarget":"{{target}}"}
+            """)!;
+        Assert.That(timeline.Items.Single().At(0).UsesDepthMask(legacy: false), Is.EqualTo(expected));
+    }
+
     [Test]
     public void OutsideMaskingUsesItsOwnMode()
     {
@@ -572,9 +698,132 @@ public sealed class TestImageDecorationSize
         Assert.That(ImageDecorationRenderer.WorldSize(pixels, pose, item, 1f, 1f), Is.EqualTo(pixels));
     }
 
-    private static ImageDecorationTimeline? BuildTimeline(string decoration, List<string>? warnings = null,
-        bool legacyMasks = false, string? move = null, JArray? moves = null, int version = 15)
+    [TestCase("Floor")]
+    [TestCase("Planet")]
+    [TestCase("PlayerBubble")]
+    public void ObjectDecorationLoadsAndMovesWithoutReplacingItsArt(string objectType)
     {
+        var timeline = BuildTimeline($$"""
+            {"floor":0,"eventType":"AddObject","objectType":"{{objectType}}","tag":"obj","trackAngle":90}
+            """, move: """
+            {"floor":1,"eventType":"MoveDecorations","tag":"obj","positionOffset":[2,1],"decorationImage":"unrelated.png"}
+            """, version: 19)!;
+        var item = timeline.Items.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(item.IsObject, Is.True);
+            Assert.That(timeline.Images.ContainsKey(item.Initial.Image), Is.True);
+            Assert.That(item.At(1).Image, Is.EqualTo(item.Initial.Image));
+            Assert.That(item.At(1).Position, Is.EqualTo(new Vector2(2, 1)));
+        });
+    }
+
+    [Test]
+    public void PlanetDecorationUsesOneFrameAtATime()
+    {
+        var timeline = BuildTimeline("""
+            {"floor":0,"eventType":"AddObject","objectType":"Planet"}
+            """, version: 19)!;
+        string first = ObjectDecorationArt.PlanetImageAt(0);
+        string second = ObjectDecorationArt.PlanetImageAt(.1);
+        Assert.Multiple(() =>
+        {
+            Assert.That(second, Is.Not.EqualTo(first));
+            Assert.That(ObjectDecorationArt.PlanetImageAt(1), Is.EqualTo(second));
+            Assert.That(timeline.Images[first].Height, Is.EqualTo(80));
+            Assert.That(timeline.Images[second].Height, Is.EqualTo(timeline.Images[first].Height));
+            Assert.That(timeline.Images[second].Pixels, Is.Not.EqualTo(timeline.Images[first].Pixels));
+        });
+    }
+
+    [TestCase("Circle", 500f)]
+    [TestCase("Rectangle", 0f)]
+    public void ParticleShapeControlsDefaultSpeed(string shape, float speed)
+    {
+        var timeline = BuildTimeline($$"""
+            {"floor":0,"eventType":"AddParticle","tag":"dust","shapeType":"{{shape}}","autoPlay":false}
+            """, move: """
+            {"floor":0,"eventType":"EmitParticle","tag":"dust","count":1}
+            """, version: 19)!;
+        List<ParticleDecorationTimeline.Sample> samples = [];
+        timeline.Items.Single().Particles!.Collect(.5, samples);
+        Assert.That(samples.Single().Travel.Length * 150f, Is.EqualTo(speed * .5f).Within(.001f));
+    }
+
+    [TestCase("\"ff0000\"")]
+    [TestCase("""{"mode":"Color","color1":"ff0000"}""")]
+    [TestCase("""{"mode":0,"color1":"ff0000"}""")]
+    public void ParticleCommandsAreTaggedAndDeterministicAcrossRewind(string color)
+    {
+        var timeline = BuildTimeline($$"""
+            {"floor":0,"eventType":"AddParticle","tag":"dust","autoPlay":false,"emissionRate":[4,4],
+             "particleLifetime":[4,4],"color":{{color}},"randomSeed":42}
+            """, moves: JArray.Parse("""
+            [
+              {"floor":0,"eventType":"EmitParticle","tag":"other","count":8},
+              {"floor":0,"eventType":"EmitParticle","tag":"dust","count":3},
+              {"floor":0,"eventType":"SetParticle","tag":"dust","targetMode":"Start"},
+              {"floor":1,"eventType":"SetParticle","tag":"dust","targetMode":"Stop"},
+              {"floor":1,"eventType":"SetParticle","tag":"dust","targetMode":"Clear","angleOffset":180}
+            ]
+            """), version: 19)!;
+        var item = timeline.Items.Single();
+        var particles = item.Particles!;
+        List<ParticleDecorationTimeline.Sample> samples = [];
+        particles.Collect(.25, samples);
+        var before = samples.ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(timeline.Images.ContainsKey(item.Initial.Image), Is.True);
+            Assert.That(before, Has.Length.EqualTo(4));
+            Assert.That(before[0].Tint, Is.EqualTo(new Vector4(1, 0, 0, 1)));
+            particles.Collect(.75, samples);
+            Assert.That(samples, Has.Count.EqualTo(4));
+            particles.Collect(1.25, samples);
+            Assert.That(samples, Is.Empty);
+            particles.Collect(.25, samples);
+            Assert.That(samples, Is.EqualTo(before));
+        });
+    }
+
+    [Test]
+    public void ParticleLifetimeGradientMultipliesStartTintAndPreservesLowAlpha()
+    {
+        var timeline = BuildTimeline("""
+            {"floor":0,"eventType":"AddParticle","tag":"stars","autoPlay":false,"particleLifetime":[2,2],
+             "color":{"mode":"RandomColor","gradient1":{"colorKeys":[{"time":0,"color":"ff8000"}]}},
+             "colorOverLifetime":{"mode":"Gradient","gradient1":{"mode":"Blend",
+              "colorKeys":[{"time":0,"color":"ffffff"},{"time":1,"color":"00ffff"}],
+              "alphaKeys":[{"time":1,"alpha":0},{"time":0,"alpha":0},{"time":0.5,"alpha":0.01}]}}}
+            """, move: """
+            {"floor":0,"eventType":"EmitParticle","tag":"stars","count":1}
+            """, version: 19)!;
+        var particles = timeline.Items.Single().Particles!;
+        List<ParticleDecorationTimeline.Sample> samples = [];
+        particles.Collect(0, samples);
+        Assert.That(samples.Single().Tint.W, Is.Zero);
+        particles.Collect(1, samples);
+        var peak = samples.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(peak.Tint.X, Is.EqualTo(.5f).Within(.0001f));
+            Assert.That(peak.Tint.Y, Is.EqualTo(128f / 255).Within(.0001f));
+            Assert.That(peak.Tint.Z, Is.Zero);
+            Assert.That(peak.Tint.W, Is.EqualTo(.01f).Within(.0001f));
+        });
+        particles.Collect(1.5, samples);
+        Assert.That(samples.Single().Tint.W, Is.EqualTo(.005f).Within(.0001f));
+        particles.Collect(1, samples);
+        Assert.That(samples.Single(), Is.EqualTo(peak));
+    }
+
+    private static ImageDecorationTimeline? BuildTimeline(string decoration, List<string>? warnings = null,
+        bool legacyMasks = false, string? move = null, JArray? moves = null, int version = 15, bool decorationInActions = false)
+    {
+        var actions = moves ?? (move is null ? new JArray() : new JArray(JObject.Parse(move)));
+        var source = JObject.Parse(decoration);
+        if (decorationInActions)
+            actions.Insert(0, source);
         var root = new JObject
         {
             ["song"] = "test",
@@ -582,8 +831,8 @@ public sealed class TestImageDecorationSize
             ["offset"] = 0,
             ["angleData"] = new JArray(0, 0),
             ["settings"] = new JObject { ["version"] = version, ["zoom"] = 120 },
-            ["actions"] = moves ?? (move is null ? new JArray() : new JArray(JObject.Parse(move))),
-            ["decorations"] = new JArray(JObject.Parse(decoration)),
+            ["actions"] = actions,
+            ["decorations"] = decorationInActions ? new JArray() : new JArray(source),
         };
         var level = new Level(root.Properties().ToDictionary(item => item.Name, item => (object)item.Value));
         var floors = new[] { new Floor(0, 180, default), new Floor(0, 180, default) };

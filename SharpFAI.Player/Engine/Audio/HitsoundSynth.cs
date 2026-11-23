@@ -3,6 +3,8 @@ using Thrust.Audio;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace SharpFAI.Player.Engine.Audio;
 
@@ -15,23 +17,15 @@ public static class HitsoundSynth
     /// </summary>
     private const string EmbeddedSampleName = "Resources.kick.wav";
 
-    // Synthesized results are cached so each level only builds its track once
-    private static readonly Dictionary<string, DecodedAudio> SynthCache = [];
-    private static readonly Lock SynthLock = new();
+    private static readonly HitsoundPcmCache SynthCache = new(maxBytes: 256L * 1024 * 1024, maxEntries: 8);
 
     /// <summary>Clear the synthesis cache.</summary>
-    public static void ClearCache()
-    {
-        lock (SynthLock)
-        {
-            SynthCache.Clear();
-        }
-    }
+    public static void ClearCache() => SynthCache.Clear();
 
     /// <summary>
     /// Synthesize the hitsound track from the given note times, cached, using the embedded kick.
     /// </summary>
-    /// <param name="cacheKey">Cache key, usually the level path.</param>
+    /// <param name="cacheKey">Caller-provided identity for the note times and duration.</param>
     /// <param name="noteTimesSeconds">Note times in seconds.</param>
     /// <param name="totalDuration">Total track length in seconds.</param>
     /// <param name="volume">Sample volume in 0..1.</param>
@@ -40,23 +34,39 @@ public static class HitsoundSynth
         IReadOnlyList<double> noteTimesSeconds,
         double totalDuration,
         float volume = 0.85f)
+        => SynthCache.GetOrAdd(new(cacheKey, volume), () => SynthesizeCore(noteTimesSeconds, totalDuration, volume))!;
+
+    internal static DecodedAudio? SynthesizeTimeline(double[] entryTimes, double rate, float volume = 0.85f)
     {
-        lock (SynthLock)
+        if (entryTimes.Length <= 1)
+            return null;
+
+        // Tile zero never triggers a hit. Hash the remaining times without allocating a scaled list on a hit.
+        string timing = Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(entryTimes.AsSpan(1))));
+        return SynthCache.GetOrAdd(new(timing, volume, BitConverter.DoubleToInt64Bits(rate)), () =>
         {
-            if (SynthCache.TryGetValue(cacheKey, out DecodedAudio? cached))
-            {
-                return cached;
-            }
+            List<double> noteTimes = HitsoundTimes(entryTimes);
+            if (noteTimes.Count == 0)
+                return null;
+
+            // Only the spacing follows the wall-time clock; the sample keeps its original rate.
+            for (int i = 0; i < noteTimes.Count; i++)
+                noteTimes[i] /= rate;
+            return SynthesizeCore(noteTimes, noteTimes[^1] + 0.5, volume);
+        });
+    }
+
+    internal static List<double> HitsoundTimes(ReadOnlySpan<double> entryTimes)
+    {
+        List<double> times = new(entryTimes.Length);
+        for (int i = 1; i < entryTimes.Length; i++)
+        {
+            double time = entryTimes[i];
+            if (time >= 0.0 && (times.Count == 0 || Math.Abs(time - times[^1]) >= 1e-6))
+                times.Add(time);
         }
 
-        DecodedAudio result = SynthesizeCore(noteTimesSeconds, totalDuration, volume);
-
-        lock (SynthLock)
-        {
-            SynthCache[cacheKey] = result;
-        }
-
-        return result;
+        return times;
     }
 
     /// <summary>Load the embedded kick sample.</summary>
@@ -109,6 +119,7 @@ public static class HitsoundSynth
             }
 
             int[] starts = NoteFrames(noteTimesSeconds, sampleRate, totalFrames);
+            RetriggeredKick? retrigger = RetriggeredKick.Prepare(kick, channels, sampleRate, ref starts, out float[]? weights);
             const int blockFrames = 16384;
             int blockCount = (totalFrames - 1) / blockFrames + 1;
             int scratchLength = Math.Min(blockFrames, totalFrames) * channels;
@@ -118,7 +129,7 @@ public static class HitsoundSynth
                 ? new(() => new DenseHitsoundMixer(kick, channels, fftSize)) : null;
             if (blockCount == 1)
             {
-                MixBlock(starts, kick, channels, 0, totalFrames, new float[scratchLength], pcm, dense, fftWork);
+                MixBlock(starts, weights, kick, channels, 0, totalFrames, new float[scratchLength], pcm, dense, fftWork, retrigger);
             }
             else if (starts.Length > 0)
             {
@@ -131,7 +142,7 @@ public static class HitsoundSynth
                 {
                     int start = block * blockFrames;
                     int count = Math.Min(blockFrames, totalFrames - start);
-                    MixBlock(starts, kick, channels, start, count, scratch, pcm, dense, fftWork);
+                    MixBlock(starts, weights, kick, channels, start, count, scratch, pcm, dense, fftWork, retrigger);
                     return scratch;
                 },
                 scratch => ArrayPool<float>.Shared.Return(scratch));
@@ -163,44 +174,55 @@ public static class HitsoundSynth
             frames.Sort();
         }
 
+        // Two onsets that map to the same PCM frame cannot be played separately.
+        int unique = 0;
+        for (int i = 0; i < frames.Count; i++)
+        {
+            int frame = frames[i];
+            if (unique > 0 && frames[unique - 1] == frame)
+                continue;
+            if (unique != i)
+                frames[unique] = frame;
+            unique++;
+        }
+        frames.RemoveRange(unique, frames.Count - unique);
         return frames.ToArray();
     }
 
-    private static void MixBlock(ReadOnlySpan<int> noteFrames, ReadOnlySpan<float> kick, int channels,
-        int start, int count, Span<float> scratch, Span<byte> pcm, Lazy<DenseHitsoundMixer>? dense, long fftWork)
+    private static void MixBlock(ReadOnlySpan<int> noteFrames, ReadOnlySpan<float> weights, ReadOnlySpan<float> kick, int channels,
+        int start, int count, Span<float> scratch, Span<byte> pcm, Lazy<DenseHitsoundMixer>? dense, long fftWork,
+        RetriggeredKick? retrigger)
     {
         int kickFrames = kick.Length / channels;
         int note = LowerBound(noteFrames, start - kickFrames + 1);
         int end = start + count;
-        if (note == noteFrames.Length || noteFrames[note] >= end)
-        {
-            return;
-        }
-
         int lastNote = LowerBound(noteFrames, end);
+        int shortHit = retrigger?.FindFirstHit(start, end) ?? -1;
+        if (note == lastNote && shortHit < 0)
+            return;
+
+        Span<float> mixedBlock = scratch[..(count * channels)];
         if (dense is not null && (long)(lastNote - note) * kick.Length >= fftWork)
         {
-            Span<float> mixedBlock = scratch[..(count * channels)];
-            dense.Value.Mix(noteFrames[note..lastNote], start, mixedBlock);
-            WritePcm(mixedBlock, pcm[(start * channels * sizeof(short))..]);
-            return;
+            dense.Value.Mix(noteFrames[note..lastNote], start, mixedBlock,
+                weights.IsEmpty ? default : weights[note..lastNote]);
         }
-
-        scratch[..(count * channels)].Clear();
-        int firstWritten = Math.Max(start, noteFrames[note]);
-        int lastWritten = firstWritten;
-        for (; note < noteFrames.Length && noteFrames[note] < end; note++)
+        else
         {
-            int hit = noteFrames[note];
-            int from = Math.Max(start, hit);
-            int length = Math.Min(kickFrames - (from - hit), end - from);
-            AddSamples(kick.Slice((from - hit) * channels, length * channels),
-                scratch.Slice((from - start) * channels, length * channels));
-            lastWritten = Math.Max(lastWritten, from + length);
+            mixedBlock.Clear();
+            for (; note < lastNote; note++)
+            {
+                int hit = noteFrames[note];
+                int from = Math.Max(start, hit);
+                int length = Math.Min(kickFrames - (from - hit), end - from);
+                AddSamples(kick.Slice((from - hit) * channels, length * channels),
+                    mixedBlock.Slice((from - start) * channels, length * channels), weights.IsEmpty ? 1f : weights[note]);
+            }
         }
 
-        ReadOnlySpan<float> mixed = scratch.Slice((firstWritten - start) * channels, (lastWritten - firstWritten) * channels);
-        WritePcm(mixed, pcm[(firstWritten * channels * sizeof(short))..]);
+        if (shortHit >= 0)
+            retrigger!.Mix(shortHit, start, end, mixedBlock);
+        WritePcm(mixedBlock, pcm[(start * channels * sizeof(short))..]);
     }
 
     private static void WritePcm(ReadOnlySpan<float> mixed, Span<byte> bytes)
@@ -230,19 +252,19 @@ public static class HitsoundSynth
         return lo;
     }
 
-    private static void AddSamples(ReadOnlySpan<float> source, Span<float> destination)
+    private static void AddSamples(ReadOnlySpan<float> source, Span<float> destination, float gain)
     {
         int i = 0;
         if (Vector.IsHardwareAccelerated)
         {
             for (; i <= source.Length - Vector<float>.Count; i += Vector<float>.Count)
             {
-                (new Vector<float>(source[i..]) + new Vector<float>(destination[i..])).CopyTo(destination[i..]);
+                (new Vector<float>(source[i..]) * gain + new Vector<float>(destination[i..])).CopyTo(destination[i..]);
             }
         }
         for (; i < source.Length; i++)
         {
-            destination[i] += source[i];
+            destination[i] += source[i] * gain;
         }
     }
 

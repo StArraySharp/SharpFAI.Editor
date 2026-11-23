@@ -53,6 +53,42 @@ public sealed class TestEditorEffectUpdates
     }
 
     [Test]
+    public void SetObjectFadesRevealedFloorsAndCanBePatchedInPlace()
+    {
+        var level = Chart();
+        var decorations = (JArray)level.root["decorations"]!;
+        decorations.Add(JObject.Parse("""{"floor":0,"eventType":"AddObject","objectType":"Floor","tag":"target","trackColor":"ffffff","trackOpacity":0}"""));
+        decorations.Add(JObject.Parse("""{"floor":0,"eventType":"AddObject","objectType":"Planet","tag":"target","planetColorType":"Custom","planetColor":"ff0000"}"""));
+        level.actions.Clear();
+        level.actions.Add(JObject.Parse("""{"floor":1,"eventType":"SetObject","tag":"target","duration":2,"ease":"InQuad","trackOpacity":0,"trackColor":"000000","planetColor":"0000ff"}"""));
+        level.actions.Add(JObject.Parse("""{"floor":1,"eventType":"MoveDecorations","tag":"target","opacity":100}"""));
+        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var timeline = Build(events);
+        var floor = timeline.Items[1];
+        var planet = timeline.Items[2];
+        Assert.That(floor.At(0).Opacity, Is.Zero);
+        Assert.That(floor.At(.5).Opacity, Is.EqualTo(1));
+        Assert.That(floor.At(1).Opacity, Is.EqualTo(.75f));
+        Assert.That(floor.At(1).Tint.X, Is.EqualTo(.75f));
+        Assert.That(floor.At(2).Opacity, Is.Zero);
+        Assert.That(floor.At(1).Opacity, Is.EqualTo(.75f));
+        Assert.That(planet.At(2).Opacity, Is.EqualTo(1));
+        Assert.That(planet.At(2).Tint, Is.EqualTo(new Vector4(0, 0, 1, 1)));
+        Assert.That(timeline.Items[0].At(2).Opacity, Is.EqualTo(1));
+        Assert.That(timeline.Items[0].At(2).Tint, Is.EqualTo(Vector4.One));
+
+        var before = events.OfType<SetObjectDecoration>().Single();
+        var raw = (JObject)level.actions[before.SourceIndex]!;
+        raw["trackOpacity"] = 40;
+        var after = (SetObjectDecoration)PlaybackEventBinder.Rebind(raw, before, null);
+        Assert.That(timeline.CanEditMotion(before, after), Is.True);
+        timeline.EditMotions(new Dictionary<int, MoveImageDecoration> { [after.SourceIndex] = after });
+        Assert.That(floor.At(2).Opacity, Is.EqualTo(.4f));
+        Assert.That(timeline.ChangedItems, Does.Not.Contain(timeline.Items[0]));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+    }
+
+    [Test]
     public void SharedMotionEditsPreserveLastPositionAndLaterOverrides()
     {
         var level = Chart();
@@ -195,7 +231,7 @@ public sealed class TestEditorEffectUpdates
     private static ImageDecorationTimeline Build(PlaybackEvent[] events)
     {
         var floors = Enumerable.Range(0, 4).Select(_ => new Floor(0, 180, default)).ToArray();
-        var images = new Dictionary<string, ImageDecoder.RgbaImage> { ["base.png"] = new(2, 2, new byte[16]) };
+        var images = new Dictionary<string, DecorationImage> { ["base.png"] = new(2, 2, new byte[16]) };
         return ImageDecorationTimeline.Build(events, floors, [0, .5, 1, 1.5], [120, 120, 120, 120],
             null, [], CancellationToken.None, editable: true, cachedImages: images)!;
     }

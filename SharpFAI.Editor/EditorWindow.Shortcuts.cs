@@ -24,25 +24,47 @@ internal sealed unsafe partial class EditorWindow
     private (int First, int Last) FloorRange =>
         (Math.Min(_rangeAnchor ?? _floor, _floor), Math.Max(_rangeAnchor ?? _floor, _floor));
 
+    private bool ShortcutContextBlocked => _settingsWindow.IsOpen || _playbackView == PlaybackView.Manual ||
+        _pending is not null || _error is not null || _openFindFloor || _openFindComment ||
+        ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId |
+            (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupLevel) != 0;
+
+    private void ApplyConfiguredPlaybackShortcut()
+    {
+        if (_queuedRateShortcut != PlaybackRate.Configured)
+            return;
+        _queuedRateShortcut = null;
+
+        // Inspect the current widget after drawing: text fields own the chord, mouse-only controls do not.
+        ImGuiContext* context = ImGui.GetCurrentContext();
+        if (ShortcutContextBlocked || (context->ActiveId != 0 &&
+            (SharpFAI.Player.WindowInputMethod.HasTextFocus(context) ||
+             context->ActiveIdSource != ImGuiInputSource.ImGuiInputSource_Mouse)))
+            return;
+
+        StartFromShortcut(PlaybackRate.Configured);
+    }
+
     private void HandleShortcuts()
     {
         ImGuiIO* io = ImGui.GetIO();
         KeyModifiers? spaceModifiers = _spacePressModifiers;
         _spacePressModifiers = null;
-        if (_playbackView == PlaybackView.Manual || io->WantTextInput != 0 ||
-            ImGui.IsAnyItemActive() != 0 || _pending is not null || _error is not null ||
-            _openFindFloor || _openFindComment ||
-            ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId |
-                (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupLevel) != 0)
+        if (ShortcutContextBlocked)
+            return;
+        if ((spaceModifiers.GetValueOrDefault() & (KeyModifiers.Control | KeyModifiers.Super)) != 0)
+        {
+            _queuedRateShortcut = PlaybackRate.Configured;
+            return;
+        }
+        if (io->WantTextInput != 0 || ImGui.IsAnyItemActive() != 0)
             return;
 
         bool shift = io->KeyShift != 0;
         bool alt = io->KeyAlt != 0;
         if (spaceModifiers is { } modifiers)
         {
-            if ((modifiers & (KeyModifiers.Control | KeyModifiers.Super)) != 0)
-                _queuedRateShortcut = PlaybackRate.Configured;
-            else if ((modifiers & (KeyModifiers.Shift | KeyModifiers.Alt)) == 0)
+            if ((modifiers & (KeyModifiers.Shift | KeyModifiers.Alt)) == 0)
                 _queuedRateShortcut = PlaybackRate.Normal;
             else if (modifiers == KeyModifiers.Shift && _playbackView != PlaybackView.Auto &&
                      !_inspectDecoration && _hasFloorSelection && _rangeAnchor is null)
@@ -237,7 +259,7 @@ internal sealed unsafe partial class EditorWindow
             return;
         _pendingTiles.Clear();
         _document.PasteTiles(_floor, clipboard, includeDecorations);
-        SelectFloor(_floor + clipboard.Angles.Length, true);
+        SelectFloor(_floor + clipboard.Angles.Length, false);
     }
 
     private void DeleteFloorRange(int first, int last, int select)
@@ -246,7 +268,7 @@ internal sealed unsafe partial class EditorWindow
             return;
         _pendingTiles.Clear();
         _document.DeleteTiles(first, last);
-        SelectFloor(select, true);
+        SelectFloor(select, false);
     }
 
     private void TransformSelection(Func<double, double> transform)
@@ -364,9 +386,8 @@ internal sealed unsafe partial class EditorWindow
             PauseToPreview();
         else
         {
-            if ((!_hasFloorSelection && !_inspectDecoration) || _rangeAnchor is not null)
-                SelectFloor(0, true);
-            SwitchPlaybackView(_shortcutAuto ? PlaybackView.Auto : PlaybackView.Manual, rate);
+            bool fromStart = (!_hasFloorSelection && !_inspectDecoration) || _rangeAnchor is not null;
+            SwitchPlaybackView(_shortcutAuto ? PlaybackView.Auto : PlaybackView.Manual, rate, fromStart ? 0 : null);
         }
     }
 

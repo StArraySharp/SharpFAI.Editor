@@ -11,6 +11,11 @@ public sealed unsafe partial class LevelRenderer
 // 播放控制：播放/暂停/跳转、手打判定、可见性。
 // Playback control: play/pause/seek, manual play, tile visibility.
 
+    private bool _playbackZoomNeedsReset = true;
+
+    private float PlaybackBaseZoom => _settings.CameraZoom is float zoom
+        ? AuthoredZoom(_camera.ViewportHeight, zoom) : _homeZoom;
+
     /// <summary>Start playback, from the selected floor when there is one.</summary>
     public void Play()
     {
@@ -29,30 +34,38 @@ public sealed unsafe partial class LevelRenderer
                 PlayInput.Clear();
                 ResetDecorationTriggers();
                 PlaySession.Start(track, start);
+                ResetCameraHit();
                 _playTime = PlaySession.Time;
                 if (start > 0)
                     _imageDecorations?.TriggerCondition(start, HitMargin.Perfect, _playTime, checkpoint: true);
                 _cameraSnap = true;
+                _playbackZoomNeedsReset = true;
             }
         }
         else if (_playTime >= _duration)
         {
             _playTime = 0.0;
             ResetDecorationTriggers();
+            _playbackZoomNeedsReset = true;
+        }
+
+        if (_playbackZoomNeedsReset)
+        {
+            _camera.Zoom = PlaybackBaseZoom;
+            _playbackZoomNeedsReset = false;
         }
 
         SetRuntimeTrackMode(true);
         _isPlaying = true;
+        _filterClockPaused = false;
         _audioNeedsResync = true;
 
-        // Give the camera back to the follow logic
+        if (_cameraFree)
+        {
+            _cameraFrom = _cameraEventActive ? _cameraFollowCenter : _camera.Position;
+            _cameraElapsed = 0.0;
+        }
         _cameraFree = false;
-
-        // While paused the camera did not move, so resuming would otherwise make it chase a target
-        // captured two beats ago and slide visibly. Re-anchor from the current position instead.
-        _cameraFrom = _cameraEventActive ? _cameraFollowCenter : _camera.Position;
-        _cameraTo = _cameraFrom;
-        _cameraElapsed = _cameraDuration = 0.0;
         _lastCameraTime = _playTime;
         ResetTrail();
         ApplyTimeline();
@@ -62,6 +75,7 @@ public sealed unsafe partial class LevelRenderer
     public void Pause()
     {
         _isPlaying = false;
+        _filterClockPaused = true;
         PlayInput.Clear();
         _music.Pause();
         _hitsound.Pause();
@@ -125,6 +139,7 @@ public sealed unsafe partial class LevelRenderer
         PlayInput.ReleaseAll();
         PlayInput.Clear();
         PlaySession.Clear();
+        ResetCameraHit();
     }
 
     /// <summary>Rewind to the beginning.</summary>
@@ -138,6 +153,7 @@ public sealed unsafe partial class LevelRenderer
         SetRuntimeTrackMode(false);
         _trackRuntime?.Reset();
         _isPlaying = false;
+        _filterClockPaused = false;
         _playTime = 0.0;
         ResetDecorationTriggers();
         _lastFilterTime = double.NaN;
@@ -150,6 +166,8 @@ public sealed unsafe partial class LevelRenderer
         // Rewind: put the camera straight back
         _cameraSnap = true;
         _cameraFree = false;
+        _camera.Zoom = PlaybackBaseZoom;
+        _playbackZoomNeedsReset = true;
         ResetTrail();
         ApplyTimeline();
     }
@@ -209,8 +227,7 @@ public sealed unsafe partial class LevelRenderer
         if (playing && manual)
         {
             PlaySession.Advance(AdvancePlaybackClock(delta), _lastFrameTime - delta, _lastFrameTime,
-                PlayInput.Pending, PlayInput.MarginMultiplier, _imageDecorations?.HasConditions == true
-                    ? _decorationJudgmentCallback ??= TriggerDecorationJudgment : null);
+                PlayInput.Pending, PlayInput.MarginMultiplier, _cameraHitCallback ??= OnPlaybackCameraHit);
             PlayInput.Clear();
             _playTime = PlaySession.Time;
             if (PlaySession.Failed || PlaySession.Completed)
@@ -315,42 +332,49 @@ public sealed unsafe partial class LevelRenderer
         CameraTimeline? cameraEvents = useCameraEffects ? _cameraTimeline : null;
         _cameraShake = useCameraEffects && _sceneEffects is { } effects
             ? effects.ShakeAt(_playTime) : Vector2.Zero;
-        int last = _floors.Count - 1;
-        if (last <= 0)
+        if (_floors.Count == 0)
         {
             _currentIndex = 0;
             _rotationAngle = 0f;
-            if (_floors.Count == 0)
-            {
-                // No floors exist while a background load is running, so nothing may index _floors[0]
-                return;
-            }
-
-            if (_runtimeTrackActive)
-            {
-                _trackRuntime?.Advance(_playTime);
-            }
-            (_planetCenter, float rotation) = PlanetAnchor(0);
-            _rotationAngle = MathHelper.RadiansToDegrees(rotation);
-            _rotationAngleContinuous = _rotationAngle;
-            _sweepAngleNow = _rotationAngle;
-            PlanetTrackFloor only = _planetTrack[0];
-            _secondaryCenter = _planetCenter + PlanetTrackFloor.Direction(_rotationAngle) * (only.Radius * TileSpacing);
-            _thirdCenter = _planetCenter + PlanetTrackFloor.Direction(_rotationAngle + PlanetTrackFloor.ThirdAngle(_floors[0].isCW))
-                * (only.Radius * TileSpacing);
-            UpdatePlaybackCamera(0, _planetCenter, cameraEvents);
             return;
         }
 
         // A floor may be entered before the music file starts. Keep that signed timing so its
         // sweep is already in progress when playback reaches zero.
         bool manual = ManualAttemptActive;
-        int index = manual ? PlaySession.CurrentFloor : FloorAtTime(_entryTimes, _playTime);
+        int index = manual && _floors.Count > 1 ? PlaySession.CurrentFloor : FloorAtTime(_entryTimes, _playTime);
 
         // A tile change alone does not create a seam: at normal speed the secondary lands where the
         // primary used to be, so the path is continuous. Seams come from the jump check below.
         _currentIndex = index;
         _isCw = _floors[index].isCW;
+        PlanetPose pose = EvaluatePlanetPose(index, _playTime, manual);
+        _planetCenter = pose.Pivot;
+        _secondaryCenter = pose.Orbit;
+        _thirdCenter = pose.Third;
+        _rotationAngleContinuous = (float)pose.ContinuousAngle;
+        _rotationAngle = _floors.Count == 1 ? (float)pose.Angle : WrapAngle(pose.Angle);
+        UpdatePlaybackCamera(index, pose.Pivot, cameraEvents);
+    }
+
+    private readonly record struct PlanetPose(Vector2 Pivot, Vector2 Orbit, Vector2 Third,
+        double Angle, double ContinuousAngle);
+
+    private PlanetPose EvaluatePlanetPose(int index, double time, bool manual)
+    {
+        if (_runtimeTrackActive)
+            _trackRuntime?.Advance(time);
+
+        (Vector2 here, float floorRotation) = PlanetAnchor(index, time);
+        float trackRotation = MathHelper.RadiansToDegrees(floorRotation);
+        PlanetTrackFloor track = _planetTrack[index];
+        float radius = track.Radius * TileSpacing;
+        bool clockwise = _floors[index].isCW;
+        int last = _floors.Count - 1;
+        if (last == 0)
+            return new PlanetPose(here, here + PlanetTrackFloor.Direction(trackRotation) * radius,
+                here + PlanetTrackFloor.Direction(trackRotation + PlanetTrackFloor.ThirdAngle(clockwise)) * radius,
+                trackRotation, trackRotation);
 
         // Window per tile: floor 0 starts at playback time 0 (spinning in place), the rest start when
         // the planet lands on that tile. The final tile has no next entry time, so its window is
@@ -365,7 +389,7 @@ public sealed unsafe partial class LevelRenderer
         // Only intermediate tiles clamp to [0,1]; the first tile (countdown wait) and the last tile
         // (keeps turning after the end) do not clamp the upper bound.
         double t = manual && PlaySession.Completed ? 0.0
-            : span > 1e-9 ? (_playTime - fromTime) / span : 0.0;
+            : span > 1e-9 ? (time - fromTime) / span : 0.0;
 
         if (index > 0 && index < last)
         {
@@ -376,73 +400,99 @@ public sealed unsafe partial class LevelRenderer
             t = Math.Max(t, 0.0);
         }
 
-        double eased = EasePlanet(t);
-        if (_runtimeTrackActive)
-        {
-            _trackRuntime?.Advance(_playTime);
-        }
-        (Vector2 here, float floorRotation) = PlanetAnchor(index);
+        double eased = EasePlanet(index, t);
         double rawDegrees = _sweepStart[index] + _sweepDelta[index] * t;
         double degrees = _sweepStart[index] + _sweepDelta[index] * eased;
         if (manual && index < last && _manualTrack is { } trackTiming)
         {
-            double direction = _isCw ? -1.0 : 1.0;
+            double direction = clockwise ? -1.0 : 1.0;
             rawDegrees = _sweepStart[index] + _sweepDelta[index]
-                + (_playTime - toTime) * trackTiming.AngleRate(index) * direction;
+                + (time - toTime) * trackTiming.AngleRate(index) * direction;
             degrees = eased == t ? rawDegrees : degrees;
         }
-        double trackRotation = MathHelper.RadiansToDegrees(floorRotation);
-        _rotationAngleContinuous = (float)((manual ? rawDegrees : degrees) + trackRotation);
+        double continuousAngle = (manual ? rawDegrees : degrees) + trackRotation;
         degrees += trackRotation;
         if (_pauseAngles?.TryGetValue(index, out PauseAngleCorrection correction) == true)
-            degrees += correction.At(_playTime - fromTime);
+            degrees += correction.At(time - fromTime);
 
-        _sweepAngleNow = (float)degrees;
-
-        // The cosmetic offset affects the sprites while hit timing uses the raw angle above.
-        _rotationAngle = (float)WrapAngle(degrees);
-
-        PlanetTrackFloor track = _planetTrack[index];
-        float radius = track.Radius * TileSpacing;
         if (index < last)
         {
             float progress = (float)Math.Clamp(eased, 0, 1);
             float landingRadius = _planetTrack[index + 1].Radius * TileSpacing;
             if (track.HasHold)
             {
-                here = PlanetTrackFloor.HoldPivot(here, PlanetAnchor(index + 1).Center, _floors[index].angle,
+                here = PlanetTrackFloor.HoldPivot(here, PlanetAnchor(index + 1, time).Center, _floors[index].angle,
                     landingRadius, progress);
             }
             radius += (landingRadius - radius) * progress;
         }
-        _planetCenter = here;
-        _secondaryCenter = here + PlanetTrackFloor.Direction(degrees) * radius;
-        _thirdCenter = here + PlanetTrackFloor.Direction(degrees + PlanetTrackFloor.ThirdAngle(_isCw)) * radius;
+        return new PlanetPose(here, here + PlanetTrackFloor.Direction(degrees) * radius,
+            here + PlanetTrackFloor.Direction(degrees + PlanetTrackFloor.ThirdAngle(clockwise)) * radius,
+            degrees, continuousAngle);
+    }
 
-        UpdatePlaybackCamera(index, here, cameraEvents);
+    private void ResetCameraHit()
+    {
+        _cameraPulseTime = double.NegativeInfinity;
+        _cameraPulseFloor = -1;
+        _cameraHoldOffset = Vector2.Zero;
+        _cameraHoldReleaseTime = double.NaN;
+    }
+
+    private void OnPlaybackCameraHit(HitRecord hit)
+    {
+        if (hit.Accepted && hit.Floor > 0 && hit.Floor != _cameraPulseFloor)
+        {
+            _cameraPulseFloor = hit.Floor;
+            _cameraPulseTime = hit.Time;
+        }
+        if (_imageDecorations?.HasConditions == true)
+            TriggerDecorationJudgment(hit);
     }
 
     private void UpdatePlaybackCamera(int index, Vector2 here, CameraTimeline? cameraEvents)
     {
         bool useEvents = cameraEvents is not null;
+        _cameraRenderDisabled = !_cameraFree && _settings.CameraZoom == 0f;
         if (useEvents != _cameraEventActive)
         {
             _cameraSnap = true;
             _cameraEventActive = useEvents;
             if (!useEvents)
             {
-                _camera.Rotation = _homeRotation;
-                if (_cameraEventZoomApplied)
-                    _camera.Zoom = _homeZoom;
+                if (!_cameraFree)
+                {
+                    _camera.Rotation = _homeRotation;
+                    if (_cameraEventZoomApplied)
+                        _camera.Zoom = PlaybackBaseZoom;
+                }
                 _cameraEventZoomApplied = false;
             }
         }
 
-        // Camera: on every tile change the tween restarts from the *current* camera position and
-        // targets the new tile over two beats. The planet crosses a tile in one beat, so the camera
-        // never catches up and trails smoothly; because each tile restarts from the current position
-        // the lag converges to about one tile instead of growing without bound.
-        Vector2 target = useEvents ? here : LevelCameraTarget(here);
+        Vector2 anchor = PlanetAnchor(index).Center;
+        Vector2 target = useEvents ? anchor : LevelCameraTarget(anchor);
+        Vector2 holdOffset = here - anchor;
+        if (!useEvents && _settings.CameraRelativeTo != SharpFAI.Serialization.EventEnums.CamMovementType.Player)
+            holdOffset = Vector2.Zero;
+        if (ManualAttemptActive && PlaySession.ReleasedHoldEarly)
+        {
+            if (double.IsNaN(_cameraHoldReleaseTime))
+            {
+                _cameraHoldReleaseOffset = _cameraHoldOffset;
+                _cameraHoldReleaseTime = _lastFrameTime;
+                _cameraFrom = useEvents ? _cameraFollowCenter : _camera.Position;
+                _cameraElapsed = 0;
+                if (index > 0)
+                    _cameraTo = useEvents ? PlanetAnchor(index - 1).Center : LevelCameraTarget(PlanetAnchor(index - 1).Center);
+            }
+            holdOffset = CameraMotion.ReleaseHold(_cameraHoldReleaseOffset, _lastFrameTime - _cameraHoldReleaseTime);
+        }
+        else
+        {
+            _cameraHoldReleaseTime = double.NaN;
+        }
+        _cameraHoldOffset = holdOffset;
 
         // Advance the tween with the playback clock so a paused player freezes the camera too
         double step = _playTime - _lastCameraTime;
@@ -455,62 +505,50 @@ public sealed unsafe partial class LevelRenderer
             // accumulation below.
             _cameraSnap = false;
             _cameraIndex = index;
-            _cameraFrom = _cameraTo = target;
-            _cameraElapsed = _cameraDuration = 0.0;
+            _cameraFrom = target + holdOffset;
+            _cameraTo = target;
+            _cameraElapsed = 0.0;
+            if (!ManualAttemptActive)
+            {
+                _cameraPulseTime = double.NegativeInfinity;
+                _cameraPulseFloor = -1;
+            }
         }
         else
         {
             if (index != _cameraIndex)
             {
-                // Tile change: anchor frompos to the current camera position and reset the timer,
                 _cameraIndex = index;
                 _cameraFrom = useEvents ? _cameraFollowCenter : _camera.Position;
                 _cameraTo = target;
-                _cameraElapsed = 0.0;
+                double landedAt = ManualAttemptActive ? _cameraPulseTime : _entryTimes[index];
+                _cameraElapsed = double.IsFinite(landedAt) ? Math.Max(0, _playTime - landedAt) : 0;
             }
             else
             {
-                _cameraTo = target;
+                _cameraElapsed += Math.Max(0, step);
             }
-
-            // The camera tween lasts two beats: 60 / (bpm * speed * pitch) * 2. The global BPM and the
-            // per-tile SetSpeed are already folded into _floors[i].bpm, so two beats is exact. On top of
-            // it is also scaled by a distance ramp, letting the camera catch up up to twice as
-            // fast when it has fallen far behind -- exactly what stops it falling behind in speed-ups.
-            double bpmAtFloor = _floors[index].bpm > 1e-6 ? _floors[index].bpm : 120.0;
-            float distance = Vector2.Distance(_cameraFrom, _cameraTo);
-            float catchUp = MathF.Min(1f, Math.Clamp(
-                (distance - CameraCatchUpStartDistance) / (CameraCatchUpEndDistance - CameraCatchUpStartDistance),
-                0f, 1f)) * 0.5f + 1f;
-            _cameraDuration = Math.Max(60.0 / bpmAtFloor * 2.0 / catchUp, 1e-4);
-
-            // The tween timer advances unconditionally every frame, including on the frame that
-            // changes tile. Resetting it there would pin the blend factor at 0 and freeze the camera
-            // while the planet runs away -- which is exactly what happens in the high-speed sections,
-            // where a new tile arrives every frame.
-            _cameraElapsed = Math.Min(_cameraElapsed + step, _cameraDuration);
         }
-
-        float cameraT = _cameraDuration > 1e-9
-            ? (float)Math.Clamp(_cameraElapsed / _cameraDuration, 0.0, 1.0)
-            : 1f;
 
         // The planet sits on its real tile; only the camera interpolates.
         // Skip the write-back once the user has taken manual control, otherwise every frame would
         // yank the camera back onto the tile.
         if (!_cameraFree)
         {
-            Vector2 center = Vector2.Lerp(_cameraFrom, _cameraTo, cameraT);
+            Vector2 center = CameraMotion.Follow(_cameraFrom, _cameraTo, holdOffset, _cameraElapsed, _floors[index].bpm);
             _camera.Position = center;
             if (cameraEvents is not null)
             {
                 _cameraFollowCenter = center;
-                float baseZoom = _offlineSubSample ? GetExportZoom() : _homeZoom;
+                float baseZoom = _offlineSubSample ? GetExportZoom() : PlaybackBaseZoom;
                 float basePercent = _camera.ViewportHeight / (MathF.Max(baseZoom, 1e-4f) * 10f);
-                CameraTimeline.Sample sample = cameraEvents.Evaluate(_playTime, center, basePercent);
+                CameraTimeline.Sample sample = ManualAttemptActive
+                    ? cameraEvents.Evaluate(_playTime, center, basePercent)
+                    : cameraEvents.Evaluate(_playTime, basePercent);
                 _camera.Position = sample.Position;
-                _camera.Rotation = -sample.Rotation;
-                if (sample.Zoom is float zoom)
+                _camera.Rotation = sample.Rotation;
+                _cameraRenderDisabled = sample.Zoom == 0f;
+                if (sample.Zoom is float zoom && zoom != 0f)
                     _camera.Zoom = AuthoredZoom(_camera.ViewportHeight, zoom);
                 else if (_cameraEventZoomApplied)
                     _camera.Zoom = baseZoom;
@@ -579,7 +617,7 @@ public sealed unsafe partial class LevelRenderer
     /// <param name="seconds">目标播放时刻（秒，文件位置时钟）。</param>
     public void SeekForOfflineRender(double seconds)
     {
-        if (IsLoading || _floors.Count == 0)
+        if (IsLoading || _floors.Count == 0 || !double.IsFinite(seconds))
         {
             return;
         }
@@ -594,6 +632,7 @@ public sealed unsafe partial class LevelRenderer
         if (offlineStart)
         {
             _colorHistory?.Reset();
+            _filterBackend?.ResetCameraHistory();
             _lastFilterTime = double.NaN;
             _runtimeTrackBeforeOffline = _runtimeTrackActive;
             SetRuntimeTrackMode(true);
@@ -608,6 +647,7 @@ public sealed unsafe partial class LevelRenderer
         _playTime = Math.Clamp(seconds, 0.0, Math.Max(_duration, seconds));
         _isPlaying = false;
 
+        UpdateOfflineTrail(_playTime);
         ApplyTimeline();
         UpdateDecorationTriggers(manual: false, autoFrom: offlineStart ? _currentIndex : null);
     }

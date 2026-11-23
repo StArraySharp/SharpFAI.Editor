@@ -273,9 +273,42 @@ public class TestFloorTrackState
         // SetTrackStyle only overrides _Sprite and the tile texture for Gems; the border texture and
         // shadow fall through to the default branch
         Assert.That(TrackStyleInfo.Gems.Sprite, Is.True);
-        Assert.That(TrackStyleInfo.Gems.EdgeTextureSuffix, Is.EqualTo("Edge.png"));
+        Assert.That(TrackStyleInfo.Gems.EdgeResolved, Is.EqualTo(TrackStyleInfo.Standard.EdgeResolved));
         Assert.That(TrackStyleInfo.Gems.ShadowTune, Is.EqualTo(1.23f));
-        Assert.That(TrackStyleInfo.Gems.TileTextureSuffix, Is.EqualTo("Gem.png"));
+    }
+
+    [TestCase("Standard", "rs13.png", FloorTextureWrap.Mirror, FloorTextureFilter.Bilinear)]
+    [TestCase("Neon", "neon_edge.png", FloorTextureWrap.Clamp, FloorTextureFilter.Bilinear)]
+    [TestCase("NeonLight", "neonLight_edge.png", FloorTextureWrap.Clamp, FloorTextureFilter.Bilinear)]
+    [TestCase("Basic", "basic_edge.png", FloorTextureWrap.Clamp, FloorTextureFilter.Point)]
+    [TestCase("Gems", "rs13.png", FloorTextureWrap.Mirror, FloorTextureFilter.Bilinear)]
+    [TestCase("Minimal", "minimal_edge.png", FloorTextureWrap.Clamp, FloorTextureFilter.Point)]
+    public void BuiltInStylesUseOriginalFloorTextures(string styleName, string edgeName, int edgeWrap, int edgeFilter)
+    {
+        var (edge, noise, tile) = new OfficialFloorMeshBaker.BakeCache().GetStyleTextures(TrackStyleInfo.Parse(styleName));
+        Assert.That(edge.Resource, Is.EqualTo("Resources.Floor." + edgeName));
+        Assert.That(edge.Wrap, Is.EqualTo((FloorTextureWrap)edgeWrap));
+        Assert.That(edge.Filter, Is.EqualTo((FloorTextureFilter)edgeFilter));
+        Assert.That(EmbeddedAssets.Read(edge.Resource), Is.Not.Null);
+
+        if (styleName == "Standard")
+        {
+            Assert.That(noise.Resource, Is.EqualTo("Resources.Floor.perlin.png"));
+            Assert.That(tile.Resource, Is.EqualTo("Resources.Floor.tile_texture_2020_cracks_tiled_2048.png"));
+            foreach (FloorTexture texture in new[] { noise, tile })
+            {
+                Assert.That(texture.Wrap, Is.EqualTo(FloorTextureWrap.Mirror));
+                Assert.That(texture.Filter, Is.EqualTo(FloorTextureFilter.BilinearMipmapped));
+                Assert.That(EmbeddedAssets.Read(texture.Resource), Is.Not.Null);
+            }
+        }
+        else if (styleName == "Gems")
+        {
+            Assert.That(tile.Resource, Is.EqualTo("Resources.Floor.gem_floorMesh.png"));
+            Assert.That(tile.Wrap, Is.EqualTo(FloorTextureWrap.Clamp));
+            Assert.That(tile.Filter, Is.EqualTo(FloorTextureFilter.Bilinear));
+            Assert.That(EmbeddedAssets.Read(tile.Resource), Is.Not.Null);
+        }
     }
 
     [Test]

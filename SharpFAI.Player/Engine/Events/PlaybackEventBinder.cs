@@ -62,6 +62,7 @@ internal static class PlaybackEventBinder
         IReadOnlyList<BaseEvent> parsed = level.DeserializeEvents();
         JsonSerializer serializer = JsonSerializer.Create(EventJsonConverter.GetJsonSettings());
         List<PlaybackEvent> result = new(playbackOnly ? Math.Min(parsed.Count, 4096) : parsed.Count);
+        JObject? settings = level.root["settings"] as JObject;
         int index = 0;
         int sourceIndex = -1;
         foreach (JObject action in level.actions.OfType<JObject>())
@@ -74,32 +75,27 @@ internal static class PlaybackEventBinder
             if (playbackOnly && (type == typeof(ParsedPreviewEvent) || type == typeof(ParsedRuntimeEvent)))
                 continue;
 
-            var item = Bind(action, source, type, serializer);
+            var item = Bind(action, source, type, serializer, settings);
             item.SourceIndex = sourceIndex;
             result.Add(item);
         }
 
-        // Older charts can still contain a separate decorations array. The game
-        // reads the array whenever present, regardless of the settings version.
+        // The game reads a separate decorations array whenever present, regardless of the settings version.
         if (includeDecorations && (level.decorations ?? level.root["decorations"] as JArray) is { } decorations)
         {
-            var settings = level.root["settings"] as JObject;
             for (int decorationIndex = 0; decorationIndex < decorations.Count; decorationIndex++)
             {
                 if (decorations[decorationIndex] is not JObject decoration)
                     continue;
-                if (playbackOnly && (string?)decoration["eventType"] is not ("AddDecoration" or "AddText"))
+                if (playbackOnly && (string?)decoration["eventType"] is not ("AddDecoration" or "AddText" or "AddObject" or "AddParticle"))
                     continue;
                 using JsonReader reader = decoration.CreateReader();
                 if (serializer.Deserialize<BaseEvent>(reader) is { } source)
                 {
-                    PlaybackEvent item = Bind(decoration, source, ResolveType(source.EventType), serializer);
+                    PlaybackEvent item = Bind(decoration, source, ResolveType(source.EventType), serializer, settings);
                     item.SourceIndex = decorationIndex;
                     if (item is AddImageDecoration image)
-                    {
                         image.DecorationIndex = decorationIndex;
-                        MigrateDecoration(image, decoration, settings);
-                    }
                     result.Add(item);
                 }
             }
@@ -116,13 +112,10 @@ internal static class PlaybackEventBinder
     internal static PlaybackEvent Rebind(JObject replacement, PlaybackEvent previous, JObject? settings)
     {
         var result = Bind(replacement, previous.Source!, previous.GetType(),
-            JsonSerializer.Create(EventJsonConverter.GetJsonSettings()));
+            JsonSerializer.Create(EventJsonConverter.GetJsonSettings()), settings);
         result.SourceIndex = previous.SourceIndex;
         if (previous is AddImageDecoration old && result is AddImageDecoration image)
-        {
             image.DecorationIndex = old.DecorationIndex;
-            MigrateDecoration(image, replacement, settings);
-        }
         return result;
     }
 
@@ -163,12 +156,18 @@ internal static class PlaybackEventBinder
             image.Parallax = new JArray(100, 100);
     }
 
-    private static PlaybackEvent Bind(JObject sourceToken, BaseEvent source, Type type, JsonSerializer serializer)
+    private static PlaybackEvent Bind(JObject sourceToken, BaseEvent source, Type type, JsonSerializer serializer,
+        JObject? settings)
     {
         using JsonReader reader = sourceToken.CreateReader();
         PlaybackEvent item = (PlaybackEvent)serializer.Deserialize(reader, type)!;
         item.EventType = source.EventType;
         item.Source = source;
+        if (item is AddImageDecoration image)
+            MigrateDecoration(image, sourceToken, settings);
+        if (item is AddImageDecoration or MoveImageDecoration && (int?)settings?["version"] == 7 &&
+            item.Active is null && sourceToken["enabled"]?.Type == JTokenType.Boolean)
+            item.Active = (bool)sourceToken["enabled"]!;
         return item;
     }
 
@@ -192,7 +191,11 @@ internal static class PlaybackEventBinder
             or EventType.Bloom or EventType.ShakeScreen => typeof(SceneEffectEvent),
         EventType.AddDecoration => typeof(AddImageDecoration),
         EventType.AddText => typeof(AddTextDecoration),
+        EventType.AddObject => typeof(AddObjectDecoration),
+        EventType.AddParticle => typeof(AddParticleDecoration),
+        EventType.SetParticle or EventType.EmitParticle => typeof(ParticleControlEvent),
         EventType.SetText => typeof(SetTextDecoration),
+        EventType.SetObject => typeof(SetObjectDecoration),
         EventType.MoveDecorations => typeof(MoveImageDecoration),
         EventType.SetConditionalEvents => typeof(ConditionalDecorationEvent),
         EventType.Flash or EventType.HallOfMirrors or EventType.CustomBackground => typeof(BackdropEvent),
@@ -206,8 +209,7 @@ internal static class PlaybackEventBinder
             or EventType.EventSettings or EventType.DecorationSettings or EventType.SetSpeed or EventType.Twirl
             or EventType.Bookmark or EventType.EditorComment
             or EventType.MultiPlanet or EventType.FreeRoam or EventType.FreeRoamTwirl or EventType.FreeRoamRemove
-            or EventType.FreeRoamWarning
-            or EventType.AddObject or EventType.AddParticle => typeof(ParsedPreviewEvent),
+            or EventType.FreeRoamWarning => typeof(ParsedPreviewEvent),
         _ => typeof(ParsedRuntimeEvent),
     };
 }

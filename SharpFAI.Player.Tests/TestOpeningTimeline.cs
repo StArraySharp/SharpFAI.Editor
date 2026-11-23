@@ -1,5 +1,6 @@
 using Newtonsoft.Json.Linq;
 using SharpFAI.Player.Engine;
+using SharpFAI.Player.Engine.Audio;
 using SharpFAI.Framework;
 using SharpFAI.Serialization;
 using SharpFAI.Util;
@@ -19,7 +20,7 @@ public class TestOpeningTimeline
 
         Assert.That(timeline.EntryTimes[1], Is.EqualTo(firstHit).Within(1e-7));
         Assert.That(timeline.EntryTimes[2], Is.EqualTo(1.25).Within(1e-7));
-        Assert.That(LevelRenderer.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(timeline.EntryTimes[1]));
+        Assert.That(HitsoundSynth.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(timeline.EntryTimes[1]));
         Assert.That(timeline.SweepStart[0] + timeline.SweepDelta[0], Is.EqualTo(angle).Within(1e-7));
 
         double radians = (timeline.SweepStart[0] + timeline.SweepDelta[0]) * Math.PI / 180;
@@ -36,7 +37,7 @@ public class TestOpeningTimeline
         LevelRenderer.PlaybackTimeline timeline = LevelRenderer.BuildTimeline(level, level.CreateFloors());
 
         Assert.That(timeline.EntryTimes[1], Is.EqualTo(2.50).Within(1e-7));
-        Assert.That(LevelRenderer.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(2.50).Within(1e-7));
+        Assert.That(HitsoundSynth.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(2.50).Within(1e-7));
     }
 
     [Test]
@@ -47,7 +48,7 @@ public class TestOpeningTimeline
 
         Assert.That(timeline.EntryTimes[1], Is.EqualTo(-.15).Within(1e-7));
         Assert.That(timeline.EntryTimes[2], Is.EqualTo(.60).Within(1e-7));
-        Assert.That(LevelRenderer.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(.60).Within(1e-7));
+        Assert.That(HitsoundSynth.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(.60).Within(1e-7));
     }
 
     private static Level Chart(int angle, int offset, bool separateCountdown) => new(new Dictionary<string, object>

@@ -15,6 +15,7 @@ internal class AddImageDecoration : PreviewEvent
     [JsonProperty("rotation")] public float? Rotation { get; set; }
     [JsonProperty("scale")] public JArray? Scale { get; set; }
     [JsonProperty("originalSize")] public JArray? OriginalSize { get; set; }
+    [JsonProperty("cropPivotOffset")] public JArray? CropPivotOffset { get; set; }
     [JsonProperty("scaleMultiplier")] public float? ScaleMultiplier { get; set; }
     [JsonProperty("tile")] public JArray? Tile { get; set; }
     [JsonProperty("color")] public string? Color { get; set; }
@@ -64,6 +65,7 @@ internal class MoveImageDecoration : TimedEvent
     }
     [JsonIgnore] public bool ImageSpecified { get; private set; }
     [JsonProperty("originalSize")] public JArray? OriginalSize { get; set; }
+    [JsonProperty("cropPivotOffset")] public JArray? CropPivotOffset { get; set; }
     [JsonProperty("positionOffset")] public JArray? Position { get; set; }
     [JsonProperty("pivotOffset")] public JArray? Pivot { get; set; }
     [JsonProperty("rotationOffset")] public float? Rotation { get; set; }
@@ -79,6 +81,37 @@ internal class MoveImageDecoration : TimedEvent
     [JsonProperty("useMaskingDepth")] public bool? UseMaskingDepth { get; set; }
     [JsonProperty("maskingFrontDepth")] public int? MaskingFrontDepth { get; set; }
     [JsonProperty("maskingBackDepth")] public int? MaskingBackDepth { get; set; }
+}
+
+internal sealed class AddObjectDecoration : AddImageDecoration
+{
+    [JsonProperty("objectType")] public string? ObjectType { get; set; }
+    [JsonProperty("trackType")] public string? TrackType { get; set; }
+    [JsonProperty("trackAngle")] public float? TrackAngle { get; set; }
+    [JsonProperty("trackStyle")] public string? TrackStyle { get; set; }
+    [JsonProperty("trackColor")] public string? TrackColor { get; set; }
+    [JsonProperty("trackOpacity")] public float? TrackOpacity { get; set; }
+    [JsonProperty("planetColorType")] public string? PlanetColorType { get; set; }
+    [JsonProperty("planetColor")] public string? PlanetColor { get; set; }
+}
+
+internal sealed class SetObjectDecoration : MoveImageDecoration
+{
+    [JsonProperty("trackColor")] public string? TrackColor { get; set; }
+    [JsonProperty("trackOpacity")] public float? TrackOpacity { get; set; }
+    [JsonProperty("planetColor")] public string? PlanetColor { get; set; }
+}
+
+internal sealed class AddParticleDecoration : AddImageDecoration
+{
+    [JsonExtensionData] public Dictionary<string, JToken> ParticleFields { get; set; } = [];
+    [JsonProperty("color")] public JToken? ParticleColor { get; set; }
+}
+
+internal sealed class ParticleControlEvent : TimedEvent
+{
+    [JsonProperty("tag")] public string? Tag { get; set; }
+    [JsonExtensionData] public IDictionary<string, JToken> ParticleFields { get; set; } = new Dictionary<string, JToken>();
 }
 
 internal sealed class AddTextDecoration : AddImageDecoration

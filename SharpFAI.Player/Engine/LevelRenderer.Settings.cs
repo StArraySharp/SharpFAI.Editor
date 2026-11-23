@@ -20,20 +20,21 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private float AuthoredZoom(float height, float zoomPercent) =>
-        Math.Clamp(height / (1000f * (zoomPercent / 100f)), _camera.MinZoom, _camera.MaxZoom);
+        zoomPercent == 0f ? .5f
+            : Math.Clamp(height / (1000f * (zoomPercent / 100f)), _camera.MinZoom, _camera.MaxZoom);
 
     internal float GetExportZoom() => _settings.CameraZoom is float zoom ? AuthoredZoom(_camera.ViewportHeight, zoom) : 0.5f;
 
     internal bool HasCameraEventZoom => _cameraEventZoomApplied;
 
-    private double EasePlanet(double time)
+    private double EasePlanet(int floor, double time)
     {
         if (!_runtimeTrackActive || time <= 0 || time >= 1)
         {
             return time;
         }
 
-        var rotation = _sceneEffects?.PlanetRotation(_currentIndex);
+        var rotation = _sceneEffects?.PlanetRotation(floor);
         var ease = rotation?.Enabled("ease", rotation.Ease) ?? _settings.PlanetEase;
         int parts = rotation?.Enabled("easeParts", rotation.EaseParts) ?? _settings.PlanetEaseParts;
         if (parts <= 0 || ease == EventEnums.Ease.Linear)
@@ -57,7 +58,7 @@ public sealed unsafe partial class LevelRenderer
             return 1f;
         }
 
-        double elapsed = (_playTime - _entryTimes[_currentIndex]) / _pitch;
-        return 1f + .04f * (float)Math.Clamp(1.0 - elapsed / .2, 0, 1);
+        double hitTime = ManualAttemptActive ? _cameraPulseTime : _entryTimes[_currentIndex];
+        return CameraMotion.PulseScale((_playTime - hitTime) / _pitch);
     }
 }

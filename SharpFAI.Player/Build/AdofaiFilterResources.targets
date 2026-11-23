@@ -13,7 +13,7 @@
       <Using Namespace="System.Text.RegularExpressions" />
       <Code Type="Fragment" Language="cs"><![CDATA[
         var imports = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var shaderName = new Regex("^[ \t]*Shader\\s*\"(CameraFilterPack(?:Legacy)?/[^\"]+|ADOFAI/Screen(?:Tile|Scroll)|Sprites/Tile|Hidden/VideoBloom)\"", RegexOptions.Multiline);
+        var shaderName = new Regex("^[ \t]*Shader\\s*\"(CameraFilterPack(?:Legacy)?/[^\"]+|ADOFAI/(?:Screen(?:Tile|Scroll)|PolarScreen)|Sprites/Tile|Hidden/(?:VideoBloom|CameraMotionBlur))\"", RegexOptions.Multiline);
         var exportNumber = new Regex(@"^([1-9]\d*)_glsl\.orig\.glsl$");
         var names = new Regex(@"^[A-Za-z0-9_ .-]+(/[A-Za-z0-9_ .-]+)+$");
 
@@ -21,6 +21,7 @@
             .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var candidates = new Dictionary<string, string>(StringComparer.Ordinal);
+            var shaderSources = new Dictionary<string, string>(StringComparer.Ordinal);
             var ambiguous = new HashSet<string>(StringComparer.Ordinal);
             foreach (string subfolder in new[] { "Shader", "Resources" })
             {
@@ -41,17 +42,15 @@
                     string first = name == "Sprites/Tile" ? "4_glsl.orig.glsl" : "1_glsl.orig.glsl";
                     if (!Directory.Exists(stages) || !File.Exists(Path.Combine(stages, first)))
                         continue;
-                    // ShaderRipper changed "half" inside these two ShaderLab names.
-                    if (name == "CameraFilterPack/Distortion_float_Sphere")
-                        name = "CameraFilterPack/Distortion_Half_Sphere";
-                    if (name == "CameraFilterPack/Drawing_floattone")
-                        name = "CameraFilterPack/Drawing_Halftone";
                     string previous;
                     if (candidates.TryGetValue(name, out previous) &&
                         !StringComparer.OrdinalIgnoreCase.Equals(previous, stages))
                         ambiguous.Add(name);
                     else
+                    {
                         candidates[name] = stages;
+                        shaderSources[name] = file;
+                    }
                 }
             }
 
@@ -66,6 +65,7 @@
                     continue;
                 }
 
+                imports.Add(key + ".shaderlab", shaderSources[candidate.Key]);
                 foreach (string path in Directory.EnumerateFiles(candidate.Value, "*_glsl.orig.glsl"))
                 {
                     var match = exportNumber.Match(Path.GetFileName(path));
@@ -80,6 +80,9 @@
                         candidate.Key == "Hidden/VideoBloom" && number == "5" ? ".pass-2.glsl" :
                         candidate.Key == "Hidden/VideoBloom" && number == "7" ? ".pass-3.glsl" :
                         candidate.Key == "Hidden/VideoBloom" && number == "8" ? ".pass-4.glsl" :
+                        candidate.Key == "Hidden/CameraMotionBlur" && number == "5" ? ".pass-2.glsl" :
+                        candidate.Key == "Hidden/CameraMotionBlur" && number == "7" ? ".pass-3.glsl" :
+                        candidate.Key == "Hidden/CameraMotionBlur" && number == "9" ? ".pass-4.glsl" :
                         passLayout && number == "3" ? ".pass-1.glsl" :
                         passLayout && number == "4" ? ".pass-2.glsl" :
                         passLayout && number == "6" ? ".pass-3.glsl" : ".export-" + number + ".glsl";
@@ -102,6 +105,21 @@
                 imports.Add(key, file);
                 if (File.Exists(file + ".meta"))
                     imports.Add(key + ".meta", file + ".meta");
+            }
+        }
+
+        if (Directory.Exists(UnityAssets))
+        {
+            string textures = Path.Combine(UnityAssets, "Texture2D");
+            foreach (string file in new[] { "MotionBlurJitter.png", "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png" })
+            {
+                string path = Path.Combine(textures, file);
+                if (!File.Exists(path))
+                    continue;
+                string key = "Resources.Filters." + file;
+                imports.Add(key, path);
+                if (File.Exists(path + ".meta"))
+                    imports.Add(key + ".meta", path + ".meta");
             }
         }
 

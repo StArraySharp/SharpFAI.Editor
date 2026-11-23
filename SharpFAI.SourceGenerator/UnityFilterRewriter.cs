@@ -50,8 +50,6 @@ internal sealed class UnityFilterRewriter : CSharpSyntaxRewriter
 
     public string Member { private get; set; } = "";
 
-    public HashSet<string> Integers { get; set; } = new(StringComparer.Ordinal);
-
     public override SyntaxNode? VisitAttributeList(AttributeListSyntax node) => null;
 
     public override SyntaxNode VisitIdentifierName(IdentifierNameSyntax node) =>
@@ -131,18 +129,4 @@ internal sealed class UnityFilterRewriter : CSharpSyntaxRewriter
         return base.VisitCastExpression(node)!;
     }
 
-    public override SyntaxNode? VisitBinaryExpression(BinaryExpressionSyntax node)
-    {
-        SyntaxNode? visited = base.VisitBinaryExpression(node);
-        if (visited is not BinaryExpressionSyntax binary)
-            return visited;
-        if (binary.Kind() is not (SyntaxKind.DivideExpression or SyntaxKind.ModuloExpression) ||
-            (binary.Right as IdentifierNameSyntax)?.Identifier.ValueText is not { } divisor ||
-            !Integers.Contains(divisor))
-            return binary;
-
-        // Unity tolerates values that the filter would not normally receive; avoid the DivideByZeroException
-        // that C# integer division raises for parameters such as FastFilter.
-        return binary.WithRight(SyntaxFactory.ParseExpression("Math.Max(1, " + divisor + ")"));
-    }
 }

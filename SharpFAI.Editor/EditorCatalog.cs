@@ -6,7 +6,8 @@ namespace SharpFAI.Editor;
 internal sealed record EditorField(string Key, string Type, JToken? Default = null,
     JArray? DisableIf = null, bool Hidden = false, string? Unit = null,
     bool Optional = false, bool StartEnabled = true, double? Minimum = null, double? Maximum = null,
-    bool AllowEmpty = false, string[]? Options = null);
+    bool AllowEmpty = false, string[]? Options = null, JArray? ShowIf = null, JArray? HideIf = null,
+    JArray? EnableIf = null, string? FileType = null, bool StringDropdown = false, bool Browsable = false);
 
 internal sealed record EditorEvent(string Type, bool Decoration, bool AllowFirstFloor, EditorField[] Fields);
 
@@ -28,7 +29,7 @@ internal sealed class EditorCatalog
 
     public (string Key, string[] Events)[] Categories { get; private set; } =
     [
-        ("Gameplay", ["SetSpeed", "Twirl", "Pause", "Hold", "MultiPlanet", "ScaleRadius", "SetHitsound", "Bookmark"]),
+        ("Gameplay", ["SetSpeed", "Twirl", "Pause", "Hold", "MultiPlanet", "ScaleRadius", "SetHitsound", "PlaySound", "Bookmark"]),
         ("TrackFx", ["PositionTrack", "ColorTrack", "AnimateTrack", "MoveTrack", "RecolorTrack"]),
         ("DecorationFx", ["MoveDecorations", "SetText", "SetParticle", "EmitParticle"]),
         ("VisualFx", ["CustomBackground", "MoveCamera", "Flash", "SetFilter", "SetFilterAdvanced", "Bloom", "HallOfMirrors"]),
@@ -53,6 +54,7 @@ internal sealed class EditorCatalog
         AddDefaults("MultiPlanet", """{"planets":"TwoPlanets"}""");
         AddDefaults("ScaleRadius", """{"scale":100.0}""");
         AddDefaults("SetHitsound", """{"gameSound":"Hitsound","hitsound":"Kick","hitsoundVolume":100}""");
+        AddDefaults("PlaySound", """{"hitsound":"Kick","offset":0,"playDuration":0,"pitch":100,"hitsoundVolume":100,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("EditorComment", """{"comment":""}""");
         AddDefaults("PositionTrack", """{"positionOffset":[0,0],"relativeTo":[0,"ThisTile"],"rotation":0.0,"scale":100.0,"opacity":100.0,"editorOnly":false,"stickToFloors":true,"justThisTile":false}""");
         AddDefaults("ColorTrack", """{"trackColorType":"Single","trackColor":"debb7b","secondaryTrackColor":"ffffff","trackStyle":"Standard"}""");
@@ -60,7 +62,7 @@ internal sealed class EditorCatalog
         AddDefaults("MoveTrack", """{"startTile":[0,"ThisTile"],"endTile":[0,"ThisTile"],"duration":1.0,"positionOffset":[0,0],"rotationOffset":0.0,"scale":[100,100],"opacity":100.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("RecolorTrack", """{"startTile":[0,"ThisTile"],"endTile":[0,"ThisTile"],"trackColor":"debb7b","secondaryTrackColor":"ffffff","trackColorType":"Single","trackStyle":"Standard","angleOffset":0.0,"eventTag":""}""");
         AddDefaults("MoveCamera", """{"duration":1.0,"relativeTo":"Player","position":[0,0],"rotation":0.0,"zoom":100.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
-        AddDefaults("MoveDecorations", """{"duration":1.0,"tag":"","positionOffset":[0,0],"rotationOffset":0.0,"scale":[100,100],"opacity":100.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
+        AddDefaults("MoveDecorations", """{"duration":1.0,"tag":"","positionOffset":[0,0],"cropPivotOffset":[0,0],"rotationOffset":0.0,"scale":[100,100],"opacity":100.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("CustomBackground", """{"color":"000000","bgImage":"","imageColor":"ffffff","parallax":[100,100],"bgDisplayMode":"FitToScreen","angleOffset":0.0,"eventTag":""}""");
         AddDefaults("Flash", """{"duration":1.0,"plane":"Foreground","startColor":"ffffff","startOpacity":100.0,"endColor":"ffffff","endOpacity":0.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("SetFilter", """{"filter":"Grayscale","enabled":true,"intensity":100.0,"duration":0.0,"ease":"Linear","disableOthers":false,"angleOffset":0.0,"eventTag":""}""");
@@ -71,7 +73,7 @@ internal sealed class EditorCatalog
         AddDefaults("SetText", """{"decText":"","tag":"","angleOffset":0.0,"eventTag":""}""");
         AddDefaults("SetParticle", """{"tag":"","targetMode":"Start","duration":0.0,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("EmitParticle", """{"tag":"","count":10,"angleOffset":0.0,"eventTag":""}""");
-        AddDefaults("AddDecoration", """{"decorationImage":"","tag":"","relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0],"maskingType":"None"}""");
+        AddDefaults("AddDecoration", """{"decorationImage":"","tag":"","relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"cropPivotOffset":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0],"maskingType":"None"}""");
         AddDefaults("AddText", """{"decText":"","tag":"","font":"Default","relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0]}""");
         AddDefaults("AddObject", """{"objectType":"Floor","tag":"","relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"depth":-1}""");
         AddDefaults("AddParticle", """
@@ -84,20 +86,27 @@ internal sealed class EditorCatalog
             """);
 
         JObject defaults = (JObject)Level.CreateNewLevel().root["settings"]!;
-        _settings["SongSettings"] = Settings("songFilename", "bpm", "volume", "offset", "pitch", "hitsound", "hitsoundVolume", "countdownTicks");
-        _settings["LevelSettings"] = Settings("artist", "song", "author", "levelDesc", "difficulty", "levelTags", "previewImage", "previewSongStart");
-        _settings["TrackSettings"] = Settings("tileShape", "trackColorType", "trackColor", "secondaryTrackColor", "trackStyle", "trackTexture",
+        AddSettings("SongSettings", "songFilename", "bpm", "volume", "offset", "pitch", "hitsound", "hitsoundVolume", "countdownTicks");
+        AddSettings("LevelSettings", "artist", "song", "author", "levelDesc", "difficulty", "levelTags", "previewImage", "previewSongStart");
+        AddSettings("TrackSettings", "tileShape", "trackColorType", "trackColor", "secondaryTrackColor", "trackStyle", "trackTexture",
             "trackTextureScale", "trackAnimation", "beatsAhead", "trackDisappearAnimation", "beatsBehind");
-        _settings["BackgroundSettings"] = Settings("backgroundColor", "bgImage", "bgImageColor", "bgDisplayMode", "parallax", "loopBG",
+        AddSettings("BackgroundSettings", "backgroundColor", "bgImage", "bgImageColor", "bgDisplayMode", "parallax", "loopBG",
             "bgVideo", "vidOffset", "loopVideo");
-        _settings["CameraSettings"] = Settings("relativeTo", "position", "rotation", "zoom", "pulseOnFloor");
-        _settings["MiscSettings"] = Settings("stickToFloors", "floorIconOutlines", "planetEase", "planetEaseParts", "separateCountdownTime");
+        AddSettings("CameraSettings", "relativeTo", "position", "rotation", "zoom", "pulseOnFloor");
+        AddSettings("MiscSettings", "stickToFloors", "floorIconOutlines", "planetEase", "planetEaseParts", "separateCountdownTime");
 
         if (source is not null)
             LoadSchema(JObject.Parse(File.ReadAllText(source)));
 
-        EditorField[] Settings(params string[] keys) =>
-            keys.Select(key => Infer(key, defaults[key]!)).ToArray();
+        void AddSettings(string owner, params string[] keys) =>
+            _settings[owner] = keys.Select(key => Infer(key, defaults[key]!, owner)).ToArray();
+    }
+
+    internal static EditorCatalog FromSchema(JObject schema)
+    {
+        var catalog = new EditorCatalog(null);
+        catalog.LoadSchema(schema);
+        return catalog;
     }
 
     public EditorEvent? Find(string type) => _events.GetValueOrDefault(type);
@@ -134,7 +143,8 @@ internal sealed class EditorCatalog
             "PositionTrack" => ["positionOffset", "rotation", "scale", "opacity", "stickToFloors"],
             "MoveTrack" => ["positionOffset", "rotationOffset", "scale", "opacity"],
             "MoveCamera" => ["position", "rotation", "zoom"],
-            "MoveDecorations" => ["positionOffset", "rotationOffset", "scale", "opacity"],
+            "MoveDecorations" => ["positionOffset", "cropPivotOffset", "rotationOffset", "scale", "opacity"],
+            "AddDecoration" => ["cropPivotOffset"],
             "AddParticle" => ["velocityLimitOverLifetime", "colorOverLifetime", "sizeOverLifetime"],
             _ => []
         };
@@ -142,9 +152,18 @@ internal sealed class EditorCatalog
         {
             Fields = JObject.Parse(json).Properties().Select(field =>
             {
-                EditorField metadata = Infer(field.Name, field.Value);
+                EditorField metadata = Infer(field.Name, field.Value, type);
                 if (type == "AddParticle" && field.Name is "color" or "colorOverLifetime")
                     metadata = metadata with { Type = "MinMaxGradient" };
+                if (type == "PlaySound")
+                    metadata = field.Name switch
+                    {
+                        "offset" or "playDuration" => metadata with { Unit = "ms", Minimum = field.Name == "playDuration" ? 0 : null },
+                        "pitch" => metadata with { Unit = "%", Minimum = 1, Maximum = 1000 },
+                        "hitsoundVolume" => metadata with { Unit = "%", Minimum = 1, Maximum = 100 },
+                        "angleOffset" => metadata with { Unit = "\u00b0" },
+                        _ => metadata
+                    };
                 return metadata with { Optional = optional.Contains(field.Name), StartEnabled = false };
             }).ToArray()
         };
@@ -182,53 +201,91 @@ internal sealed class EditorCatalog
         SettingsTabs = _settings.Keys.ToArray();
     }
 
-    private static EditorField[] ReadFields(JObject item) => (item["properties"] as JArray ?? []).OfType<JObject>()
-        .Where(field => field.Value<bool?>("pro") != true && field.Value<bool?>("encode") != false)
-        .Select(field =>
-        {
-            string type = field.Value<string>("type")!;
-            JToken? value = field["default"];
-            if (value is null && type == "MinMaxGradient")
-                value = new JValue("ffffff");
-            string[]? options = (field["options"] as JArray)?.OfType<JValue>().Select(option => option.ToString()).ToArray();
-            if (options is null && type.StartsWith("Enum:", StringComparison.Ordinal))
-                options = Options(new("", type));
-            if (field["except"] is JArray exceptions && options is not null)
-                options = options.Except(exceptions.Values<string>().OfType<string>(), StringComparer.Ordinal).ToArray();
-            return new EditorField(field.Value<string>("name")!, type, value, field["disableIf"] as JArray,
-                field.Value<string>("control") == "Hidden", field.Value<string>("unit"),
-                field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") == true,
-                field.Value<double?>("min"), field.Value<double?>("max"), field.Value<bool?>("allowEmpty") == true,
-                options);
-        })
-        .ToArray();
-
-    public static string[]? Options(EditorField field)
+    private static EditorField[] ReadFields(JObject item)
     {
-        if (field.Options is { Length: > 0 }) return field.Options;
-        if (field.Key == "filter" && field.Type == "AdvancedFilter") return EditorFilterCatalog.Names;
-        string? name = field.Type.StartsWith("Enum:", StringComparison.Ordinal) ? field.Type[5..].Split('.').Last() : field.Key switch
-        {
-            "ease" => "Ease", "speedType" => "SpeedType", "hitsound" => "HitSound", "planets" => "PlanetCount",
-            "angleCorrectionDir" => "AngleCorrectionDirection", _ => null
-        };
-        Type? type = typeof(EventEnums).GetNestedTypes().FirstOrDefault(type => type.IsEnum && type.Name == name);
-        return type is null ? name is null ? null : EditorControlMetadata.EnumOptions(name)
-            : Enum.GetNames(type).Where(value => value != "Unset" && !value.StartsWith("INTERNAL_", StringComparison.Ordinal)).ToArray();
+        string? owner = item.Value<string>("name");
+        return (item["properties"] as JArray ?? []).OfType<JObject>()
+            .Where(field => field.Value<bool?>("pro") != true && field.Value<bool?>("encode") != false)
+            .Select(field =>
+            {
+                string key = field.Value<string>("name")!;
+                string type = field.Value<string>("type")!;
+                if (owner == "SetFilterAdvanced" && key == "filter" && type == "String")
+                    type = "AdvancedFilter";
+                JToken? value = field["default"];
+                if (value is null && type == "MinMaxGradient")
+                    value = new JValue("ffffff");
+                var metadata = new EditorField(key, type, value, field["disableIf"] as JArray,
+                    field.Value<string>("control") == "Hidden", field.Value<string>("unit"),
+                    field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") == true,
+                    field.Value<double?>("min"), field.Value<double?>("max"), field.Value<bool?>("allowEmpty") == true,
+                    ShowIf: field["showIf"] as JArray, HideIf: field["hideIf"] as JArray,
+                    EnableIf: field["enableIf"] as JArray, FileType: field.Value<string>("fileType"),
+                    StringDropdown: field.Value<bool?>("stringDropdown") == true, Browsable: field.Value<bool?>("browsable") == true);
+                string[]? options = field["options"] is JArray explicitOptions
+                    ? explicitOptions.Values<string>().OfType<string>().Distinct(StringComparer.Ordinal).ToArray()
+                    : Options(metadata);
+                if (field["except"] is JArray exceptions && options is not null)
+                    options = options.Except(exceptions.Values<string>().OfType<string>(), StringComparer.Ordinal).ToArray();
+                return metadata with { Options = options };
+            })
+            .ToArray();
     }
 
-    public static EditorField Infer(string key, JToken value) => new(key, key == "filterProperties" ? "FilterProperties" :
-        key == "filter" && value.ToString().StartsWith("CameraFilterPack", StringComparison.Ordinal) ? "AdvancedFilter" :
-        (key.EndsWith("Color", StringComparison.OrdinalIgnoreCase) || key is "color" or "backgroundColor") && value.Type == JTokenType.String ? "Color" :
-        value.Type switch
+    private static readonly string[] EaseOptions = Enum.GetNames<EventEnums.Ease>()
+        .Where(value => value != "Unset" && !value.StartsWith("INTERNAL_", StringComparison.Ordinal)).ToArray();
+
+    public static string[] TileReferenceOptions { get; } = Enum.GetNames<EventEnums.TileRelativeTo>();
+
+    public static string? EnumName(string type) => type.StartsWith("Enum:", StringComparison.Ordinal)
+        ? type[(type.LastIndexOfAny([':', '.', '+']) + 1)..] : null;
+
+    public static string[]? Options(EditorField field) => field.Options ?? (field.Type == "AdvancedFilter"
+        ? EditorFilterCatalog.Names : EnumName(field.Type) switch
+        {
+            "Ease" => EaseOptions,
+            "TileRelativeTo" => TileReferenceOptions,
+            { } name => EditorControlMetadata.EnumOptions(name),
+            _ => null
+        });
+
+    public static EditorField Infer(string key, JToken value, string? owner = null)
     {
-        JTokenType.Integer => "Int",
-        JTokenType.Float => "Float",
-        JTokenType.Boolean => "Bool",
-        JTokenType.Array when value.Count() == 2 && value.All(item => item.Type is JTokenType.Integer or JTokenType.Float or JTokenType.Null) => "Vector2",
-        JTokenType.Array or JTokenType.Object or JTokenType.Null => "Json",
-        _ => "String"
-    }, value, AllowEmpty: value is JArray && value.Any(part => part.Type == JTokenType.Null));
+        if (owner == "PlaySound" && key == "hitsound")
+            return new(key, "String", value, FileType: "Audio", StringDropdown: true, Browsable: true);
+        if (owner == "EditorComment" && key == "comment")
+            return new(key, "Text", value);
+        if (key == "filterProperties")
+            return new(key, "FilterProperties", value);
+        if (key == "filter" && (owner == "SetFilterAdvanced" || owner is null && value.Type == JTokenType.String &&
+            value.ToString().StartsWith("CameraFilterPack", StringComparison.Ordinal)))
+            return new(key, "AdvancedFilter", value);
+        if (value is JArray { Count: 2 } tile && tile[1]?.Type == JTokenType.String && key is "relativeTo" or "startTile" or "endTile")
+            return new(key, "Tile", value);
+        if (EditorFieldEnums.For(key, owner) is { } enumName)
+        {
+            var field = new EditorField(key, "Enum:" + enumName, value);
+            string[]? options = Options(field);
+            options = (owner, key) switch
+            {
+                ("TrackSettings", "tileShape") => options?.Where(option => option != "Custom").ToArray(),
+                ("CameraSettings", "relativeTo") => options?.Where(option => option is not ("LastPosition" or "LastPositionNoRotation")).ToArray(),
+                ("AddParticle", "maskingType") => options?.Where(option => option != "Mask").ToArray(),
+                _ => options
+            };
+            return field with { Options = options };
+        }
+        return new(key, (key.EndsWith("Color", StringComparison.OrdinalIgnoreCase) || key is "color" or "backgroundColor") &&
+            value.Type == JTokenType.String ? "Color" : value.Type switch
+            {
+                JTokenType.Integer => "Int",
+                JTokenType.Float => "Float",
+                JTokenType.Boolean => "Bool",
+                JTokenType.Array when value.Count() == 2 && value.All(item => item.Type is JTokenType.Integer or JTokenType.Float or JTokenType.Null) => "Vector2",
+                JTokenType.Array or JTokenType.Object or JTokenType.Null => "Json",
+                _ => "String"
+            }, value, AllowEmpty: value is JArray && value.Any(part => part.Type == JTokenType.Null));
+    }
 
     public static string Name(string key) => L.Name(key);
 }

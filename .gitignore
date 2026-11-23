@@ -6,6 +6,8 @@ publish/
 .idea/
 
 /docs/
+/GameFiles/*
+!/GameFiles/README.md
 /testlevels/
 /tools/
 /tmp-compare/

@@ -7,6 +7,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using SharpFAI.Editor.Widgets;
+using SharpFAI.Player.Engine;
 
 namespace SharpFAI.Editor;
 
@@ -23,9 +24,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private readonly bool _smokeTest;
     private EditorDocument _document;
     private ImGuiContext* _context;
+    private SharpFAI.Player.WindowInputMethod? _inputMethod;
     private bool _backendInitialized;
     private bool _resetLayout = true;
-    private string? _pendingLanguage;
     private bool _showSettings = true;
     private bool _showDecorations = true;
     private bool _showInspector = true;
@@ -41,6 +42,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private string? _error;
     private bool _openError;
     private int _frames;
+    private readonly SharpFAI.Player.MenuBarFrameRate _menuBarFrameRate = new();
     private int _floor;
     private int _category;
     private string? _eventType;
@@ -54,13 +56,14 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private static readonly Dictionary<string, List<string>> LevelFilter = new() { ["ADOFAI / ZIP"] = ["adofai", "zip"] };
 
     public EditorWindow(NativeWindowSettings settings, EditorCatalog catalog, EditorDocument document, bool smokeTest,
-        bool effectBenchmark = false)
+        bool effectBenchmark = false, string? commandLineLanguage = null)
         : base(GameWindowSettings.Default, settings)
     {
         _catalog = catalog;
         _document = document;
         _smokeTest = smokeTest;
         _effectBenchmark = effectBenchmark;
+        _commandLineLanguage = commandLineLanguage;
     }
 
     protected override void OnLoad()
@@ -85,7 +88,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         style->FramePadding = WidgetDraw.V2(7, 4);
         ApplyTheme(style);
         LoadFont(io);
+        LoadApplicationSettings();
         InitializePlayback();
+        _inputMethod = SharpFAI.Player.WindowInputMethod.Create(WindowPtr);
         TextInput += e => ImGuiIO.AddInputCharacter(io, (uint)e.Unicode);
         MouseWheel += e =>
         {
@@ -97,8 +102,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         MouseMove += _ => FeedMouse();
         MouseDown += e => { FeedMouse(); FeedPlaybackMouse(e.Button, true); };
         MouseUp += e => { FeedMouse(); FeedPlaybackMouse(e.Button, false); };
-        KeyDown += e => { ReleaseWebInput(); FeedKey(e, true); FeedPlaybackKey(e, true); };
-        KeyUp += e => { ReleaseWebInput(); FeedKey(e, false); FeedPlaybackKey(e, false); };
+        KeyDown += e => { ReleaseWebInput(); FeedEditorKey(e, true); };
+        KeyUp += e => { ReleaseWebInput(); FeedEditorKey(e, false); };
         UpdateTitle();
 
         if (_smokeTest)
@@ -110,7 +115,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             _document.Add(_particle, true);
             string directory = Path.GetDirectoryName(_document.PlaybackPath)!;
             string testImage = Path.GetRelativePath(directory,
-                Path.Combine(AppContext.BaseDirectory, "Resources", "Floor", "Tile.png"));
+                Path.Combine(AppContext.BaseDirectory, "Resources", "Floor", TrackStyleInfo.Standard.TileTextureSuffix!));
             if (!EditorDocument.IsLocalAsset(testImage))
                 testImage = Directory.EnumerateFiles(directory, "*.png").Select(Path.GetFileName).FirstOrDefault() ?? "";
             if (testImage.Length != 0)
@@ -137,6 +142,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         base.OnRenderFrame(args);
         if (ClientSize.X <= 0 || ClientSize.Y <= 0)
             return;
+        UpdateVideoRender();
         ImGuiIO* io = ImGui.GetIO();
         io->DisplaySize = WidgetDraw.V2(ClientSize.X, ClientSize.Y);
         io->DisplayFramebufferScale = WidgetDraw.V2(FramebufferSize.X / (float)ClientSize.X, FramebufferSize.Y / (float)ClientSize.Y);
@@ -148,11 +154,13 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             FeedNumericSmokeInput(io);
             FeedPlaybackSmokeInput(io);
         }
+        _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
-        if (_pendingLanguage is { } language)
+        if (_pendingApplicationSettings is { } settings)
         {
-            L.Language = System.Globalization.CultureInfo.GetCultureInfo(language);
-            _pendingLanguage = null;
+            _applicationSettings = settings;
+            _pendingApplicationSettings = null;
+            ApplyApplicationSettings();
         }
 
         if (_closeRequested)
@@ -160,6 +168,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             _closeRequested = false;
             RequestClose();
         }
+        _menuBarFrameRate.Sample(args.Time);
         DrawMenu();
         DrawDockspace();
         HandleShortcuts();
@@ -169,8 +178,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         DrawDecorations();
         DrawCanvas();
         _speedWheels.Clear();
-        // Starting here lets the canvas apply a wheel step from this frame first.
-        if (_queuedRateShortcut is { } rate)
+        // Starting after the canvas lets it apply a wheel step from this frame first.
+        if (_queuedRateShortcut is { } rate && rate != PlaybackRate.Configured)
         {
             _queuedRateShortcut = null;
             StartFromShortcut(rate);
@@ -180,10 +189,20 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         DrawParticleEditor();
         DrawShortcuts();
         DrawFindComment();
+        DrawVideoRender();
         DrawDialogs();
+        _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
+            TryApplyApplicationSettings);
         if (_smokeTest) DrawNumericSmoke();
         if (!_numericDrawn)
             FinishNumericEdit();
+        ApplyConfiguredPlaybackShortcut();
+        _inputMethod?.Update(IsFocused, _playbackView switch
+        {
+            PlaybackView.Edit => _hasFloorSelection || _inspectDecoration,
+            PlaybackView.Preview => _playback is { SelectedFloor: >= 0 },
+            _ => true,
+        });
         UpdateTitle();
 
         GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
@@ -265,6 +284,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ImGuiIO.AddFocusEvent(ImGui.GetIO(), (byte)(e.IsFocused ? 1 : 0));
         if (!e.IsFocused)
         {
+            _inputMethod?.Restore();
             ResetCanvasGesture();
             _dragDecoration = null;
             ReleasePlaybackInput();
@@ -273,6 +293,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     protected override void OnUnload()
     {
+        _inputMethod?.Dispose();
+        DisposeVideoRender();
         DisposePlayback();
         if (_backendInitialized)
             ImGui_ImplOpenGL3.Shutdown();
@@ -362,6 +384,11 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (ImGui.MenuItem(L.T("ReturnToEdit"), "Esc") != 0) SwitchPlaybackView(PlaybackView.Edit);
             ImGui.EndMenu();
         }
+        if (ImGui.BeginMenu(L.T("MenuRender")) != 0)
+        {
+            if (ImGui.MenuItem(L.T("VideoRenderTitle") + "…") != 0) _videoRenderWindow.Open();
+            ImGui.EndMenu();
+        }
         if (ImGui.BeginMenu(L.T("MenuTools")) != 0)
         {
             if (ImGui.MenuItem(L.T("Decorations")) != 0) _showDecorations = _focusDecorations = true;
@@ -371,14 +398,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         if (ImGui.BeginMenu(L.T("MenuHelp")) != 0)
         {
             ToggleMenu(L.T("Shortcuts"), ref _showShortcuts);
-            if (ImGui.BeginMenu(L.T("Language")) != 0)
-            {
-                if (ImGui.MenuItem("English", null, (byte)(L.IsChinese ? 0 : 1)) != 0) _pendingLanguage = "en";
-                if (ImGui.MenuItem(L.T("Chinese"), null, (byte)(L.IsChinese ? 1 : 0)) != 0) _pendingLanguage = "zh-Hans";
-                ImGui.EndMenu();
-            }
             ImGui.EndMenu();
         }
+        DrawApplicationSettingsMenuItem();
+        _menuBarFrameRate.Draw(showFrameRate: _applicationSettings.ShowFrameRate);
         ImGui.EndMainMenuBar();
     }
 
@@ -396,6 +419,11 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private void ClampSelection()
     {
         _floor = Math.Clamp(_floor, 0, _document.LastFloor);
+        if (_rangeAnchor is int anchor)
+        {
+            anchor = Math.Clamp(anchor, 0, _document.LastFloor);
+            _rangeAnchor = anchor == _floor ? null : anchor;
+        }
         _selectedDecorations.RemoveWhere(item => item.Parent is null);
         if (_decoration?.Parent is null)
         {
@@ -427,12 +455,15 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         SwitchPlaybackView(PlaybackView.Edit);
         _playbackFrameAvailable = false;
         _document = document;
+        _decorationRowsKey = null;
+        _decorationMarkersVersion = -1;
         _decoration = _particle = null;
         _showParticle = _inspectDecoration = false;
         _selectedDecorations.Clear();
         _hideAllDecorations = _lockAllDecorations = false;
         _dragDecoration = null;
         _pendingTiles.Clear();
+        _floorHitCycle.Reset();
         _savedEditCamera = null;
         _centerEditDecoration = null;
         SelectFloor(0, true);

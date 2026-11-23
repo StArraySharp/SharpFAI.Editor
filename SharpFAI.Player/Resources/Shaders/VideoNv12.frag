@@ -3,9 +3,9 @@
 uniform sampler2D uFrame;
 out vec4 packedBytes;
 
-const vec3 luma = vec3(0.299, 0.587, 0.114);
-const vec3 blueChroma = vec3(-0.168736, -0.331264, 0.5);
-const vec3 redChroma = vec3(0.5, -0.418688, -0.081312);
+const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+const vec3 blueChroma = vec3(-0.114572, -0.385428, 0.5);
+const vec3 redChroma = vec3(0.5, -0.454153, -0.045847);
 
 vec3 rgb(int x, int y)
 {

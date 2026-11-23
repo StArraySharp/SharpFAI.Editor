@@ -1,6 +1,8 @@
 using SharpFAI.Player.Engine;
 using SharpFAI.Player.Engine.Events;
 using SharpFAI.Player.Engine.Filters;
+using SharpFAI.Player.Engine.Play;
+using SharpFAI.Framework;
 using SharpFAI.Serialization;
 using System.Numerics;
 using Newtonsoft.Json;
@@ -9,6 +11,50 @@ namespace SharpFAI.Player.Tests;
 
 public sealed class TestGeneratedFilters
 {
+    [TestCase("Distortion_Half_Sphere", "Distortion_float_Sphere")]
+    [TestCase("Drawing_Halftone", "Drawing_floattone")]
+    public void UnresolvedOriginalShaderNamesAreNotAliased(string component, string serialized)
+    {
+        if (GeneratedFilterRegistry.Coverage.Length == 0)
+            Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
+        string name = "CameraFilterPack_" + component;
+        string shader = "CameraFilterPack/" + component;
+        var resources = typeof(PlayerWindow).Assembly.GetManifestResourceNames();
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratedFilterRegistry.Factories.ContainsKey(name), Is.True);
+            Assert.That(GeneratedFilterRegistry.ShaderNames[name], Is.EqualTo(shader));
+            Assert.That(resources, Does.Not.Contain("Resources.Shaders.Filters/" + shader + ".glsl"));
+            Assert.That(resources, Does.Contain("Resources.Shaders.Filters/CameraFilterPack/" + serialized + ".glsl"));
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(100f)]
+    [TestCase(-100f)]
+    public void LegacyTunnelRendersPolarScreenIndependentlyOfIntensity(float intensity)
+    {
+        if (GeneratedFilterRegistry.Coverage.Length == 0)
+            Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
+        var item = JsonConvert.DeserializeObject<CameraFilterEvent>(
+            $$"""{"eventType":"SetFilter","filter":"Tunnel","enabled":true,"intensity":{{intensity}}}""")!;
+        item.EventType = EventType.SetFilter;
+        using var filters = new FilterTimeline([new(item, 0, new(0, 0, EventEnums.Ease.Linear))], false);
+        var backend = new RecordingBackend();
+        var entry = filters.Evaluate(backend, 0).Single();
+        entry.Filter.Render(new Target(320, 180), new Target(320, 180));
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.Name, Is.EqualTo("PolarScreen"));
+            Assert.That(filters.ShaderNames(), Does.Contain("ADOFAI/PolarScreen"));
+            Assert.That(backend.Resources, Does.Contain("ADOFAI/PolarScreen"));
+            Assert.That(backend.Vectors["_ScreenResolution"], Is.EqualTo(new Vector4(320, 180, 0, 0)));
+            Assert.That(backend.Draws.Single().Material, Is.True);
+            Assert.That(typeof(PlayerWindow).Assembly.GetManifestResourceNames(),
+                Does.Contain("Resources.Shaders.Filters/ADOFAI/PolarScreen.glsl"));
+        });
+    }
+
     [TestCase("Drawing_Paper", "Pencil_Correction", 1.1f, 0.76f)]
     [TestCase("TV_CompressionFX", "Parasite", 3f, 1f)]
     [TestCase("Pixel_Pixelisation", "_Pixelisation", 4f, 0f)]
@@ -90,7 +136,7 @@ public sealed class TestGeneratedFilters
 
     [TestCase(false)]
     [TestCase(true)]
-    public void FirstAdvancedEventOverridesCameraAndDecorationDefaultsWithNeutralValues(bool decoration)
+    public void FirstAdvancedEventOverridesComponentDefaultsOnBothCameraPlanes(bool background)
     {
         if (GeneratedFilterRegistry.Coverage.Length == 0)
             Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
@@ -99,7 +145,7 @@ public sealed class TestGeneratedFilters
             """)!;
         var scheduled = new ScheduledEvent<CameraFilterEvent>(item, 0,
             new TrackTiming(0, 0, EventEnums.Ease.Linear));
-        using var filters = new FilterTimeline([scheduled], legacyTween: false, decoration: decoration);
+        using var filters = new FilterTimeline([scheduled], legacyTween: false, background: background);
         var filter = filters.Evaluate(new RecordingBackend(), 0).Single().Filter;
         Assert.That(filter.GetParameter("EdgeWeight")!.Value.X, Is.EqualTo(0f));
     }
@@ -154,6 +200,32 @@ public sealed class TestGeneratedFilters
         Assert.That(filters.Evaluate(backend, 0).Single().Filter.GetParameter("_Fade")!.Value.X, Is.EqualTo(.6f).Within(1e-6f));
         Assert.That(filters.Evaluate(backend, 1).Single().Filter.GetParameter("_Fade")!.Value.X, Is.EqualTo(0f));
         Assert.That(filters.Evaluate(backend, 2).Single().Filter.GetParameter("_Fade")!.Value.X, Is.EqualTo(.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void AdvancedDisableOthersKeepsLegacyFiltersAndCompletesThePreviousFieldTween()
+    {
+        if (GeneratedFilterRegistry.Coverage.Length == 0)
+            Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
+        var legacy = new CameraFilterEvent { EventType = EventType.SetFilter, Filter = "Grayscale" };
+        var first = JsonConvert.DeserializeObject<CameraFilterEvent>("""
+            {"filter":"CameraFilterPack_Color_Invert","filterProperties":{"filter__Fade":100}}
+            """)!;
+        var reset = new CameraFilterEvent
+        {
+            EventType = EventType.SetFilterAdvanced, Filter = first.Filter, DisableOthers = true,
+        };
+        first.EventType = EventType.SetFilterAdvanced;
+        using var filters = new FilterTimeline([
+            new(legacy, 0, new(0, 0, EventEnums.Ease.Linear)),
+            new(first, 0, new(0, 4, EventEnums.Ease.Linear)),
+            new(reset, 0, new(2, 2, EventEnums.Ease.Linear))], false);
+        var backend = new RecordingBackend();
+
+        var active = filters.Evaluate(backend, 2);
+        Assert.That(active.Select(entry => entry.Name), Is.EqualTo(new[] { "CameraFilterPackLegacy_Color_GrayScale", first.Filter }));
+        Assert.That(active[1].Filter.GetParameter("_Fade")!.Value.X, Is.Zero);
+        Assert.That(filters.Evaluate(backend, 4)[1].Filter.GetParameter("_Fade")!.Value.X, Is.EqualTo(1f));
     }
 
     [Test]
@@ -263,7 +335,7 @@ public sealed class TestGeneratedFilters
     }
 
     [Test]
-    public void AdvancedOmittedIntegerStartsAtZeroAndRendersWithoutDividingByZero()
+    public void AdvancedOmittedIntegerStartsAtZeroAndPreservesArithmeticFailure()
     {
         const string name = "CameraFilterPack_Blur_Movie";
         if (GeneratedFilterRegistry.Coverage.Length == 0)
@@ -282,13 +354,13 @@ public sealed class TestGeneratedFilters
         Assert.Multiple(() =>
         {
             Assert.That(active.Filter.GetParameter("FastFilter")!.Value.X, Is.EqualTo(0f));
-            Assert.DoesNotThrow(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
+            Assert.Throws<DivideByZeroException>(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
             Assert.That(backend.Temporary, Is.Null);
         });
     }
 
     [Test]
-    public void TriggeredDecorationFilterJoinsTheScheduleAndResetsOnRestart()
+    public void ConditionalCameraFilterJoinsItsPlaneAtTheTriggerAndResetsOnRestart()
     {
         if (GeneratedFilterRegistry.Coverage.Length == 0)
             Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
@@ -297,20 +369,30 @@ public sealed class TestGeneratedFilters
         {
             EventType = EventType.SetFilterAdvanced,
             Filter = "CameraFilterPack_Color_Invert",
+            EventTag = "hit",
+            AngleOffset = 180,
+            Plane = "1",
+            TargetType = "Decoration",
         };
-        using var filters = FilterTimeline.ForDecoration([], new Dictionary<string, int>(), false);
+        PlaybackEvent[] events = [new ConditionalDecorationEvent { Perfect = "hit" }, item];
+        Floor[] floors = [new(0, 180, default)];
+        double[] times = [0], bpm = [120];
+        using var front = FilterTimeline.Build(events, floors, times, bpm, false);
+        using var filters = FilterTimeline.Build(events, floors, times, bpm, false, background: true)!;
+        var triggers = ImageDecorationTimeline.Build(events, floors, times, bpm, null, [], CancellationToken.None)!;
+        triggers.BindCameraFilters(floors, bpm, front, filters);
         var backend = new RecordingBackend();
+        Assert.That(front, Is.Null);
         Assert.That(filters.HasDueEvent(1), Is.False);
-        filters.InsertTriggered(new ScheduledEvent<CameraFilterEvent>(item, 0,
-            new TrackTiming(2, 0, EventEnums.Ease.Linear)));
-        Assert.That(filters.Evaluate(backend, 1), Is.Empty);
+        triggers.TriggerCondition(0, HitMargin.Perfect, 1.5);
+        Assert.That(filters.Evaluate(backend, 1.99), Is.Empty);
         Assert.That(filters.Evaluate(backend, 2).Single().Name, Is.EqualTo(item.Filter));
-        filters.ResetTriggers();
+        triggers.ResetTriggers();
         Assert.That(filters.Evaluate(backend, 3), Is.Empty);
     }
 
     [Test]
-    public void AdvancedIntegerParameterTweensFromNeutralAndRendersAtZero()
+    public void AdvancedIntegerParameterTweensFromNeutralAndPreservesZeroFailure()
     {
         if (GeneratedFilterRegistry.Coverage.Length == 0)
             Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
@@ -328,7 +410,7 @@ public sealed class TestGeneratedFilters
         Assert.Multiple(() =>
         {
             Assert.That(active.Filter.GetParameter("FastFilter")!.Value.X, Is.EqualTo(0f));
-            Assert.DoesNotThrow(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
+            Assert.Throws<DivideByZeroException>(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
         });
         filters.Evaluate(backend, 1);
         Assert.That(active.Filter.GetParameter("FastFilter")!.Value.X, Is.EqualTo(4f).Within(1e-6f));
@@ -382,16 +464,19 @@ public sealed class TestGeneratedFilters
         Assert.That(failures, Is.Empty);
     }
 
-    [Test]
-    public void ExplicitZeroFastFilterDoesNotDivideByZero()
+    [TestCase("CameraFilterPack_Blur_Movie")]
+    [TestCase("CameraFilterPack_Blur_Blurry")]
+    [TestCase("CameraFilterPack_Blur_Tilt_Shift_Hole")]
+    public void ExplicitZeroFastFilterPreservesOriginalArithmeticFailure(string name)
     {
         if (GeneratedFilterRegistry.Coverage.Length == 0)
             Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
-        Assert.That(GeneratedFilterRegistry.Factories.TryGetValue("CameraFilterPack_Blur_Movie", out var create), Is.True);
+        Assert.That(GeneratedFilterRegistry.Factories.ContainsKey(name), Is.True);
 
         var item = JsonConvert.DeserializeObject<CameraFilterEvent>("""
-            {"filter":"CameraFilterPack_Blur_Movie","filter_FastFilter":0}
+            {"filter_FastFilter":0}
             """)!;
+        item.Filter = name;
         var scheduled = new ScheduledEvent<CameraFilterEvent>(item, 0,
             new TrackTiming(0, 1, EventEnums.Ease.Linear));
         var backend = new RecordingBackend();
@@ -399,7 +484,7 @@ public sealed class TestGeneratedFilters
 
         var active = filters.Evaluate(backend, 1).Single();
         Assert.That(active.Filter.GetParameter("FastFilter")!.Value.X, Is.EqualTo(0f));
-        Assert.DoesNotThrow(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
+        Assert.Throws<DivideByZeroException>(() => active.Filter.Render(new Target(128, 96), new Target(128, 96)));
     }
 
     [Test]
@@ -429,6 +514,22 @@ public sealed class TestGeneratedFilters
             Assert.That(IntensityAt(2), Is.EqualTo(0.6f).Within(1e-6f));
             Assert.That(IntensityAt(0.5), Is.EqualTo(0.25f).Within(1e-6f));
         });
+    }
+
+    [Test]
+    public void DurationDefersLegacyOnAndOffUntilTheirFirstTweenSample()
+    {
+        ScheduledEvent<CameraFilterEvent> Event(double start, bool enabled) => new(
+            new CameraFilterEvent { EventType = EventType.SetFilter, Filter = "17", FilterEnabled = enabled },
+            0, new TrackTiming(start, 1, EventEnums.Ease.Linear));
+        using var filters = new FilterTimeline([Event(0, true), Event(2, false)], false);
+        var backend = new RecordingBackend();
+        Assert.That(filters.Evaluate(backend, 0), Is.Empty);
+        Assert.That(filters.HasDueEvent(0.5), Is.True);
+        var motion = (CameraMotionBlurFilter)filters.Evaluate(backend, 0.5).Single().Filter;
+        Assert.That(motion.VelocityScale, Is.EqualTo(.1875f));
+        Assert.That(filters.Evaluate(backend, 2).Count, Is.EqualTo(1));
+        Assert.That(filters.Evaluate(backend, 2.1), Is.Empty);
     }
 
     [Test]
@@ -490,7 +591,7 @@ public sealed class TestGeneratedFilters
 
         Assert.Multiple(() =>
         {
-            Assert.That(passes.Select(pass => pass.Legacy!.Value.Component), Is.EqualTo(new[]
+            Assert.That(passes.Select(pass => pass.Name), Is.EqualTo(new[]
             {
                 "CameraFilterPackLegacy_Color_Sepia",
                 "CameraFilterPackLegacy_Blizzard",
@@ -512,6 +613,7 @@ public sealed class TestGeneratedFilters
         public List<string> Resources { get; } = [];
         public List<string> Textures { get; } = [];
         public Dictionary<string, float> Floats { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Vector4> Vectors { get; } = new(StringComparer.Ordinal);
         public List<(int Source, int Destination, bool Material, int Pass)> Draws { get; } = [];
         public (int Width, int Height, int Depth) Rented { get; private set; }
         public Target? Temporary { get; private set; }
@@ -545,7 +647,7 @@ public sealed class TestGeneratedFilters
             Draws.Add((source.Width, destination.Width, material is not null, pass));
         public void SetFloat(string name, float value) => Floats[name] = value;
         public void SetInt(string name, int value) => Floats[name] = value;
-        public void SetVector(string name, Vector4 value) { }
+        public void SetVector(string name, Vector4 value) => Vectors[name] = value;
         public void SetTexture(string name, IFilterTexture? value) => Textures.Add(name);
     }
 }

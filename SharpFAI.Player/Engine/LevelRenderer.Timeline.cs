@@ -60,11 +60,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         double offsetSeconds = ReadLevelOffset(level);
-        double pitch = ReadSetting(level, "pitch", 100.0) / 100.0;
-        if (!(pitch > 1e-6) || !double.IsFinite(pitch))
-        {
-            pitch = 1.0;
-        }
+        double pitch = ReadPlaybackPitch(level.root["settings"] as Newtonsoft.Json.Linq.JObject);
 
         double bpm = ReadSetting(level, "bpm", 0.0);
         if (!(bpm > 1e-6))
@@ -205,10 +201,13 @@ public sealed unsafe partial class LevelRenderer
         };
     }
 
-    /// <summary>
-    /// Main thread: install a computed timeline and reset the camera and planet state to the start.
-    /// </summary>
-    private void ApplyTimelineData(PlaybackTimeline timeline)
+    private static double ReadPlaybackPitch(Newtonsoft.Json.Linq.JObject? settings)
+    {
+        double pitch = LevelPlaybackSettings.Setting(settings, "pitch", 100.0) / 100.0;
+        return pitch > 1e-6 && double.IsFinite(pitch) ? pitch : 1.0;
+    }
+
+    private void SetTimelineData(PlaybackTimeline timeline)
     {
         _entryTimes = timeline.EntryTimes;
         _sweepStart = timeline.SweepStart;
@@ -218,10 +217,15 @@ public sealed unsafe partial class LevelRenderer
         _levelDuration = timeline.LevelDuration;
         _offsetSeconds = timeline.OffsetSeconds;
         _pitch = timeline.Pitch;
+    }
 
+    private void ApplyTimelineData(PlaybackTimeline timeline)
+    {
+        SetTimelineData(timeline);
         _currentIndex = 0;
         _playTime = 0.0;
         _isPlaying = false;
+        _playbackZoomNeedsReset = true;
         _duration = _levelDuration;
 
         if (_floors.Count == 0)
@@ -236,7 +240,8 @@ public sealed unsafe partial class LevelRenderer
         _cameraSnap = false;
         _cameraIndex = 0;
         _cameraFrom = _cameraTo = LevelCameraTarget(_planetCenter);
-        _cameraElapsed = _cameraDuration = 0.0;
+        _cameraElapsed = 0.0;
+        ResetCameraHit();
         _lastCameraTime = 0.0;
         _cameraFree = false;
         _camera.Position = _cameraTo;

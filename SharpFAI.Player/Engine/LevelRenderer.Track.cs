@@ -87,12 +87,14 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    private (Vector2 Center, float Rotation) PlanetAnchor(int index)
+    private (Vector2 Center, float Rotation) PlanetAnchor(int index) => PlanetAnchor(index, _playTime);
+
+    private (Vector2 Center, float Rotation) PlanetAnchor(int index, double time)
     {
         var position = _floors[index].position;
         Vector2 anchor = new(position.X, position.Y);
         var motion = _runtimeTrackActive && _trackRuntime is { } runtime
-            ? runtime.PlanetMotionAt(index, _playTime)
+            ? runtime.PlanetMotionAt(index, time)
             : default;
         return (anchor + motion.Offset, motion.Rotation);
     }
@@ -136,8 +138,11 @@ public sealed unsafe partial class LevelRenderer
         FloorTrackState[] states, ref float? volume)
     {
         renderer.SetMaterials(states, runtime?.MaterialRevision ?? 0, _styleOverride, indices);
-        for (int i = 0; i < renderer.FloorCount; i++)
+        int[]? selection = renderer.LevelSelection;
+        int count = selection?.Length ?? renderer.FloorCount;
+        for (int local = 0; local < count; local++)
         {
+            int i = selection?[local] ?? local;
             int floor = indices?[i] ?? i;
             ref readonly FloorTrackState state = ref states[floor];
             FloorRenderTransform transform = state.Transform;
@@ -157,9 +162,10 @@ public sealed unsafe partial class LevelRenderer
             if (_floorPositionRemainders is { } remainders)
                 transform = transform with { Offset = transform.Offset + remainders[floor] };
 
+            // The static chart shows unlit tiles. Track glow intensity controls the playback effect.
             var appearance = runtime is not null
                 ? runtime.AppearanceAt(floor, _playTime, opacity, trackVolume, color)
-                : new FloorAppearance(color ?? state.EvaluateColor(floor, (float)_playTime, trackVolume), opacity, state.GlowMultiplier);
+                : new FloorAppearance(color ?? state.EvaluateColor(floor, (float)_playTime, trackVolume), opacity);
             renderer.SetFloorVisual(i, transform, appearance);
         }
     }

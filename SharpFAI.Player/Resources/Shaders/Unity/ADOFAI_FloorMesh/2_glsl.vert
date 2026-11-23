@@ -35,8 +35,6 @@ flat out vec3 vs_TILEOFFSET;
 flat out int vs_OUTLINESLOT;
 flat out float vs_OPACITY;
 flat out float vs_GLOW;
-vec4 u_xlat0;
-vec4 u_xlat1;
 void main()
 {
     vec4 position = aPosition;
@@ -55,15 +53,15 @@ void main()
     int floorId = int(position.w);
     // Four RGBA32F texels per floor: color, transform, appearance, and active material.
     ivec2 address = ivec2((floorId % 256) * 4, floorId / 256);
+    vec4 scaleOpacity = texelFetch(uFloorData, address + ivec2(2, 0), 0);
     vec4 variantOffset = texelFetch(uFloorData, address + ivec2(3, 0), 0);
-    if (variantOffset.x != iconData.y)
+    if (scaleOpacity.z == 0.0 || variantOffset.x != iconData.y)
     {
         gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
         return;
     }
     vec4 floorColor = texelFetch(uFloorData, address, 0);
     vec4 transform = texelFetch(uFloorData, address + ivec2(1, 0), 0);
-    vec4 scaleOpacity = texelFetch(uFloorData, address + ivec2(2, 0), 0);
     vec4 vertexColor = aVertexColor;
     vec4 uv = vec4(aTexCoord, aTileCoord);
     vec4 style = aStyleParams;
@@ -85,27 +83,17 @@ void main()
     vec2 relative = (transform.xy - uCameraOrigin) + variantOffset.yz;
     relative += mat2(transform.z, transform.w, -transform.w, transform.z) * local;
 
-    u_xlat0 = relative.yyyy * uModel[1];
-    u_xlat0 = uModel[0] * relative.xxxx + u_xlat0;
-    u_xlat0 = uModel[2] * position.zzzz + u_xlat0;
-    u_xlat0 = u_xlat0 + uModel[3];
-    u_xlat1 = u_xlat0.yyyy * uViewProjection[1];
-    u_xlat1 = uViewProjection[0] * u_xlat0.xxxx + u_xlat1;
-    u_xlat1 = uViewProjection[2] * u_xlat0.zzzz + u_xlat1;
-    u_xlat0 = uViewProjection[3] * u_xlat0.wwww + u_xlat1;
-    u_xlat0.xy = u_xlat0.xy / u_xlat0.ww;
-    u_xlat1.xy = uScreenParams.xy * vec2(0.5, 0.5);
-    u_xlat0.xy = u_xlat0.xy * u_xlat1.xy;
-    u_xlat0.xy = roundEven(u_xlat0.xy);
-    u_xlat0.xy = u_xlat0.xy / u_xlat1.xy;
-    gl_Position.xy = u_xlat0.ww * u_xlat0.xy;
-    gl_Position.zw = u_xlat0.zw;
-    u_xlat0.xyz = (-floorColor.xyz) + vec3(1.0, 1.0, 1.0);
-    u_xlat0.xyz = vec3(_FlashColor) * u_xlat0.xyz + floorColor.xyz;
-    vs_COLOR0.xyz = u_xlat0.xyz * vertexColor.xyz;
-    vs_COLOR0.w = vertexColor.w * floorColor.w;
-    vs_TEXCOORD0.xy = uv.xy;
-    vs_TEXCOORD1.xy = uv.zw;
+    mat4 model = mat4(uModel[0], uModel[1], uModel[2], uModel[3]);
+    mat4 viewProjection = mat4(uViewProjection[0], uViewProjection[1], uViewProjection[2], uViewProjection[3]);
+    vec4 clipPosition = viewProjection * (model * vec4(relative, position.z, 1.0));
+    vec2 halfViewport = uScreenParams.xy * 0.5;
+    vec2 pixelPosition = roundEven(clipPosition.xy / clipPosition.w * halfViewport);
+    gl_Position = vec4((pixelPosition / halfViewport) * clipPosition.w, clipPosition.zw);
+
+    vec3 flashedColor = floorColor.rgb + _FlashColor * (vec3(1.0) - floorColor.rgb);
+    vs_COLOR0 = vec4(flashedColor, floorColor.a) * vertexColor;
+    vs_TEXCOORD0 = uv.xy;
+    vs_TEXCOORD1 = uv.zw;
     vs_ICONDATA = vec4(iconData.x, 0.75, iconData.zw);
     vs_STYLEPARAMS = style;
     vs_SHADOWCOLOR = vec4(shadow.xyz * floorColor.xyz, shadow.w);

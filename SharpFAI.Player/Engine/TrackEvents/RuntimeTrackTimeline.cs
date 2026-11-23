@@ -31,7 +31,7 @@ internal sealed class RuntimeTrackTimeline
     }
 
     private readonly FloorTrackState[] _baseline;
-    private readonly TrackAnimationWindow[]? _animation;
+    private readonly TrackAnimationWindow[] _animation;
     private readonly IReadOnlyList<Floor> _floors;
     private readonly double[] _entries;
     private readonly double[]? _floorBpms;
@@ -50,13 +50,10 @@ internal sealed class RuntimeTrackTimeline
         _entries = entries;
         _floorBpms = floorBpms;
         _pitch = pitch;
-        if (floors.Count < VisibleFloorIndex.MinimumFloorCount)
+        _animation = new TrackAnimationWindow[floors.Count];
+        for (int i = 0; i < floors.Count; i++)
         {
-            _animation = new TrackAnimationWindow[floors.Count];
-            for (int i = 0; i < floors.Count; i++)
-            {
-                _animation[i] = CreateAnimation(i);
-            }
+            _animation[i] = CreateAnimation(i);
         }
 
         _events = TimedEventSchedule.Build<TrackRangeEvent>(events, floors, entries, floorBpms);
@@ -78,7 +75,7 @@ internal sealed class RuntimeTrackTimeline
         {
             return FloorTimeRange.All;
         }
-        TrackAnimationWindow window = _animation?[floor] ?? CreateAnimation(floor);
+        ref readonly TrackAnimationWindow window = ref _animation[floor];
         return new FloorTimeRange(window.Appear == TrackAnimation.Fade ? window.AppearStart : double.NegativeInfinity,
             window.Disappear == TrackAnimation.None ? double.PositiveInfinity : window.DisappearStart + window.Duration);
     }
@@ -195,7 +192,7 @@ internal sealed class RuntimeTrackTimeline
             if (!basis.Hidden)
                 opacity = motion.Opacity?.At(time) ?? opacity;
         }
-        (_animation?[floor] ?? CreateAnimation(floor)).Apply(time, hidePassed, ref transform, ref opacity);
+        _animation[floor].Apply(time, hidePassed, ref transform, ref opacity);
         return (transform, opacity);
     }
 

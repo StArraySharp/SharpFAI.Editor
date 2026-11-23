@@ -16,7 +16,9 @@ internal sealed class EditorDocument
     private readonly List<Edit> _edits = [];
     private int _revision;
     private int _savedRevision;
-    private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null, object? Group = null);
+    private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null,
+        object? Group = null, bool SettingsOnly = false);
+    private int _lastChartChange;
     private readonly Dictionary<JObject, int> _effectChanges = new(ReferenceEqualityComparer.Instance);
     private int _lastFullPlaybackChange;
 
@@ -78,7 +80,7 @@ internal sealed class EditorDocument
             (ReferenceEquals(target.Parent, _actions) || ReferenceEquals(target.Parent, _decorations)) &&
             LevelRenderer.SupportsEditorEffect(Type(target));
         Apply(new(() => Write(value), () => Write(before), name == "floor" && ReferenceEquals(target.Parent, _actions),
-            isEffect ? target : null, group));
+            isEffect ? target : null, group, SettingsOnly: ReferenceEquals(target, Settings)));
 
         void Write(JToken? token)
         {
@@ -353,6 +355,7 @@ internal sealed class EditorDocument
     public Level SnapshotForPlayback() => _level.CreateSnapshot(PlaybackPath);
 
     public bool HasOnlyEffectChangesSince(int version) => version >= _lastFullPlaybackChange;
+    public bool CanReusePlaybackChart(int version) => version >= _lastChartChange;
 
     public LevelRenderer.EditorEffectPatch[] EffectChangesSince(int version)
     {
@@ -430,7 +433,8 @@ internal sealed class EditorDocument
             _savedRevision != _revision && ReferenceEquals(_edits[_revision - 1].Group, edit.Group))
         {
             var previous = _edits[_revision - 1];
-            _edits[_revision - 1] = edit with { Undo = previous.Undo, Events = previous.Events || edit.Events };
+            _edits[_revision - 1] = edit with { Undo = previous.Undo, Events = previous.Events || edit.Events,
+                SettingsOnly = previous.SettingsOnly && edit.SettingsOnly };
             Refresh(edit);
             return;
         }
@@ -448,6 +452,7 @@ internal sealed class EditorDocument
     private void Refresh(Edit edit)
     {
         ChangeVersion++;
+        if (!edit.SettingsOnly) _lastChartChange = ChangeVersion;
         if (edit.Effect is { } effect)
             _effectChanges[effect] = ChangeVersion;
         else

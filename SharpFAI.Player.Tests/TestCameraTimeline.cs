@@ -95,22 +95,74 @@ public class TestCameraTimeline
     }
 
     [Test]
-    public void SwitchingBetweenPlayerAndGlobalStartsFromTheVisibleCameraPosition()
+    public void SwitchingModesRebasesInParentSpaceAndFreezesTheFollowCenterAtTheEvent()
     {
-        (CameraTimeline camera, LevelRenderer.PlaybackTimeline time, float spacing) = Build(
-            """{"floor":1,"eventType":"MoveCamera","duration":1,"relativeTo":"Global","position":[5,6]}""",
-            """{"floor":3,"eventType":"MoveCamera","duration":1,"relativeTo":"Player","position":[0,0]}""");
+        Vector2 PlanetAt(double _) => new(50, -30);
+        Vector2 FollowAt(double t, CameraTimeline.FollowStart? start) => start is { } entry
+            ? entry.Center + new Vector2((float)(t - entry.Time) * 10, 0)
+            : new Vector2(20 + (float)t * 10, -10);
+        (CameraTimeline camera, LevelRenderer.PlaybackTimeline time, float spacing) = BuildWithFollow(FollowAt, PlanetAt, 100,
+            """{"floor":0,"eventType":"MoveCamera","duration":8,"relativeTo":"Player","position":[3,4]}""",
+            """{"floor":1,"eventType":"MoveCamera","angleOffset":90,"duration":1,"relativeTo":"Global","position":[5,6]}""",
+            """{"floor":3,"eventType":"MoveCamera","duration":2,"relativeTo":"Player","position":[0,0]}""",
+            """{"floor":4,"eventType":"MoveCamera","duration":1,"relativeTo":"Tile","position":[2,null]}""");
 
-        Vector2 laggingPlayer = new(20, -10);
-        Assert.That(camera.Evaluate(time.EntryTimes[1], laggingPlayer, 100).Position,
-            Is.EqualTo(laggingPlayer + new Vector2(1, 2) * spacing));
-        Assert.That(camera.Evaluate(time.EntryTimes[3], laggingPlayer, 100).Position,
-            Is.EqualTo(new Vector2(5, 6) * spacing));
-        Assert.That(camera.Evaluate(time.EntryTimes[3] + .5, laggingPlayer, 100).Position,
-            Is.EqualTo(laggingPlayer));
+        double exit = time.EntryTimes[1] + .25;
+        double entry = time.EntryTimes[3];
+        double nextExit = time.EntryTimes[4];
+        Vector2 frozen = FollowAt(exit, null) + new Vector2(3, 4) * spacing;
+        Vector2 global = new Vector2(5, 6) * spacing;
+        Vector2 middle = Vector2.Lerp(frozen, global, .5f);
+        Assert.Multiple(() =>
+        {
+            Assert.That(camera.Evaluate(nextExit, 100).Position, Is.EqualTo(PlanetAt(entry) + new Vector2(5, 0)));
+            Assert.That(camera.Evaluate(exit + .25, 100).Position, Is.EqualTo(middle));
+            Assert.That(camera.Evaluate(exit, 100).Position, Is.EqualTo(frozen));
+            Assert.That(camera.Evaluate(entry, 100).Position, Is.EqualTo(global));
+            Assert.That(camera.Evaluate(exit + .25, 100).Position, Is.EqualTo(middle));
+        });
     }
 
-    private static (CameraTimeline Camera, LevelRenderer.PlaybackTimeline Timeline, float Spacing) Build(params string[] actions)
+    [Test]
+    public void ZeroZoomDisablesAtCompletionAndCompletesWhenInterrupted()
+    {
+        (CameraTimeline camera, LevelRenderer.PlaybackTimeline time, _) = Build(
+            """{"floor":1,"eventType":"MoveCamera","duration":4,"zoom":0}""",
+            """{"floor":2,"eventType":"MoveCamera","duration":1,"zoom":250,"disabled":{"zoom":true}}""",
+            """{"floor":3,"eventType":"MoveCamera","duration":2,"zoom":200}""",
+            """{"floor":5,"eventType":"MoveCamera","duration":0,"zoom":0}""");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(camera.Evaluate(time.EntryTimes[0], 100).Zoom, Is.Null);
+            Assert.That(camera.Evaluate(time.EntryTimes[2], 100).Zoom, Is.EqualTo(75));
+            Assert.That(camera.Evaluate(time.EntryTimes[3], 100).CameraDisabled, Is.True);
+            Assert.That(camera.Evaluate(time.EntryTimes[3] + .5, 100).Zoom, Is.EqualTo(100));
+            Assert.That(camera.Evaluate(time.EntryTimes[5], 100).CameraDisabled, Is.True);
+            Assert.That(camera.Evaluate(time.EntryTimes[2], 100).CameraDisabled, Is.False);
+        });
+    }
+
+    [Test]
+    public void InitialZeroZoomIsDistinctFromAnAbsentSetting()
+    {
+        const string action = """{"floor":1,"eventType":"MoveCamera","duration":1,"zoom":200}""";
+        var zero = BuildWithFollow(null, null, 0, action);
+        var absent = BuildWithFollow(null, null, null, action);
+        Assert.Multiple(() =>
+        {
+            Assert.That(zero.Camera.Evaluate(zero.Timeline.EntryTimes[0], 100).CameraDisabled, Is.True);
+            Assert.That(zero.Camera.Evaluate(zero.Timeline.EntryTimes[1] + .25, 100).Zoom, Is.EqualTo(100));
+            Assert.That(absent.Camera.Evaluate(absent.Timeline.EntryTimes[0], 100).Zoom, Is.Null);
+            Assert.That(absent.Camera.Evaluate(absent.Timeline.EntryTimes[1] + .25, 100).Zoom, Is.EqualTo(150));
+        });
+    }
+
+    private static (CameraTimeline Camera, LevelRenderer.PlaybackTimeline Timeline, float Spacing) Build(params string[] actions) =>
+        BuildWithFollow(null, null, 100, actions);
+
+    private static (CameraTimeline Camera, LevelRenderer.PlaybackTimeline Timeline, float Spacing) BuildWithFollow(
+        CameraTimeline.FollowSampler? followAt, Func<double, Vector2>? playerAt, float? zoom, params string[] actions)
     {
         Level level = new(new Dictionary<string, object>
         {
@@ -119,15 +171,17 @@ public class TestCameraTimeline
             {
                 ["version"] = 15, ["bpm"] = 120, ["pitch"] = 100, ["offset"] = 0, ["countdownTicks"] = 1,
                 ["separateCountdownTime"] = false,
-                ["relativeTo"] = "Player", ["position"] = new JArray(1, 2), ["zoom"] = 100,
+                ["relativeTo"] = "Player", ["position"] = new JArray(1, 2),
             },
             ["actions"] = new JArray(actions.Select(JObject.Parse)),
         });
+        if (zoom.HasValue)
+            level.PutSetting("zoom", zoom.Value);
         List<Floor> floors = level.CreateFloors();
         PlaybackEvent[] events = PlaybackEventBinder.BindForPlayback(level);
         LevelRenderer.PlaybackTimeline timeline = LevelRenderer.BuildTimeline(level, floors, events);
         float spacing = Floor.length * 2f;
-        return (CameraTimeline.Build(events, floors, timeline, LevelPlaybackSettings.Read(level), spacing)!,
+        return (CameraTimeline.Build(events, floors, timeline, LevelPlaybackSettings.Read(level), spacing, followAt, playerAt)!,
             timeline, spacing);
     }
 }

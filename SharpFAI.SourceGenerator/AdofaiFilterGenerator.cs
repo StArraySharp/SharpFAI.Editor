@@ -50,7 +50,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 output.ReportDiagnostic(Diagnostic.Create(InvalidInput, Location.None, error.Message));
-                EmitRegistry(output, new(), new(), Array.Empty<string>());
+                EmitRegistry(output, [], [], [], [], Array.Empty<string>());
             }
         });
     }
@@ -59,12 +59,14 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
     {
         List<string> factories = new();
         List<string> legacy = new();
+        List<string> shaderNames = new();
+        List<string> textureNames = new();
         SortedDictionary<string, string> coverage = new(StringComparer.Ordinal);
         List<Candidate> candidates = new();
 
         if (string.IsNullOrWhiteSpace(manifest))
         {
-            EmitRegistry(output, factories, legacy, coverage.Values);
+            EmitRegistry(output, factories, legacy, shaderNames, textureNames, coverage.Values);
             return;
         }
 
@@ -100,6 +102,8 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         string game = paths["Assembly-CSharp.dll"];
         var components = ModuleDefinition.FromFile(firstpass).GetAllTypes()
             .Where(type => type.Name?.ToString().StartsWith("CameraFilterPack", StringComparison.Ordinal) == true)
+            .Concat(ModuleDefinition.FromFile(game).GetAllTypes()
+                .Where(type => type.FullName == "PolarScreen"))
             .OrderBy(type => type.FullName, StringComparer.Ordinal);
         CSharpDecompiler decompiler = OpenDecompiler(firstpass);
         CSharpDecompiler gameDecompiler = OpenDecompiler(game);
@@ -116,9 +120,12 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
             string resourceStatus = required.Length == 0 ? "unresolved" :
                 missing.Length == 0 ? "packaged" : "missing " + string.Join(", ", missing);
             bool initial = InitialComponents.Contains(name);
+            bool hasUnassignedShader = name == "CameraFilterPack_Colors_HSV" && required.Length == 0;
             string[] shaders = required.Where(item => item.EndsWith(".glsl", StringComparison.Ordinal)).ToArray();
-            if (!initial && (missing.Length != 0 || shaders.Length != 1 ||
-                multiExport.Contains("Resources.Shaders.Filters/" + shaders[0])))
+            // Keep single-shader components whose only missing resource is the shader:
+            // the backend passes through when the original Shader.Find name is unresolved.
+            if (!initial && !hasUnassignedShader && (missing.Any(item => !item.EndsWith(".glsl", StringComparison.Ordinal)) ||
+                shaders.Length != 1 || multiExport.Contains("Resources.Shaders.Filters/" + shaders[0])))
             {
                 coverage[name] = Report(name, "pending conversion", resourceStatus,
                     missing.Length != 0 ? "required resource unavailable" : "shader selection or multi-export layout requires mapping");
@@ -127,7 +134,8 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
 
             try
             {
-                string source = decompiler.DecompileTypeAsString(new FullTypeName(name));
+                string source = (name == "PolarScreen" ? gameDecompiler : decompiler)
+                    .DecompileTypeAsString(new FullTypeName(name));
                 ClassDeclarationSyntax declaration = SyntaxFactory.ParseCompilationUnit(source)
                     .DescendantNodes().OfType<ClassDeclarationSyntax>().Single();
                 string generated = Convert(component, declaration);
@@ -141,7 +149,11 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                 }
                 var tree = CSharpSyntaxTree.ParseText(SourceText.From(generated, Encoding.UTF8),
                     (CSharpParseOptions?)compilation.SyntaxTrees.FirstOrDefault()?.Options, name + ".g.cs", output.CancellationToken);
-                candidates.Add(new Candidate(name, tree, resourceStatus, binding, detail));
+                string? shaderName = shaders.Length == 1
+                    ? shaders[0].Substring(0, shaders[0].Length - ".glsl".Length) : null;
+                var textures = required.Where(item => item.EndsWith(".png", StringComparison.Ordinal))
+                    .Select(item => item.Substring(0, item.Length - ".png".Length)).ToArray();
+                candidates.Add(new Candidate(name, tree, resourceStatus, binding, shaderName, textures, detail));
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
@@ -166,19 +178,28 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
             }
             output.AddSource(candidate.Name + ".g.cs", candidate.Tree.GetText(output.CancellationToken));
             factories.Add("[" + Quote(candidate.Name) + "] = static backend => new " + candidate.Name + "(backend),");
+            if (candidate.ShaderName is { } shaderName)
+                shaderNames.Add("[" + Quote(candidate.Name) + "] = " + Quote(shaderName) + ",");
+            if (candidate.Textures.Length != 0)
+                textureNames.Add("[" + Quote(candidate.Name) + "] = [" +
+                    string.Join(", ", candidate.Textures.Select(Quote)) + "],");
             if (candidate.Binding is { } binding)
                 legacy.Add(binding);
             coverage[candidate.Name] = Report(candidate.Name, "generated", candidate.ResourceStatus, candidate.Detail);
         }
-        EmitRegistry(output, factories, legacy, coverage.Values);
+        EmitRegistry(output, factories, legacy, shaderNames, textureNames, coverage.Values);
     }
 
-    private sealed class Candidate(string name, SyntaxTree tree, string resourceStatus, string? binding, string detail)
+    private sealed class Candidate(string name, SyntaxTree tree, string resourceStatus, string? binding, string? shaderName,
+        string[] textures, string detail)
     {
         public string Name { get; } = name;
         public SyntaxTree Tree { get; } = tree;
         public string ResourceStatus { get; } = resourceStatus;
         public string? Binding { get; } = binding;
+        /// <summary>Unity shader name the component draws with, e.g. <c>CameraFilterPack/Color_GrayScale</c>.</summary>
+        public string? ShaderName { get; } = shaderName;
+        public string[] Textures { get; } = textures;
         public string Detail { get; } = detail;
     }
 
@@ -340,11 +361,6 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                 (Name: variable.Identifier.ValueText, Type: field.Declaration.Type.ToString()))).ToArray();
         string Has(string method) => methods.Any(item => item.Identifier.ValueText == method &&
             (item.Body?.Statements.Count != 0 || item.ExpressionBody is not null)) ? method + "();" : "";
-        foreach (var member in selected)
-            foreach (var variable in member.DescendantNodes().OfType<VariableDeclarationSyntax>()
-                .Where(declaration => declaration.Type.ToString() == "int")
-                .SelectMany(declaration => declaration.Variables))
-                rewriter.Integers.Add(variable.Identifier.ValueText);
         string members = string.Join("\n", selected.Select(member =>
         {
             rewriter.Member = member is MethodDeclarationSyntax method ? method.Identifier.ValueText : member.Kind().ToString();
@@ -525,7 +541,8 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         "UnityEngine.Graphics::Blit(UnityEngine.Texture, UnityEngine.RenderTexture, UnityEngine.Material, System.Int32)",
     };
 
-    private static void EmitRegistry(SourceProductionContext output, List<string> factories, List<string> legacy, IEnumerable<string> coverage)
+    private static void EmitRegistry(SourceProductionContext output, List<string> factories, List<string> legacy,
+        List<string> shaderNames, List<string> textureNames, IEnumerable<string> coverage)
     {
         output.AddSource("GeneratedFilterRegistry.g.cs", SourceText.From($$"""
             // <auto-generated />
@@ -537,6 +554,15 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                 internal static readonly Dictionary<string, Func<IFilterBackend, IGeneratedFilter>> Factories = new(StringComparer.Ordinal)
                 {
                     {{string.Join("\n", factories)}}
+                };
+                /// <summary>Unity shader name for each generated component, used to compile it ahead of use.</summary>
+                internal static readonly Dictionary<string, string> ShaderNames = new(StringComparer.Ordinal)
+                {
+                    {{string.Join("\n", shaderNames)}}
+                };
+                internal static readonly Dictionary<string, string[]> TextureNames = new(StringComparer.Ordinal)
+                {
+                    {{string.Join("\n", textureNames)}}
                 };
                 internal static readonly Dictionary<string, Func<IFilterBackend, IGeneratedFilter>> CameraFactories = new(StringComparer.Ordinal)
                 {

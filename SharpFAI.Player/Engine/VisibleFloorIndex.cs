@@ -63,6 +63,26 @@ internal sealed class VisibleFloorIndex
     public Aabb Bounds { get; }
     public FloorShapeLibrary Shapes { get; }
 
+    public VisibleFloorIndex WithTiming(RuntimeTrackTimeline runtime, CancellationToken token)
+    {
+        var floors = new FloorTimeRange[_floorTimes.Length];
+        var groups = new FloorTimeRange[_groupTimes.Length];
+        for (int group = 0; group < groups.Length; group++)
+        {
+            token.ThrowIfCancellationRequested();
+            var combined = FloorTimeRange.Empty;
+            int end = Math.Min((group + 1) * FloorsPerGroup, floors.Length);
+            for (int i = group * FloorsPerGroup; i < end; i++)
+            {
+                floors[i] = runtime.VisibilityAt(i);
+                combined = combined.Union(floors[i]);
+            }
+            groups[group] = combined;
+        }
+        return new VisibleFloorIndex(_regions, _groups, floors, groups,
+            new FloorRegion(Bounds.Min.Xy, Bounds.Max.Xy), Shapes);
+    }
+
     public static VisibleFloorIndex Build(IReadOnlyList<Floor> floors, FloorTrackState[] preview,
         RuntimeTrackTimeline runtime, HashSet<FloorMaterial>?[] materials, CancellationToken token,
         TrackStyleInfo? styleOverride = null, FloorRenderTransform[]? overrides = null, FloorShapeLibrary? existingShapes = null)

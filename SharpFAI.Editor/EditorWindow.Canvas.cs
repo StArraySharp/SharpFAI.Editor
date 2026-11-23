@@ -1,3 +1,4 @@
+using System.Globalization;
 using ImGui4NET;
 using Newtonsoft.Json.Linq;
 using OpenTK.Mathematics;
@@ -20,11 +21,15 @@ internal sealed unsafe partial class EditorWindow
     private bool _grid = true;
     private bool _directionGuide = true;
     private bool _showArbitraryAngle;
+    private string? _angleDraft;
     private bool _centerEditSelection = true;
     private enum CanvasGesture { None, Click, Drag }
     private readonly record struct PendingTile(int Floor, int Version, double Direction);
     private readonly List<PendingTile> _pendingTiles = [];
-    private bool _centerPendingTile;
+    private readonly List<int> _canvasFloorHits = [];
+    private readonly List<int> _decorationMarkers = [];
+    private int _decorationMarkersVersion = -1;
+    private readonly FloorHitCycle _floorHitCycle = new();
     private bool _canvasPress;
     private bool _canvasDrag;
     private double? _pressedDirection;
@@ -71,9 +76,8 @@ internal sealed unsafe partial class EditorWindow
                 heading = angles[i] == 999 ? (heading + 180) % 360 : angles[i];
                 _pendingTiles.Add(new(_floor + i + 1, _document.ChangeVersion, heading));
             }
-            _centerPendingTile = true;
         }
-        SelectFloor(_floor + angles.Length, true);
+        SelectFloor(_floor + angles.Length, false);
     }
 
     private void DrawCanvas()
@@ -87,6 +91,19 @@ internal sealed unsafe partial class EditorWindow
                 DrawPlaybackCanvas();
         }
         ImGui.End();
+    }
+
+    private void UpdateDecorationMarkers()
+    {
+        if (_document.ChangeVersion == _decorationMarkersVersion)
+            return;
+
+        _decorationMarkersVersion = _document.ChangeVersion;
+        _decorationMarkers.Clear();
+        var decorations = _document.Decorations;
+        for (int index = 0; index < decorations.Count; index++)
+            if (decorations[index] is JObject item && EditorDocument.Type(item) is not ("AddDecoration" or "AddText"))
+                _decorationMarkers.Add(index);
     }
 
     private static float ButtonWidth(string label) =>
@@ -104,6 +121,22 @@ internal sealed unsafe partial class EditorWindow
         string label = L.T(key);
         ContinueToolbar(ImGui.CalcTextSize(label).x + ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x);
         Toggle(label, ref value);
+    }
+
+    private bool DrawArbitraryAngleInput()
+    {
+        const string id = "##arbitrary-angle";
+        bool submit = ImGui.GetCurrentContext()->ActiveId == ImGui.GetID(id) &&
+            (Pressed(ImGuiKey.ImGuiKey_Enter) || Pressed(ImGuiKey.ImGuiKey_KeypadEnter));
+        const int flags = (int)(ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll |
+            ImGuiInputTextFlags.ImGuiInputTextFlags_CharsScientific);
+        string text = _angleDraft ?? _arbitraryAngle.ToString("R", CultureInfo.InvariantCulture);
+        string? update = EditText(id, "", text, live: true, extraFlags: flags);
+        bool valid = float.TryParse(update ?? text, NumberStyles.Float, CultureInfo.InvariantCulture, out float angle) &&
+            float.IsFinite(angle);
+        if (valid) _arbitraryAngle = angle;
+        _angleDraft = ImGui.IsItemActive() != 0 ? update ?? text : null;
+        return submit && valid;
     }
 
     private void DrawEditCanvas()
@@ -125,15 +158,14 @@ internal sealed unsafe partial class EditorWindow
         {
             ContinueToolbar(80 * _uiScale);
             ImGui.SetNextItemWidth(80 * _uiScale);
-            float angle = _arbitraryAngle;
-            bool submitted = ImGui.InputFloat("##arbitrary-angle", ref angle, 0, 0, "%.4g",
-                (int)ImGuiInputTextFlags.ImGuiInputTextFlags_EnterReturnsTrue) != 0;
-            if (submitted)
-                _arbitraryAngle = angle;
+            bool submitted = DrawArbitraryAngleInput();
+            if (_smokeTest && _frames == AngleSmokeStart) _angleSmokeInput = SmokeItemCenter();
             if (_hasFloorSelection)
             {
                 ContinueToolbar(ButtonWidth(L.T("AddTile")));
-                if (ImGui.Button(L.T("AddTile"), default) != 0 || submitted)
+                bool add = ImGui.Button(L.T("AddTile"), default) != 0;
+                if (_smokeTest && _frames == AngleSmokeStart) _angleSmokeButton = SmokeItemCenter();
+                if (add || submitted)
                     InsertArbitraryAngle();
             }
         }
@@ -142,8 +174,11 @@ internal sealed unsafe partial class EditorWindow
         {
             if (_inspectDecoration && _decoration is not null)
                 CenterOnDecoration(_decoration);
-            else
-                SelectFloor(_floor, true);
+            else if (_hasFloorSelection)
+            {
+                _playbackFloor = _floor;
+                _centerEditSelection = true;
+            }
         }
         bool ready = HasCurrentPlayback;
         string status = ready ? $"{_playback!.Camera.Zoom:P0}" : _playback?.LoadError ??
@@ -160,9 +195,6 @@ internal sealed unsafe partial class EditorWindow
         var pending = canUseScene ? PendingTileCenters(renderer!) : [];
         if (canUseScene && renderer is not null)
         {
-            if (_centerPendingTile && pending.Count > 1 && _pendingTiles[^1].Floor == _floor)
-                CenterEditCamera(renderer, pending[^1]);
-            _centerPendingTile = false;
             if (_centerEditDecoration is { } item)
             {
                 CenterEditCamera(renderer, DecorationPosition(renderer, item));
@@ -219,54 +251,75 @@ internal sealed unsafe partial class EditorWindow
             hasFloor = true;
         }
         ImVec2 selected = hasFloor ? Screen(selectedWorld) : default;
-        bool guide = hasFloor && _hasFloorSelection && _directionGuide && !_inspectDecoration && _rangeAnchor is null && !_showArbitraryAngle;
-        if (hasFloor && _hasFloorSelection && !_inspectDecoration)
+        bool selectionScene = ready || pending.Count > 1;
+        bool guide = selectionScene && hasFloor && _hasFloorSelection && _directionGuide && !_inspectDecoration &&
+            _rangeAnchor is null && !_showArbitraryAngle;
+        if (selectionScene && _hasFloorSelection && !_inspectDecoration)
         {
-            float radius = Math.Clamp(tileSize * renderer.Camera.Zoom / (4 * scale.X), 6, 25);
-            ImDrawList.AddCircle(draw, selected, radius, accent, 20, 2);
-            if (_showBrickNumbers)
-                ImDrawList.AddText(draw, WidgetDraw.V2(selected.x + radius + 3, selected.y - 8), accent, _floor.ToString());
-            if (_rangeAnchor is int anchor && renderer.TryGetFloorCenter(anchor, out Vector2 anchorPosition))
-                ImDrawList.AddCircle(draw, Screen(anchorPosition), radius, accent, 20, 2);
+            var (first, last) = FloorRange;
+            // Pending tile indices may still refer to different tiles in the previous snapshot.
+            int lastCommitted = _pendingTiles.Count == 0 ? last : Math.Min(last, _pendingTiles[0].Floor - 1);
+            renderer.VisitFloorOutlines(first, Math.Min(lastCommitted, _floor - 1), DrawFloorOutline);
+            renderer.VisitFloorOutlines(_floor + 1, lastCommitted, DrawFloorOutline);
+            if (_floor <= lastCommitted)
+                renderer.VisitFloorOutlines(_floor, _floor, DrawFloorOutline);
+            if (hasFloor && _showBrickNumbers)
+                ImDrawList.AddText(draw, WidgetDraw.V2(selected.x + 9, selected.y - 8), accent, _floor.ToString());
         }
 
         JObject? decorationHit = null;
         JObject? spriteHit = null;
+        int spriteHitIndex = -1;
         Span<Vector2> sprite = stackalloc Vector2[4];
-        for (int index = 0; !_tilesOnly && index < _document.Decorations.Count; index++)
+        bool hitSprites = hovered && (_inspectDecoration || io->KeyAlt != 0);
+        if (!_tilesOnly && !_hideAllDecorations)
         {
-            if (_document.Decorations[index] is not JObject item || DecorationHidden(item))
-                continue;
-            bool selectedDecoration = _inspectDecoration && _selectedDecorations.Contains(item);
-            if (EditorDocument.Type(item) is "AddDecoration" or "AddText")
+            var decorations = _document.Decorations;
+            if (ready && (hitSprites || _inspectDecoration))
             {
-                if (!ready || !renderer.TryGetDecorationQuad(index, sprite))
-                    continue;
-                if (!DecorationLocked(item) && InsideQuad(sprite, cursor))
-                    spriteHit = item;
-                if (selectedDecoration)
+                foreach (int index in renderer.VisibleDecorationIndices)
                 {
-                    Vector2 offset = ReferenceEquals(item, _dragDecoration)
-                        ? renderer.Camera.WorldToScreen(renderer.Camera.Position + _dragOffset) -
-                          renderer.Camera.WorldToScreen(renderer.Camera.Position) : Vector2.Zero;
-                    for (int edge = 0; edge < 4; edge++)
-                        ImDrawList.AddLine(draw, SpriteCorner(sprite[edge] + offset),
-                            SpriteCorner(sprite[(edge + 1) % 4] + offset), accent, 1.5f);
+                    if ((uint)index >= (uint)decorations.Count || decorations[index] is not JObject item || DecorationHidden(item))
+                        continue;
+                    bool selectedDecoration = _inspectDecoration && _selectedDecorations.Contains(item);
+                    bool canHit = hitSprites && index > spriteHitIndex && !DecorationLocked(item);
+                    if ((!selectedDecoration && !canHit) || !renderer.TryGetDecorationQuad(index, sprite))
+                        continue;
+                    if (canHit && InsideQuad(sprite, cursor))
+                    {
+                        spriteHit = item;
+                        spriteHitIndex = index;
+                    }
+                    if (selectedDecoration)
+                    {
+                        Vector2 offset = ReferenceEquals(item, _dragDecoration)
+                            ? renderer.Camera.WorldToScreen(renderer.Camera.Position + _dragOffset) -
+                              renderer.Camera.WorldToScreen(renderer.Camera.Position) : Vector2.Zero;
+                        for (int edge = 0; edge < 4; edge++)
+                            ImDrawList.AddLine(draw, SpriteCorner(sprite[edge] + offset),
+                                SpriteCorner(sprite[(edge + 1) % 4] + offset), accent, 1.5f);
+                    }
                 }
-                continue;
             }
-            Vector2 world = DecorationPosition(renderer, item);
-            if (ReferenceEquals(item, _dragDecoration))
-                world += _dragOffset;
-            ImVec2 point = Screen(world);
-            if (point.x < origin.x - 12 || point.x > end.x + 12 || point.y < origin.y - 12 || point.y > end.y + 12)
-                continue;
-            DrawDecorationMarker(draw, item, point, selectedDecoration);
-            if (!DecorationLocked(item) && Math.Abs(io->MousePos.x - point.x) < 11 && Math.Abs(io->MousePos.y - point.y) < 11)
-                decorationHit = item;
+
+            UpdateDecorationMarkers();
+            foreach (int index in _decorationMarkers)
+            {
+                var item = (JObject)decorations[index]!;
+                if (DecorationHidden(item) || ready && renderer.TryGetDecorationQuad(index, sprite))
+                    continue;
+                Vector2 world = DecorationPosition(renderer, item);
+                if (ReferenceEquals(item, _dragDecoration))
+                    world += _dragOffset;
+                ImVec2 point = Screen(world);
+                if (point.x < origin.x - 12 || point.x > end.x + 12 || point.y < origin.y - 12 || point.y > end.y + 12)
+                    continue;
+                DrawDecorationMarker(draw, item, point, _inspectDecoration && _selectedDecorations.Contains(item));
+                if (!DecorationLocked(item) && Math.Abs(io->MousePos.x - point.x) < 11 && Math.Abs(io->MousePos.y - point.y) < 11)
+                    decorationHit = item;
+            }
         }
-        if (_inspectDecoration || io->KeyAlt != 0)
-            decorationHit ??= spriteHit;
+        decorationHit ??= spriteHit;
         bool shift = io->KeyShift != 0;
         bool fine = FineDirections;
         double? direction = guide && !_pathLocked
@@ -274,10 +327,22 @@ internal sealed unsafe partial class EditorWindow
         ImDrawList.PopClipRect(draw);
 
         const int left = (int)ImGuiMouseButton.ImGuiMouseButton_Left;
-        if (hovered && ImGui.IsMouseClicked(left, 0) != 0)
-            _pressedDirection = direction;
-        if (ready && hovered && direction is null && decorationHit is not null && ImGui.IsMouseClicked(left, 0) != 0)
+        bool leftPressed = hovered && ImGui.IsMouseClicked(left, 0) != 0;
+        if (leftPressed)
         {
+            // A guide button must not cover a stack of selectable floors.
+            if (ready && direction is not null)
+            {
+                renderer.PickFloors(cursor, _canvasFloorHits);
+                if (_canvasFloorHits.Count > 1 || (_canvasFloorHits.Count > 0 &&
+                    (io->KeyAlt != 0 || shift && direction != -1)))
+                    direction = null;
+            }
+            _pressedDirection = direction;
+        }
+        if (ready && leftPressed && direction is null && decorationHit is not null)
+        {
+            _floorHitCycle.Reset();
             ResetCanvasGesture();
             SelectDecoration(decorationHit);
             _dragDecoration = decorationHit;
@@ -395,18 +460,48 @@ internal sealed unsafe partial class EditorWindow
                         if (direction == pressed)
                             InsertTile(pressed == -1 ? (_document.IncomingAngle(_floor) + 180) % 360 : pressed);
                     }
-                    else if (direction is not null)
-                        break;
-                    else if (ready && renderer.PickFloor(cursor) is int floor && floor >= 0)
+                    else if (ready && io->KeyAlt == 0)
                     {
-                        int anchor = _rangeAnchor ?? _floor;
-                        SelectFloor(floor, false);
-                        if (io->KeyShift != 0 && anchor != _floor)
-                            _rangeAnchor = anchor;
+                        renderer.PickFloors(cursor, _canvasFloorHits);
+                        int floor = _floorHitCycle.Pick(_canvasFloorHits);
+                        if (floor >= 0)
+                        {
+                            int? anchor = shift && _hasFloorSelection && !_inspectDecoration ? _rangeAnchor ?? _floor : null;
+                            SelectFloor(floor, false);
+                            if (anchor != floor)
+                                _rangeAnchor = anchor;
+                        }
+                        else if (spriteHit is not null)
+                            SelectDecoration(spriteHit);
+                        else
+                        {
+                            _hasFloorSelection = _inspectDecoration = false;
+                            _rangeAnchor = null;
+                            _decoration = null;
+                            _selectedDecorations.Clear();
+                        }
                     }
-                    else if (spriteHit is not null)
-                        SelectDecoration(spriteHit);
                     break;
+            }
+        }
+
+        void DrawFloorOutline(int index, ReadOnlySpan<Vector2> outline)
+        {
+            bool primary = index == _floor;
+            uint color = primary ? accent : WidgetDraw.U32(116, 175, 255);
+            float width = (primary ? 2.5f : 1.5f) * _uiScale;
+            Stroke(outline, WidgetDraw.U32(13, 25, 37, 220), width + 2 * _uiScale);
+            Stroke(outline, color, width);
+
+            void Stroke(ReadOnlySpan<Vector2> points, uint strokeColor, float thickness)
+            {
+                ImVec2 from = SpriteCorner(points[^1]);
+                foreach (Vector2 point in points)
+                {
+                    ImVec2 to = SpriteCorner(point);
+                    ImDrawList.AddLine(draw, from, to, strokeColor, thickness);
+                    from = to;
+                }
             }
         }
 
@@ -459,7 +554,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void ResetCanvasGesture()
     {
-        _canvasPress = _canvasDrag = false;
+        _canvasPress = _canvasDrag = _playbackPan = false;
         _trackGestureDocument = null;
     }
 
@@ -468,11 +563,17 @@ internal sealed unsafe partial class EditorWindow
         var previous = _savedEditCamera ?? (renderer.Camera.Position, renderer.Camera.Zoom);
         _savedEditCamera = null;
         renderer.SelectFloor(floor);
-        renderer.Camera.Zoom = previous.Zoom;
-        renderer.Camera.Rotation = 0;
-        CenterEditCamera(renderer, _centerEditSelection && renderer.TryGetFloorCenter(floor, out Vector2 center)
-            ? center : previous.Position);
+        if (_centerEditSelection && renderer.TryGetFloorCenter(floor, out Vector2 center))
+            previous.Position = center;
+        RestoreEditCamera(renderer, previous);
         _centerEditSelection = false;
+    }
+
+    private static void RestoreEditCamera(LevelRenderer renderer, (Vector2 Position, float Zoom) view)
+    {
+        renderer.Camera.Zoom = view.Zoom;
+        renderer.Camera.Rotation = 0;
+        CenterEditCamera(renderer, view.Position);
     }
 
     private static void CenterEditCamera(LevelRenderer renderer, Vector2 position)

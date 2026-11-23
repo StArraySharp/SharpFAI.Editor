@@ -8,11 +8,19 @@ internal enum FloorTextureFilter
     Trilinear,
     BilinearMipmapped,
     Bilinear,
+    Point,
+}
+
+internal enum FloorTextureWrap
+{
+    Clamp,
+    Repeat,
+    Mirror,
 }
 
 internal readonly record struct FloorTexture(
-    string Resource, bool Repeat = false, bool FlipVertically = true, bool External = false,
-    FloorTextureFilter Filter = FloorTextureFilter.Trilinear, bool Optional = false);
+    string Resource, FloorTextureWrap Wrap = FloorTextureWrap.Clamp, bool FlipVertically = true,
+    bool External = false, FloorTextureFilter Filter = FloorTextureFilter.Trilinear, bool Optional = false);
 
 internal sealed record FloorTextureBatch(int IndexStart, int IndexCount, FloorTexture[] Textures);
 

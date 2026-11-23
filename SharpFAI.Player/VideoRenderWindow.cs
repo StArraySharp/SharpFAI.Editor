@@ -1,8 +1,10 @@
 using ImGui4NET;
+using SharpFAI.Serialization;
+using static SharpFAI.Player.VideoExportSession;
 
 namespace SharpFAI.Player;
 
-internal sealed unsafe class VideoRenderWindow
+internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = null)
 {
     private bool _open;
     private bool _focusOnOpen;
@@ -17,7 +19,14 @@ internal sealed unsafe class VideoRenderWindow
         _focusOnOpen = true;
     }
 
-    public void Draw(PlayerWindow player, bool levelReady)
+    public readonly record struct Settings(int Width, int Height, int Fps, bool PreferHardware)
+    {
+        public VideoExporter.Request CreateRequest(string levelPath, Level level) => new(
+            levelPath, VideoExporter.ResolveOutputPath(levelPath, level), Width, Height, Fps,
+            KeepFrames: false, BitrateKbps: 0, Zoom: 0f, HidePassedFloors: false, PreferHardware: PreferHardware);
+    }
+
+    public void Draw(VideoExportStatus status, Action<Settings> start, Action cancel, string? unavailable = null)
     {
         if (!_open)
             return;
@@ -39,40 +48,41 @@ internal sealed unsafe class VideoRenderWindow
 
         bool open = _open;
         int flags = (int)(ImGuiWindowFlags.ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags.ImGuiWindowFlags_NoCollapse);
-        if (ImGui.Begin("视频渲染", ref open, flags) != 0)
+        if (ImGui.Begin(Text("VideoRenderTitle", "视频渲染") + "###video-render", ref open, flags) != 0)
         {
-            PlayerWindow.VideoExportStatus status = player.ExportStatus;
             if (status.Active)
-                DrawProgress(player, status);
+                DrawProgress(status, cancel);
             else
-                DrawSettings(player, levelReady, status);
+                DrawSettings(status, start, unavailable);
         }
         ImGui.End();
         _open = open;
     }
 
-    private static void DrawProgress(PlayerWindow player, PlayerWindow.VideoExportStatus status)
+    private string Text(string key, string fallback) => localize?.Invoke(key) ?? fallback;
+
+    private void DrawProgress(VideoExportStatus status, Action cancel)
     {
         ImGui.TextUnformatted(status.FrameCount == 0
-            ? "正在准备渲染…"
-            : $"渲染中  {status.Frame:N0} / {status.FrameCount:N0} 帧");
+            ? Text("VideoRenderPreparing", "正在准备渲染…")
+            : string.Format(Text("VideoRenderProgress", "渲染中  {0:N0} / {1:N0} 帧"), status.Frame, status.FrameCount));
         ImGui.ProgressBar((float)status.Progress, new ImVec2 { x = -1f }, $"{status.Progress:P1}");
         if (status.Frame > 0)
-            ImGui.TextUnformatted($"渲染速度  {status.FramesPerSecond:0.0} 帧/秒");
+            ImGui.TextUnformatted(string.Format(Text("VideoRenderRate", "渲染速度  {0:0.0} 帧/秒"), status.FramesPerSecond));
 
         double eta = status.EtaSeconds;
         if (eta > 0.0)
-            ImGui.TextUnformatted($"预计剩余 {(int)(eta / 60.0)}:{eta % 60:00}");
+            ImGui.TextUnformatted(string.Format(Text("VideoRenderEta", "预计剩余 {0}:{1:00}"), (int)(eta / 60.0), eta % 60));
 
-        if (ImGui.Button("取消渲染", default) != 0)
-            player.CancelVideoExport();
+        if (ImGui.Button(Text("VideoRenderCancel", "取消渲染"), default) != 0)
+            cancel();
     }
 
-    private void DrawSettings(PlayerWindow player, bool levelReady, PlayerWindow.VideoExportStatus status)
+    private void DrawSettings(VideoExportStatus status, Action<Settings> start, string? unavailable)
     {
-        DrawSetting("宽度 (px)", ref _width, 16, 7680);
-        DrawSetting("高度 (px)", ref _height, 16, 4320);
-        DrawSetting("帧率 (FPS)", ref _fps, 1, 480);
+        DrawSetting(Text("VideoRenderWidth", "宽度 (px)"), ref _width, 16, 7680);
+        DrawSetting(Text("VideoRenderHeight", "高度 (px)"), ref _height, 16, 4320);
+        DrawSetting(Text("VideoRenderFps", "帧率 (FPS)"), ref _fps, 1, 480);
 
         if (ImGui.Button("720p60", default) != 0)
             (_width, _height, _fps) = (1280, 720, 60);
@@ -84,25 +94,24 @@ internal sealed unsafe class VideoRenderWindow
             (_width, _height, _fps) = (3840, 2160, 60);
 
         bool preferHardware = _preferHardware;
-        if (ImGui.Checkbox("优先使用硬件编码", ref preferHardware) != 0)
+        if (ImGui.Checkbox(Text("VideoRenderHardware", "优先使用硬件编码"), ref preferHardware) != 0)
             _preferHardware = preferHardware;
 
         ImGui.Separator();
-        if (!levelReady)
-            ImGui.BeginDisabled();
-        if (ImGui.Button("开始渲染", new ImVec2 { x = -1f }) != 0)
-            player.RequestVideoExport(_width, _height, _fps, 0.5f, _preferHardware);
-        if (!levelReady)
-        {
-            ImGui.TextUnformatted("请先加载关卡");
-            ImGui.EndDisabled();
-        }
+        ImGui.BeginDisabled((byte)(unavailable is not null ? 1 : 0));
+        if (ImGui.Button(Text("VideoRenderStart", "开始渲染"), new ImVec2 { x = -1f }) != 0)
+            start(new Settings(_width, _height, _fps, _preferHardware));
+        ImGui.EndDisabled();
 
         ImGui.PushTextWrapPos(0f);
-        if (status.Error is { Length: > 0 } error)
+        if (unavailable is not null)
+            ImGui.TextUnformatted(unavailable);
+        if (status.Cancelled)
+            ImGui.TextUnformatted(Text("VideoRenderCancelled", "已取消渲染"));
+        else if (status.Error is { Length: > 0 } error)
             ImGui.TextUnformatted(error);
         else if (status.OutputPath is { Length: > 0 } output)
-            ImGui.TextUnformatted($"已输出  {output}");
+            ImGui.TextUnformatted(string.Format(Text("VideoRenderOutput", "已输出  {0}"), output));
         ImGui.PopTextWrapPos();
     }
 

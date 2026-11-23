@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
@@ -51,6 +52,10 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     private int _streamFloors;
     private FloorTrackState[]? _materialStates;
     private int _materialRevision;
+    private readonly List<(int Start, int End)> _visibleIndexRanges = [];
+    private int[] _drawCounts = [];
+    private nint[] _drawOffsets = [];
+    public int[]? LevelSelection { get; private set; }
 
     public int BatchCount => _batches.Length;
     public int FloorCount => _geometry?.Centers.Length ?? 0;
@@ -60,6 +65,60 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     public long DrawnTriangles { get; private set; }
     public int TriangleCount => (_geometry?.Stream?.IndexCount ?? _meshHandle?.IndexCount ?? 0) / 3;
     public long GeometryBytes => _meshHandle is { } handle ? handle.VertexBytes + handle.IndexBytes : 0;
+
+    public bool UsesLevelStream(FloorShapeLibrary shapes) =>
+        _geometry is { IsLevelStream: true, Stream: { } stream } && ReferenceEquals(stream.Shapes, shapes);
+
+    public void SetLevelSelection(int[] floors) => LevelSelection = floors;
+
+    public void PrepareLevelDraw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight)
+    {
+        if (LevelSelection is not { } selected)
+            return;
+
+        FloorGeometry geometry = _geometry!;
+        _visibleIndexRanges.Clear();
+        Vector2 halfViewport = new(viewportWidth * .5f, viewportHeight * .5f);
+        Vector2 xAxis = new(viewProjection.Row0.X * halfViewport.X, viewProjection.Row1.X * halfViewport.X);
+        Vector2 yAxis = new(viewProjection.Row0.Y * halfViewport.Y, viewProjection.Row1.Y * halfViewport.Y);
+        Vector2 absXAxis = Vector2.Abs(xAxis), absYAxis = Vector2.Abs(yAxis);
+        Vector2 pixelsPerUnit = new(xAxis.Length, yAxis.Length);
+        for (int index = selected.Length - 1; index >= 0; index--)
+        {
+            int floor = selected[index];
+            ref readonly FloorData data = ref _floorData[floor];
+            if (data.Scale.Z == 0f)
+                continue;
+            float radius = geometry.GetVariants(floor)[(int)data.VariantOffset.X].Radius *
+                MathF.Max(MathF.Abs(data.Scale.X), MathF.Abs(data.Scale.Y));
+            Vector2 relative = (data.CenterRotation.Xy - cameraOrigin) + new Vector2(data.VariantOffset.Y, data.VariantOffset.Z);
+            Vector2 center = new(Vector2.Dot(relative, xAxis), Vector2.Dot(relative, yAxis));
+            // Allow for CPU/GPU floating-point differences near a rounding boundary.
+            Vector2 absRelative = Vector2.Abs(relative);
+            Vector2 margin = new(
+                .01f + 1e-6f * Vector2.Dot(absRelative, absXAxis),
+                .01f + 1e-6f * Vector2.Dot(absRelative, absYAxis));
+            Vector2 extent = pixelsPerUnit * radius + margin;
+            if (OutsideOrCollapses(center.X, extent.X, halfViewport.X) ||
+                OutsideOrCollapses(center.Y, extent.Y, halfViewport.Y))
+                continue;
+
+            int start = geometry.IndexStarts[floor];
+            int end = floor == 0 ? geometry.IndexCount : geometry.IndexStarts[floor - 1];
+            if (end <= start)
+                continue;
+            if (_visibleIndexRanges.Count > 0 && _visibleIndexRanges[^1].End == start)
+                _visibleIndexRanges[^1] = (_visibleIndexRanges[^1].Start, end);
+            else
+                _visibleIndexRanges.Add((start, end));
+        }
+    }
+
+    private static bool OutsideOrCollapses(float center, float extent, float halfViewport) =>
+        MathF.Abs(center) - extent > halfViewport + .5f ||
+        // The vertex shader snaps to pixels. All vertices in a single snap cell
+        // on either axis produce zero-area triangles.
+        MathF.Abs(center - MathF.Round(center)) + extent < .5f;
 
     public static int GetTextureCapacity()
     {
@@ -79,6 +138,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
         Mesh mesh = geometry.Mesh;
         int dataTexture = 0;
+        FloorData[] data = [];
         bool reuseDataTexture = geometry.Stream is not null && _geometry?.Stream is not null && _dataTexture != 0;
         try
         {
@@ -101,7 +161,11 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             }
 
             int rows = (geometry.Centers.Length + FloorsPerRow - 1) / FloorsPerRow;
-            FloorData[] data = new FloorData[rows * FloorsPerRow];
+            if (rows > 0)
+            {
+                data = ArrayPool<FloorData>.Shared.Rent(rows * FloorsPerRow);
+                data.AsSpan(0, rows * FloorsPerRow).Clear();
+            }
             int[] activeFloorsPerBatch = new int[batches.Length];
             bool copyTransforms = preserveTransforms && _geometry is { } previous
                 && previous.Centers.AsSpan().SequenceEqual(geometry.Centers);
@@ -143,7 +207,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
                     }
-                    if (!reuseDataTexture || rows != _dataRows)
+                    if (!reuseDataTexture || rows > _dataRows)
                     {
                         fixed (FloorData* pixels = data)
                         {
@@ -170,7 +234,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             _activeFloorsPerBatch = activeFloorsPerBatch;
             _floorData = data;
             _dataTexture = dataTexture;
-            _dataRows = rows;
+            _dataRows = Math.Max(rows, _dataRows);
+            data = [];
             if (geometry.Stream is not null && geometry.Centers.Length > 0)
             {
                 _firstDirty = 0;
@@ -183,6 +248,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         }
         catch
         {
+            if (data.Length > 0)
+                ArrayPool<FloorData>.Shared.Return(data);
             uploader.Release(mesh);
             if (dataTexture != 0 && !reuseDataTexture)
             {
@@ -287,6 +354,21 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         return true;
     }
 
+    public void ProjectFloorOutline(int floor, Vector2 cameraOrigin, ReadOnlySpan<System.Numerics.Vector2> outline,
+        Span<Vector2> relativeOutline)
+    {
+        ref FloorData data = ref _floorData[floor];
+        Vector2 center = (data.CenterRotation.Xy - cameraOrigin) + new Vector2(data.VariantOffset.Y, data.VariantOffset.Z);
+        float cos = data.CenterRotation.Z;
+        float sin = data.CenterRotation.W;
+        for (int i = 0; i < outline.Length; i++)
+        {
+            float x = outline[i].X * data.Scale.X;
+            float y = outline[i].Y * data.Scale.Y;
+            relativeOutline[i] = center + new Vector2(cos * x - sin * y, sin * x + cos * y);
+        }
+    }
+
     public int IndexAfterFloor(int localFloor)
     {
         if (_batches.Length == 0 || _geometry?.IndexStarts is not { } offsets)
@@ -302,7 +384,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         DrawCalls = 0;
         DrawnTriangles = 0;
         bool streamed = _geometry?.Stream is not null;
-        if ((!streamed && _meshHandle is null) || _batches.Length == 0)
+        if ((!streamed && _meshHandle is null) || _batches.Length == 0 ||
+            (LevelSelection is not null && _visibleIndexRanges.Count == 0))
         {
             return;
         }
@@ -350,8 +433,17 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             }
 
             usedSlots = Math.Max(usedSlots, batch.Textures.Length);
-            GL.DrawElements(PrimitiveType.Triangles, count, DrawElementsType.UnsignedInt,
-                (nint)start * sizeof(uint));
+            if (LevelSelection is not null)
+            {
+                count = DrawLevelRanges(start, start + count);
+                if (count == 0)
+                    continue;
+            }
+            else
+            {
+                GL.DrawElements(PrimitiveType.Triangles, count, DrawElementsType.UnsignedInt,
+                    (nint)start * sizeof(uint));
+            }
             DrawCalls++;
             DrawnTriangles += count / 3;
         }
@@ -371,6 +463,39 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         GL.BindTexture(TextureTarget.Texture2D, 0);
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.UseProgram(0);
+    }
+
+    private int DrawLevelRanges(int start, int end)
+    {
+        if (_drawCounts.Length < _visibleIndexRanges.Count)
+        {
+            int capacity = Math.Max(_visibleIndexRanges.Count, _drawCounts.Length * 2);
+            _drawCounts = new int[capacity];
+            _drawOffsets = new nint[capacity];
+        }
+
+        int draws = 0, indices = 0;
+        foreach ((int first, int last) in _visibleIndexRanges)
+        {
+            if (first >= end)
+                break;
+            int offset = Math.Max(start, first);
+            int count = Math.Min(end, last) - offset;
+            if (count <= 0)
+                continue;
+            _drawCounts[draws] = count;
+            _drawOffsets[draws++] = (nint)offset * sizeof(uint);
+            indices += count;
+        }
+        if (draws == 1)
+            GL.DrawElements(PrimitiveType.Triangles, _drawCounts[0], DrawElementsType.UnsignedInt, _drawOffsets[0]);
+        else if (draws > 1)
+        {
+            fixed (int* counts = _drawCounts)
+            fixed (nint* offsets = _drawOffsets)
+                GL.MultiDrawElements(PrimitiveType.Triangles, counts, DrawElementsType.UnsignedInt, (nint)offsets, draws);
+        }
+        return indices;
     }
 
     private void MarkDirty(int floor)
@@ -417,8 +542,12 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         }
 
         _meshHandle = null;
+        LevelSelection = null;
+        _visibleIndexRanges.Clear();
         _batches = [];
         _activeFloorsPerBatch = [];
+        if (_floorData.Length > 0)
+            ArrayPool<FloorData>.Shared.Return(_floorData);
         _floorData = [];
         _materialStates = null;
         _firstDirty = int.MaxValue;
@@ -463,14 +592,24 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
         }
 
-        int handle = ImageDecoder.Upload(image, generateMipmaps: texture.Filter != FloorTextureFilter.Bilinear,
-            repeat: texture.Repeat);
+        bool mipmaps = texture.Filter is FloorTextureFilter.Trilinear or FloorTextureFilter.BilinearMipmapped;
+        int handle = ImageDecoder.Upload(image, generateMipmaps: mipmaps, repeat: texture.Wrap == FloorTextureWrap.Repeat);
+        GL.BindTexture(TextureTarget.Texture2D, handle);
+        if (texture.Wrap == FloorTextureWrap.Mirror)
+        {
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.MirroredRepeat);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.MirroredRepeat);
+        }
         if (texture.Filter == FloorTextureFilter.BilinearMipmapped)
         {
-            GL.BindTexture(TextureTarget.Texture2D, handle);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapNearest);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
         }
+        else if (texture.Filter == FloorTextureFilter.Point)
+        {
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        }
+        GL.BindTexture(TextureTarget.Texture2D, 0);
         binding = new TextureBinding(handle, (float)image.Width / image.Height);
         _textureCache.Add(texture, binding);
         return binding;
@@ -500,7 +639,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         GL.Uniform4(model + 1, Vector4.UnitY);
         GL.Uniform4(model + 2, Vector4.UnitZ);
         GL.Uniform4(model + 3, Vector4.UnitW);
-        GL.Uniform4(GL.GetUniformLocation(program, "_TileTex_ST"), 0f, 0f, 1f, 1f);
+        GL.Uniform4(GL.GetUniformLocation(program, "_TileTex_ST"), 0f, 0f, 0f, 0f);
         GL.Uniform4(GL.GetUniformLocation(program, "_Tint"), Vector4.One);
         GL.Uniform4(GL.GetUniformLocation(program, "_IconColor"), Vector4.One);
         GL.Uniform1(GL.GetUniformLocation(program, "_Active"), 1);

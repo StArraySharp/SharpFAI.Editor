@@ -94,6 +94,7 @@ internal sealed class FloorStreamFrame : IDisposable
     public FloorShapeLibrary Shapes { get; }
     public int IndexCount { get; private set; }
     private int InstanceCount { get; set; }
+    public int InstanceTexels => InstanceCount * TexelsPerInstance;
     public ReadOnlySpan<int> Indices => _indices.AsSpan(0, IndexCount);
     public ReadOnlySpan<FloorStreamInstance> Instances => _instances.AsSpan(0, InstanceCount);
 

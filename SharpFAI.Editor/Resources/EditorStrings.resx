@@ -8,6 +8,21 @@
   <data name="MenuEdit" xml:space="preserve"><value>Edit</value></data>
   <data name="MenuView" xml:space="preserve"><value>View</value></data>
   <data name="Chart" xml:space="preserve"><value>Chart</value></data>
+  <data name="MenuRender" xml:space="preserve"><value>Render</value></data>
+  <data name="VideoRenderTitle" xml:space="preserve"><value>Video Render</value></data>
+  <data name="VideoRenderWidth" xml:space="preserve"><value>Width (px)</value></data>
+  <data name="VideoRenderHeight" xml:space="preserve"><value>Height (px)</value></data>
+  <data name="VideoRenderFps" xml:space="preserve"><value>Frame rate</value></data>
+  <data name="VideoRenderHardware" xml:space="preserve"><value>Prefer hardware encoding</value></data>
+  <data name="VideoRenderStart" xml:space="preserve"><value>Start Render</value></data>
+  <data name="VideoRenderPreparing" xml:space="preserve"><value>Preparing render…</value></data>
+  <data name="VideoRenderProgress" xml:space="preserve"><value>Rendering {0:N0} / {1:N0} frames</value></data>
+  <data name="VideoRenderRate" xml:space="preserve"><value>Render speed: {0:0.0} FPS</value></data>
+  <data name="VideoRenderEta" xml:space="preserve"><value>Time remaining: {0}:{1:00}</value></data>
+  <data name="VideoRenderCancel" xml:space="preserve"><value>Cancel Render</value></data>
+  <data name="VideoRenderCancelled" xml:space="preserve"><value>Render cancelled</value></data>
+  <data name="VideoRenderOutput" xml:space="preserve"><value>Exported to {0}</value></data>
+  <data name="VideoRenderSaveFirst" xml:space="preserve"><value>Save the chart once to set its asset and export folder.</value></data>
   <data name="MenuTools" xml:space="preserve"><value>Tools</value></data>
   <data name="MenuHelp" xml:space="preserve"><value>Help</value></data>
   <data name="Language" xml:space="preserve"><value>Language</value></data>
@@ -359,4 +374,379 @@
   <data name="TilesOnly" xml:space="preserve"><value>Tiles only</value></data>
   <data name="EditSceneModeHelp" xml:space="preserve"><value>Switch between tiles only and effects preview without changing playback</value></data>
   <data name="InlineNumberHelp" xml:space="preserve"><value>Click to type; drag left or right to adjust</value></data>
+  <data name="Name_artistLinks" xml:space="preserve"><value>Artist links</value></data>
+  <data name="Name_artistPermission" xml:space="preserve"><value>Permission image</value></data>
+  <data name="Name_autoPlay" xml:space="preserve"><value>Play on creation</value></data>
+  <data name="Name_barelyTag" xml:space="preserve"><value>Barely hit tag</value></data>
+  <data name="Name_blendMode" xml:space="preserve"><value>Blend mode</value></data>
+  <data name="Name_bubbleAppearEndOffset" xml:space="preserve"><value>Bubble appearance end offset</value></data>
+  <data name="Name_bubbleAppearStartOffset" xml:space="preserve"><value>Bubble appearance start offset</value></data>
+  <data name="Name_bubbleDisappearOffset" xml:space="preserve"><value>Bubble disappearance offset</value></data>
+  <data name="Name_bubbleSpawnOffset" xml:space="preserve"><value>Bubble spawn offset</value></data>
+  <data name="Name_ChangeTrack" xml:space="preserve"><value>Change track</value></data>
+  <data name="Name_congratsText" xml:space="preserve"><value>Completion message</value></data>
+  <data name="Name_count" xml:space="preserve"><value>Emission count</value></data>
+  <data name="Name_defaultBGShapeColor" xml:space="preserve"><value>Default pattern color</value></data>
+  <data name="Name_defaultBGShapeType" xml:space="preserve"><value>Default background pattern</value></data>
+  <data name="Name_defaultBGTileColor" xml:space="preserve"><value>Default tile tint</value></data>
+  <data name="Name_defaultTextColor" xml:space="preserve"><value>Default text color</value></data>
+  <data name="Name_defaultTextShadowColor" xml:space="preserve"><value>Default text shadow color</value></data>
+  <data name="Name_durationRandomMode" xml:space="preserve"><value>Duration randomization</value></data>
+  <data name="Name_durationRandomValue" xml:space="preserve"><value>Alternate duration</value></data>
+  <data name="Name_earlyPerfectTag" xml:space="preserve"><value>Early-perfect tag</value></data>
+  <data name="Name_easePartBehavior" xml:space="preserve"><value>Easing segment mode</value></data>
+  <data name="Name_easeParts" xml:space="preserve"><value>Easing segments</value></data>
+  <data name="Name_endColor" xml:space="preserve"><value>End color</value></data>
+  <data name="Name_endOpacity" xml:space="preserve"><value>End opacity</value></data>
+  <data name="Name_executeOnCurrentFloor" xml:space="preserve"><value>Run on current tile</value></data>
+  <data name="Name_fadeOut" xml:space="preserve"><value>Fade out</value></data>
+  <data name="Name_failHitboxOffset" xml:space="preserve"><value>Hitbox offset</value></data>
+  <data name="Name_failHitboxRotation" xml:space="preserve"><value>Hitbox rotation</value></data>
+  <data name="Name_failHitboxScale" xml:space="preserve"><value>Hitbox scale</value></data>
+  <data name="Name_failHitboxType" xml:space="preserve"><value>Hitbox shape</value></data>
+  <data name="Name_Favorites" xml:space="preserve"><value>Favorites</value></data>
+  <data name="Name_filterProperties" xml:space="preserve"><value>Filter parameters</value></data>
+  <data name="Name_floorCount" xml:space="preserve"><value>Tile count</value></data>
+  <data name="Name_frameRate" xml:space="preserve"><value>Frame rate</value></data>
+  <data name="Name_gameSound" xml:space="preserve"><value>Game sound type</value></data>
+  <data name="Name_gapLength" xml:space="preserve"><value>Gap length</value></data>
+  <data name="Name_hideJudgment" xml:space="preserve"><value>Hide judgments</value></data>
+  <data name="Name_hideTileIcon" xml:space="preserve"><value>Hide tile icons</value></data>
+  <data name="Name_hitbox" xml:space="preserve"><value>Collision behavior</value></data>
+  <data name="Name_hitboxDecoTag" xml:space="preserve"><value>Collision decoration tag</value></data>
+  <data name="Name_hitboxDetectTarget" xml:space="preserve"><value>Collision target type</value></data>
+  <data name="Name_hitboxEventTag" xml:space="preserve"><value>Collision event tag</value></data>
+  <data name="Name_hitboxRepeatInterval" xml:space="preserve"><value>Collision repeat interval</value></data>
+  <data name="Name_hitboxTargetPlanet" xml:space="preserve"><value>Collision target planet</value></data>
+  <data name="Name_hitboxTriggerType" xml:space="preserve"><value>Collision trigger mode</value></data>
+  <data name="Name_hitsoundOffBeats" xml:space="preserve"><value>Off-beat hitsound</value></data>
+  <data name="Name_hitsoundOnBeats" xml:space="preserve"><value>On-beat hitsound</value></data>
+  <data name="Name_hitTag" xml:space="preserve"><value>Hit tag</value></data>
+  <data name="Name_holdEndSound" xml:space="preserve"><value>Hold end sound</value></data>
+  <data name="Name_holdLoopSound" xml:space="preserve"><value>Hold loop sound</value></data>
+  <data name="Name_holdMidSound" xml:space="preserve"><value>Mid-hold sound</value></data>
+  <data name="Name_holdMidSoundDelay" xml:space="preserve"><value>Mid-hold sound delay</value></data>
+  <data name="Name_holdMidSoundTimingRelativeTo" xml:space="preserve"><value>Mid-hold timing reference</value></data>
+  <data name="Name_holdMidSoundType" xml:space="preserve"><value>Mid-hold sound mode</value></data>
+  <data name="Name_holdSoundVolume" xml:space="preserve"><value>Hold sound volume</value></data>
+  <data name="Name_holdStartSound" xml:space="preserve"><value>Hold start sound</value></data>
+  <data name="Name_ignoreInput" xml:space="preserve"><value>Ignore input</value></data>
+  <data name="Name_imageColor" xml:space="preserve"><value>Image tint</value></data>
+  <data name="Name_imageSmoothing" xml:space="preserve"><value>Image smoothing</value></data>
+  <data name="Name_interval" xml:space="preserve"><value>Repeat interval</value></data>
+  <data name="Name_latePerfectTag" xml:space="preserve"><value>Late-perfect tag</value></data>
+  <data name="Name_levelTitlePosition" xml:space="preserve"><value>Level title position</value></data>
+  <data name="Name_levelTitleText" xml:space="preserve"><value>Level title text</value></data>
+  <data name="Name_lockRot" xml:space="preserve"><value>Lock background rotation</value></data>
+  <data name="Name_lockRotation" xml:space="preserve"><value>Lock rotation</value></data>
+  <data name="Name_lockScale" xml:space="preserve"><value>Lock scale</value></data>
+  <data name="Name_lossTag" xml:space="preserve"><value>Failure tag</value></data>
+  <data name="Name_maskingBackDepth" xml:space="preserve"><value>Back mask depth</value></data>
+  <data name="Name_maskingFrontDepth" xml:space="preserve"><value>Front mask depth</value></data>
+  <data name="Name_maskingTarget" xml:space="preserve"><value>Mask target</value></data>
+  <data name="Name_maskingType" xml:space="preserve"><value>Masking mode</value></data>
+  <data name="Name_missTag" xml:space="preserve"><value>Miss tag</value></data>
+  <data name="Name_objectType" xml:space="preserve"><value>Object type</value></data>
+  <data name="Name_onCheckpointTag" xml:space="preserve"><value>Checkpoint tag</value></data>
+  <data name="Name_originalSize" xml:space="preserve"><value>Original size</value></data>
+  <data name="Name_outCam" xml:space="preserve"><value>Exit camera</value></data>
+  <data name="Name_outEase" xml:space="preserve"><value>Exit easing</value></data>
+  <data name="Name_outTime" xml:space="preserve"><value>Exit transition duration</value></data>
+  <data name="Name_perfectTag" xml:space="preserve"><value>Perfect tag</value></data>
+  <data name="Name_perfectText" xml:space="preserve"><value>Perfect completion message</value></data>
+  <data name="Name_planetColor" xml:space="preserve"><value>Planet color</value></data>
+  <data name="Name_planetColorType" xml:space="preserve"><value>Planet color preset</value></data>
+  <data name="Name_planetEasePartBehavior" xml:space="preserve"><value>Planet easing segment mode</value></data>
+  <data name="Name_planets" xml:space="preserve"><value>Planet count</value></data>
+  <data name="Name_planetTailColor" xml:space="preserve"><value>Trail color</value></data>
+  <data name="Name_playbackControl" xml:space="preserve"><value>Particle playback</value></data>
+  <data name="Name_PlaySound_hitsound" xml:space="preserve"><value>Sound or audio file</value></data>
+  <data name="Name_PlaySound_playDuration" xml:space="preserve"><value>Sound duration</value></data>
+  <data name="Name_positionRandomMode" xml:space="preserve"><value>Position randomization</value></data>
+  <data name="Name_positionRandomValue" xml:space="preserve"><value>Alternate position</value></data>
+  <data name="Name_previewIcon" xml:space="preserve"><value>Preview icon</value></data>
+  <data name="Name_previewIconColor" xml:space="preserve"><value>Preview icon tint</value></data>
+  <data name="Name_previewSongDuration" xml:space="preserve"><value>Song preview duration</value></data>
+  <data name="Name_previewSongStart" xml:space="preserve"><value>Song preview start</value></data>
+  <data name="Name_repeatType" xml:space="preserve"><value>Repeat mode</value></data>
+  <data name="Name_repetitions" xml:space="preserve"><value>Repetitions</value></data>
+  <data name="Name_requiredMods" xml:space="preserve"><value>Required mods</value></data>
+  <data name="Name_rotationRandomMode" xml:space="preserve"><value>Rotation randomization</value></data>
+  <data name="Name_rotationRandomValue" xml:space="preserve"><value>Alternate rotation</value></data>
+  <data name="Name_scalingRatio" xml:space="preserve"><value>Scaling ratio</value></data>
+  <data name="Name_ScreenTile_tile" xml:space="preserve"><value>Screen tiling</value></data>
+  <data name="Name_scroll" xml:space="preserve"><value>Scroll amount</value></data>
+  <data name="Name_seizureWarning" xml:space="preserve"><value>Photosensitivity warning</value></data>
+  <data name="Name_showDefaultBGIfNoImage" xml:space="preserve"><value>Show background when no image is set</value></data>
+  <data name="Name_showDefaultBGTile" xml:space="preserve"><value>Show default background tiles</value></data>
+  <data name="Name_showStatusText" xml:space="preserve"><value>Show status text</value></data>
+  <data name="Name_size" xml:space="preserve"><value>Size</value></data>
+  <data name="Name_specialArtistType" xml:space="preserve"><value>Artist attribution type</value></data>
+  <data name="Name_speedTrialAim" xml:space="preserve"><value>Speed trial target</value></data>
+  <data name="Name_startColor" xml:space="preserve"><value>Start color</value></data>
+  <data name="Name_startOpacity" xml:space="preserve"><value>Start opacity</value></data>
+  <data name="Name_state" xml:space="preserve"><value>Input state</value></data>
+  <data name="Name_stickToFloor" xml:space="preserve"><value>Attach to tile</value></data>
+  <data name="Name_strength" xml:space="preserve"><value>Strength</value></data>
+  <data name="Name_syncFloorDepth" xml:space="preserve"><value>Match tile depth</value></data>
+  <data name="Name_target" xml:space="preserve"><value>Input target</value></data>
+  <data name="Name_targetEventTag" xml:space="preserve"><value>Target event tag</value></data>
+  <data name="Name_targetMode" xml:space="preserve"><value>Playback action</value></data>
+  <data name="Name_targetPlanet" xml:space="preserve"><value>Target planet</value></data>
+  <data name="Name_targetTag" xml:space="preserve"><value>Target tag</value></data>
+  <data name="Name_targetType" xml:space="preserve"><value>Target type</value></data>
+  <data name="Name_threshold" xml:space="preserve"><value>Threshold</value></data>
+  <data name="Name_tile" xml:space="preserve"><value>Tile size</value></data>
+  <data name="Name_tileOffset" xml:space="preserve"><value>Tile offset</value></data>
+  <data name="Name_tooEarlyTag" xml:space="preserve"><value>Too early tag</value></data>
+  <data name="Name_tooLateTag" xml:space="preserve"><value>Too late tag</value></data>
+  <data name="Name_trackAngle" xml:space="preserve"><value>Track angle</value></data>
+  <data name="Name_trackColorAnimDuration" xml:space="preserve"><value>Color cycle duration</value></data>
+  <data name="Name_trackColorPulse" xml:space="preserve"><value>Track color pulse</value></data>
+  <data name="Name_trackGlowColor" xml:space="preserve"><value>Track glow color</value></data>
+  <data name="Name_trackGlowEnabled" xml:space="preserve"><value>Enable track glow</value></data>
+  <data name="Name_trackGlowIntensity" xml:space="preserve"><value>Track glow intensity</value></data>
+  <data name="Name_trackGraySetSpeedIcon" xml:space="preserve"><value>Gray speed icon</value></data>
+  <data name="Name_trackIcon" xml:space="preserve"><value>Tile icon</value></data>
+  <data name="Name_trackIconAngle" xml:space="preserve"><value>Tile icon angle</value></data>
+  <data name="Name_trackIconFlipped" xml:space="preserve"><value>Flip tile icon</value></data>
+  <data name="Name_trackIconOutlines" xml:space="preserve"><value>Outline track icons</value></data>
+  <data name="Name_trackOpacity" xml:space="preserve"><value>Track opacity</value></data>
+  <data name="Name_trackPulseLength" xml:space="preserve"><value>Pulse length</value></data>
+  <data name="Name_trackRedSwirl" xml:space="preserve"><value>Red swirl</value></data>
+  <data name="Name_trackSetSpeedIconBpm" xml:space="preserve"><value>Speed icon BPM</value></data>
+  <data name="Name_trackType" xml:space="preserve"><value>Tile type</value></data>
+  <data name="Name_useMaskingDepth" xml:space="preserve"><value>Limit mask by depth</value></data>
+  <data name="Name_veryEarlyTag" xml:space="preserve"><value>Very early tag</value></data>
+  <data name="Name_veryLateTag" xml:space="preserve"><value>Very late tag</value></data>
+  <data name="Name_visible" xml:space="preserve"><value>Visible</value></data>
+  <data name="Name_warning" xml:space="preserve"><value>Warning</value></data>
+  <data name="Name_zoomRandomMode" xml:space="preserve"><value>Zoom randomization</value></data>
+  <data name="Name_zoomRandomValue" xml:space="preserve"><value>Alternate zoom</value></data>
+  <data name="Option_Aberration" xml:space="preserve"><value>Chromatic aberration</value></data>
+  <data name="Option_Action1" xml:space="preserve"><value>Action 1</value></data>
+  <data name="Option_Action2" xml:space="preserve"><value>Action 2</value></data>
+  <data name="Option_All" xml:space="preserve"><value>All</value></data>
+  <data name="Option_Any" xml:space="preserve"><value>Any</value></data>
+  <data name="Option_Arcade" xml:space="preserve"><value>Arcade</value></data>
+  <data name="Option_Arial" xml:space="preserve"><value>Arial</value></data>
+  <data name="Option_Assemble" xml:space="preserve"><value>Assemble</value></data>
+  <data name="Option_Assemble_Far" xml:space="preserve"><value>Assemble from afar</value></data>
+  <data name="Option_AuthorIsArtist" xml:space="preserve"><value>Level author is the artist</value></data>
+  <data name="Option_Background" xml:space="preserve"><value>Background</value></data>
+  <data name="Option_Basic" xml:space="preserve"><value>Basic</value></data>
+  <data name="Option_Beat" xml:space="preserve"><value>Beat</value></data>
+  <data name="Option_Between" xml:space="preserve"><value>Between the values</value></data>
+  <data name="Option_Blink" xml:space="preserve"><value>Blink</value></data>
+  <data name="Option_Blizzard" xml:space="preserve"><value>Blizzard</value></data>
+  <data name="Option_BluePlanet" xml:space="preserve"><value>Blue planet</value></data>
+  <data name="Option_Blur" xml:space="preserve"><value>Blur</value></data>
+  <data name="Option_BlurFocus" xml:space="preserve"><value>Focus blur</value></data>
+  <data name="Option_Box" xml:space="preserve"><value>Box</value></data>
+  <data name="Option_BurstSpread" xml:space="preserve"><value>Burst spread</value></data>
+  <data name="Option_Camera" xml:space="preserve"><value>Camera</value></data>
+  <data name="Option_CameraAspect" xml:space="preserve"><value>Camera (aspect-adjusted)</value></data>
+  <data name="Option_Capsule" xml:space="preserve"><value>Capsule</value></data>
+  <data name="Option_Center" xml:space="preserve"><value>Center</value></data>
+  <data name="Option_Checkpoint" xml:space="preserve"><value>Checkpoint</value></data>
+  <data name="Option_Chuck" xml:space="preserve"><value>Chuck</value></data>
+  <data name="Option_ClapHit" xml:space="preserve"><value>Clap</value></data>
+  <data name="Option_ClapHitEcho" xml:space="preserve"><value>Clap with echo</value></data>
+  <data name="Option_ComicSansMS" xml:space="preserve"><value>Comic Sans MS</value></data>
+  <data name="Option_Compression" xml:space="preserve"><value>Compression artifacts</value></data>
+  <data name="Option_Confirm" xml:space="preserve"><value>Confirm</value></data>
+  <data name="Option_Contrast" xml:space="preserve"><value>Contrast</value></data>
+  <data name="Option_CourierNew" xml:space="preserve"><value>Courier New</value></data>
+  <data name="Option_Custom" xml:space="preserve"><value>Custom</value></data>
+  <data name="Option_Decoration" xml:space="preserve"><value>Decoration</value></data>
+  <data name="Option_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="Option_DefaultBlue" xml:space="preserve"><value>Default blue</value></data>
+  <data name="Option_DefaultRed" xml:space="preserve"><value>Default red</value></data>
+  <data name="Option_Difference" xml:space="preserve"><value>Difference</value></data>
+  <data name="Option_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Option_DoubleRabbit" xml:space="preserve"><value>Double rabbit</value></data>
+  <data name="Option_DoubleSnail" xml:space="preserve"><value>Double snail</value></data>
+  <data name="Option_Down" xml:space="preserve"><value>Down</value></data>
+  <data name="Option_Drawing" xml:space="preserve"><value>Drawing</value></data>
+  <data name="Option_Drop" xml:space="preserve"><value>Drop</value></data>
+  <data name="Option_EdgeBlackLine" xml:space="preserve"><value>Black edge outlines</value></data>
+  <data name="Option_EightiesTV" xml:space="preserve"><value>1980s TV</value></data>
+  <data name="Option_Event" xml:space="preserve"><value>Trigger event</value></data>
+  <data name="Option_Extend" xml:space="preserve"><value>Extend</value></data>
+  <data name="Option_Fade" xml:space="preserve"><value>Fade</value></data>
+  <data name="Option_FiftiesTV" xml:space="preserve"><value>1950s TV</value></data>
+  <data name="Option_FirePlanet" xml:space="preserve"><value>Fire planet</value></data>
+  <data name="Option_FireTile" xml:space="preserve"><value>Fire tile</value></data>
+  <data name="Option_Fisheye" xml:space="preserve"><value>Fisheye</value></data>
+  <data name="Option_FitToScreen" xml:space="preserve"><value>Fit to screen</value></data>
+  <data name="Option_Flash" xml:space="preserve"><value>Flash</value></data>
+  <data name="Option_Floor" xml:space="preserve"><value>Tile</value></data>
+  <data name="Option_Foreground" xml:space="preserve"><value>Foreground</value></data>
+  <data name="Option_Funk" xml:space="preserve"><value>Funk</value></data>
+  <data name="Option_Fuse" xml:space="preserve"><value>Fuse</value></data>
+  <data name="Option_GaussianBlur" xml:space="preserve"><value>Gaussian blur</value></data>
+  <data name="Option_Gems" xml:space="preserve"><value>Gems</value></data>
+  <data name="Option_Georgia" xml:space="preserve"><value>Georgia</value></data>
+  <data name="Option_Glitch" xml:space="preserve"><value>Glitch</value></data>
+  <data name="Option_Global" xml:space="preserve"><value>Global</value></data>
+  <data name="Option_Glow" xml:space="preserve"><value>Glow</value></data>
+  <data name="Option_Gold" xml:space="preserve"><value>Gold</value></data>
+  <data name="Option_Grain" xml:space="preserve"><value>Film grain</value></data>
+  <data name="Option_GreenPlanet" xml:space="preserve"><value>Green planet</value></data>
+  <data name="Option_Grow" xml:space="preserve"><value>Grow</value></data>
+  <data name="Option_Grow_Spin" xml:space="preserve"><value>Grow and spin</value></data>
+  <data name="Option_Hammer" xml:space="preserve"><value>Hammer</value></data>
+  <data name="Option_Handheld" xml:space="preserve"><value>Handheld console</value></data>
+  <data name="Option_Hat" xml:space="preserve"><value>Hi-hat</value></data>
+  <data name="Option_HatHouse" xml:space="preserve"><value>House hi-hat</value></data>
+  <data name="Option_HexagonBlack" xml:space="preserve"><value>Black hexagons</value></data>
+  <data name="Option_Hitsound" xml:space="preserve"><value>Hitsound</value></data>
+  <data name="Option_HoldArrowLong" xml:space="preserve"><value>Long hold arrow</value></data>
+  <data name="Option_HoldArrowShort" xml:space="preserve"><value>Short hold arrow</value></data>
+  <data name="Option_HoldReleaseLong" xml:space="preserve"><value>Long hold release</value></data>
+  <data name="Option_HoldReleaseShort" xml:space="preserve"><value>Short hold release</value></data>
+  <data name="Option_IcePlanet" xml:space="preserve"><value>Ice planet</value></data>
+  <data name="Option_IceTile" xml:space="preserve"><value>Ice tile</value></data>
+  <data name="Option_Impact" xml:space="preserve"><value>Impact</value></data>
+  <data name="Option_InBack" xml:space="preserve"><value>Ease in (overshoot)</value></data>
+  <data name="Option_InBounce" xml:space="preserve"><value>Ease in (bounce)</value></data>
+  <data name="Option_InCirc" xml:space="preserve"><value>Ease in (circular)</value></data>
+  <data name="Option_InCubic" xml:space="preserve"><value>Ease in (cubic)</value></data>
+  <data name="Option_InElastic" xml:space="preserve"><value>Ease in (elastic)</value></data>
+  <data name="Option_InExpo" xml:space="preserve"><value>Ease in (exponential)</value></data>
+  <data name="Option_InFlash" xml:space="preserve"><value>Ease in (flash)</value></data>
+  <data name="Option_InOutBack" xml:space="preserve"><value>Ease in and out (overshoot)</value></data>
+  <data name="Option_InOutBounce" xml:space="preserve"><value>Ease in and out (bounce)</value></data>
+  <data name="Option_InOutCirc" xml:space="preserve"><value>Ease in and out (circular)</value></data>
+  <data name="Option_InOutCubic" xml:space="preserve"><value>Ease in and out (cubic)</value></data>
+  <data name="Option_InOutElastic" xml:space="preserve"><value>Ease in and out (elastic)</value></data>
+  <data name="Option_InOutExpo" xml:space="preserve"><value>Ease in and out (exponential)</value></data>
+  <data name="Option_InOutFlash" xml:space="preserve"><value>Ease in and out (flash)</value></data>
+  <data name="Option_InOutQuad" xml:space="preserve"><value>Ease in and out (quadratic)</value></data>
+  <data name="Option_InOutQuart" xml:space="preserve"><value>Ease in and out (quartic)</value></data>
+  <data name="Option_InOutQuint" xml:space="preserve"><value>Ease in and out (quintic)</value></data>
+  <data name="Option_InOutSine" xml:space="preserve"><value>Ease in and out (sine)</value></data>
+  <data name="Option_InputEventState_Down" xml:space="preserve"><value>Pressed</value></data>
+  <data name="Option_InputEventState_Up" xml:space="preserve"><value>Released</value></data>
+  <data name="Option_InQuad" xml:space="preserve"><value>Ease in (quadratic)</value></data>
+  <data name="Option_InQuart" xml:space="preserve"><value>Ease in (quartic)</value></data>
+  <data name="Option_InQuint" xml:space="preserve"><value>Ease in (quintic)</value></data>
+  <data name="Option_InSine" xml:space="preserve"><value>Ease in (sine)</value></data>
+  <data name="Option_KickChroma" xml:space="preserve"><value>Chroma kick</value></data>
+  <data name="Option_KickHouse" xml:space="preserve"><value>House kick</value></data>
+  <data name="Option_KickRupture" xml:space="preserve"><value>Rupture kick</value></data>
+  <data name="Option_Kill" xml:space="preserve"><value>Fail on contact</value></data>
+  <data name="Option_LastPosition" xml:space="preserve"><value>Last position</value></data>
+  <data name="Option_LastPositionNoRotation" xml:space="preserve"><value>Last position without rotation</value></data>
+  <data name="Option_LED" xml:space="preserve"><value>LED display</value></data>
+  <data name="Option_Left" xml:space="preserve"><value>Left</value></data>
+  <data name="Option_LightWater" xml:space="preserve"><value>Light on water</value></data>
+  <data name="Option_LinearDodge" xml:space="preserve"><value>Linear dodge (add)</value></data>
+  <data name="Option_Long" xml:space="preserve"><value>Long</value></data>
+  <data name="Option_Mask" xml:space="preserve"><value>Write mask</value></data>
+  <data name="Option_Midspin" xml:space="preserve"><value>Midspin</value></data>
+  <data name="Option_Minimal" xml:space="preserve"><value>Minimal</value></data>
+  <data name="Option_Mirror" xml:space="preserve"><value>Mirror</value></data>
+  <data name="Option_MotionBlur" xml:space="preserve"><value>Motion blur</value></data>
+  <data name="Option_MultiPlanetThreeMore" xml:space="preserve"><value>Additional planets</value></data>
+  <data name="Option_MultiPlanetTwo" xml:space="preserve"><value>Two planets</value></data>
+  <data name="Option_Multiply" xml:space="preserve"><value>Multiply</value></data>
+  <data name="Option_Neon" xml:space="preserve"><value>Neon</value></data>
+  <data name="Option_NeonLight" xml:space="preserve"><value>Soft neon</value></data>
+  <data name="Option_NightVision" xml:space="preserve"><value>Night vision</value></data>
+  <data name="Option_Normal" xml:space="preserve"><value>Normal</value></data>
+  <data name="Option_OilPaint" xml:space="preserve"><value>Oil painting</value></data>
+  <data name="Option_Once" xml:space="preserve"><value>Once</value></data>
+  <data name="Option_OneOrOther" xml:space="preserve"><value>Either value</value></data>
+  <data name="Option_Orbiting" xml:space="preserve"><value>Orbiting</value></data>
+  <data name="Option_OutBack" xml:space="preserve"><value>Ease out (overshoot)</value></data>
+  <data name="Option_OutBounce" xml:space="preserve"><value>Ease out (bounce)</value></data>
+  <data name="Option_OutCirc" xml:space="preserve"><value>Ease out (circular)</value></data>
+  <data name="Option_OutCubic" xml:space="preserve"><value>Ease out (cubic)</value></data>
+  <data name="Option_OutElastic" xml:space="preserve"><value>Ease out (elastic)</value></data>
+  <data name="Option_OutExpo" xml:space="preserve"><value>Ease out (exponential)</value></data>
+  <data name="Option_OutFlash" xml:space="preserve"><value>Ease out (flash)</value></data>
+  <data name="Option_OutQuad" xml:space="preserve"><value>Ease out (quadratic)</value></data>
+  <data name="Option_OutQuart" xml:space="preserve"><value>Ease out (quartic)</value></data>
+  <data name="Option_OutQuint" xml:space="preserve"><value>Ease out (quintic)</value></data>
+  <data name="Option_OutSine" xml:space="preserve"><value>Ease out (sine)</value></data>
+  <data name="Option_Overlay" xml:space="preserve"><value>Overlay</value></data>
+  <data name="Option_Overseer" xml:space="preserve"><value>Overseer</value></data>
+  <data name="Option_PerTouch" xml:space="preserve"><value>Every contact</value></data>
+  <data name="Option_Petals" xml:space="preserve"><value>Petals</value></data>
+  <data name="Option_PetalsInstant" xml:space="preserve"><value>Instant petals</value></data>
+  <data name="Option_Pixelate" xml:space="preserve"><value>Pixelation</value></data>
+  <data name="Option_PixelSnow" xml:space="preserve"><value>Pixel snow</value></data>
+  <data name="Option_Planet" xml:space="preserve"><value>Planet</value></data>
+  <data name="Option_Player" xml:space="preserve"><value>Player</value></data>
+  <data name="Option_PlayerBubble" xml:space="preserve"><value>Player bubble</value></data>
+  <data name="Option_Portal" xml:space="preserve"><value>Portal</value></data>
+  <data name="Option_Posterize" xml:space="preserve"><value>Posterization</value></data>
+  <data name="Option_PowerDown" xml:space="preserve"><value>Power down</value></data>
+  <data name="Option_PowerUp" xml:space="preserve"><value>Power up</value></data>
+  <data name="Option_PublicLicense" xml:space="preserve"><value>Public license</value></data>
+  <data name="Option_Rabbit" xml:space="preserve"><value>Rabbit</value></data>
+  <data name="Option_Rain" xml:space="preserve"><value>Rain</value></data>
+  <data name="Option_Rainbow" xml:space="preserve"><value>Rainbow</value></data>
+  <data name="Option_RedPlanet" xml:space="preserve"><value>Red planet</value></data>
+  <data name="Option_Repeat" xml:space="preserve"><value>Repeat</value></data>
+  <data name="Option_Retract" xml:space="preserve"><value>Retract</value></data>
+  <data name="Option_ReverbClack" xml:space="preserve"><value>Reverberating clack</value></data>
+  <data name="Option_ReverbClap" xml:space="preserve"><value>Reverberating clap</value></data>
+  <data name="Option_Right" xml:space="preserve"><value>Right</value></data>
+  <data name="Option_Rise" xml:space="preserve"><value>Rise</value></data>
+  <data name="Option_Scatter" xml:space="preserve"><value>Scatter</value></data>
+  <data name="Option_Scatter_Far" xml:space="preserve"><value>Scatter into the distance</value></data>
+  <data name="Option_Screen" xml:space="preserve"><value>Screen blend</value></data>
+  <data name="Option_SelectedFloors" xml:space="preserve"><value>Selected tiles</value></data>
+  <data name="Option_Sepia" xml:space="preserve"><value>Sepia</value></data>
+  <data name="Option_Shaker" xml:space="preserve"><value>Shaker</value></data>
+  <data name="Option_ShakerLoud" xml:space="preserve"><value>Loud shaker</value></data>
+  <data name="Option_Sharpen" xml:space="preserve"><value>Sharpen</value></data>
+  <data name="Option_Short" xml:space="preserve"><value>Short</value></data>
+  <data name="Option_Shrink" xml:space="preserve"><value>Shrink</value></data>
+  <data name="Option_Shrink_Spin" xml:space="preserve"><value>Shrink and spin</value></data>
+  <data name="Option_Sidestick" xml:space="preserve"><value>Side stick</value></data>
+  <data name="Option_Single" xml:space="preserve"><value>Single color</value></data>
+  <data name="Option_SingleColor" xml:space="preserve"><value>Solid color</value></data>
+  <data name="Option_SingSing" xml:space="preserve"><value>Sing Sing</value></data>
+  <data name="Option_Sizzle" xml:space="preserve"><value>Sizzle</value></data>
+  <data name="Option_Snail" xml:space="preserve"><value>Snail</value></data>
+  <data name="Option_SnareAcoustic2" xml:space="preserve"><value>Acoustic snare 2</value></data>
+  <data name="Option_SnareHouse" xml:space="preserve"><value>House snare</value></data>
+  <data name="Option_SnareVapor" xml:space="preserve"><value>Vapor snare</value></data>
+  <data name="Option_SoftLight" xml:space="preserve"><value>Soft light</value></data>
+  <data name="Option_Square" xml:space="preserve"><value>Square</value></data>
+  <data name="Option_Squareshot" xml:space="preserve"><value>Square shot</value></data>
+  <data name="Option_Standard" xml:space="preserve"><value>Standard</value></data>
+  <data name="Option_Static" xml:space="preserve"><value>TV static</value></data>
+  <data name="Option_Stick" xml:space="preserve"><value>Stick click</value></data>
+  <data name="Option_Stripes" xml:space="preserve"><value>Stripes</value></data>
+  <data name="Option_SuperDot" xml:space="preserve"><value>Super dots</value></data>
+  <data name="Option_Swirl" xml:space="preserve"><value>Swirl</value></data>
+  <data name="Option_Switch" xml:space="preserve"><value>Alternate</value></data>
+  <data name="Option_Tile" xml:space="preserve"><value>Tile</value></data>
+  <data name="Option_Tiled" xml:space="preserve"><value>Tiled</value></data>
+  <data name="Option_TileRelativeTo_End" xml:space="preserve"><value>Last tile</value></data>
+  <data name="Option_TileRelativeTo_Start" xml:space="preserve"><value>First tile</value></data>
+  <data name="Option_TimesNewRoman" xml:space="preserve"><value>Times New Roman</value></data>
+  <data name="Option_TrackAnimationType_Fade" xml:space="preserve"><value>Fade in</value></data>
+  <data name="Option_TrackAnimationType2_Fade" xml:space="preserve"><value>Fade out</value></data>
+  <data name="Option_Tunnel" xml:space="preserve"><value>Tunnel</value></data>
+  <data name="Option_Unscaled" xml:space="preserve"><value>Original size</value></data>
+  <data name="Option_Up" xml:space="preserve"><value>Up</value></data>
+  <data name="Option_VehicleNegative" xml:space="preserve"><value>Vehicle downshift</value></data>
+  <data name="Option_VehiclePositive" xml:space="preserve"><value>Vehicle upshift</value></data>
+  <data name="Option_VHS" xml:space="preserve"><value>VHS tape</value></data>
+  <data name="Option_VisibleInsideMask" xml:space="preserve"><value>Visible inside mask</value></data>
+  <data name="Option_VisibleOutsideMask" xml:space="preserve"><value>Visible outside mask</value></data>
+  <data name="Option_Volume" xml:space="preserve"><value>Audio volume</value></data>
+  <data name="Option_WaterDrop" xml:space="preserve"><value>Water drops</value></data>
+  <data name="Option_Waves" xml:space="preserve"><value>Waves</value></data>
+  <data name="Option_Weird3D" xml:space="preserve"><value>Offbeat 3D</value></data>
+  <data name="PropertyApply" xml:space="preserve"><value>Apply</value></data>
+  <data name="PropertyBrowse" xml:space="preserve"><value>Browse…</value></data>
+  <data name="PropertyTagSuggestions" xml:space="preserve"><value>Choose an existing tag</value></data>
+  <data name="PropertyTextEdit" xml:space="preserve"><value>Edit text…</value></data>
+  <data name="PropertyUnknownValue" xml:space="preserve"><value>Use original value</value></data>
 </root>

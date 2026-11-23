@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Text;
 using ImGui4NET;
-using NativeFileDialog;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SharpFAI.Editor.Widgets;
 
@@ -14,6 +12,8 @@ internal sealed unsafe partial class EditorWindow
     private bool _hideAllDecorations;
     private bool _lockAllDecorations;
     private string _decorationFilter = "";
+    private readonly List<int> _decorationRows = [];
+    private (int Version, string Filter, CultureInfo Language)? _decorationRowsKey;
     private string _eventSearch = "";
 
     private void DrawSettings()
@@ -28,9 +28,12 @@ internal sealed unsafe partial class EditorWindow
                 if (ImGui.BeginTabItem(EditorCatalog.Name(tab)) == 0)
                     continue;
                 if (ImGui.BeginChild("##fields", default) != 0)
-                    foreach (EditorField field in _catalog.SettingsFor(tab))
+                {
+                    EditorField[] fields = _catalog.SettingsFor(tab);
+                    foreach (EditorField field in fields)
                         if (!field.Hidden && IsDataField(field))
-                            DrawField(_document.Settings, field);
+                            DrawField(_document.Settings, field, tab, fields);
+                }
                 ImGui.EndChild();
                 ImGui.EndTabItem();
             }
@@ -70,14 +73,30 @@ internal sealed unsafe partial class EditorWindow
                 _lockAllDecorations = !_lockAllDecorations;
             ImGui.Separator();
 
-            string[] terms = _decorationFilter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (ImGui.BeginChild("##decoration-list", default) != 0)
             {
                 var decorations = _document.Decorations;
-                for (int i = 0; i < decorations.Count; i++)
+                UpdateDecorationRows();
+                JObject? moveFrom = null, moveTo = null;
+                ImGuiListClipper clipper = default;
+                ImGuiListClipper.ImGuiListClipper_Ctor(&clipper);
+                try
                 {
-                    if (decorations[i] is not JObject item || !MatchesDecoration(item, terms))
-                        continue;
+                    ImGuiListClipper.Begin(&clipper, _decorationRows.Count, -1);
+                    while (ImGuiListClipper.Step(&clipper) != 0)
+                        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++)
+                            DrawDecorationRow(_decorationRows[row]);
+                }
+                finally
+                {
+                    ImGuiListClipper.Dispose(&clipper);
+                }
+                if (moveFrom is not null && moveTo is not null)
+                    _document.MoveDecoration(moveFrom, moveTo);
+
+                void DrawDecorationRow(int i)
+                {
+                    var item = (JObject)decorations[i]!;
                     ImGui.PushID(i);
                     float width = Math.Max(25, ImGui.GetContentRegionAvail().x - 100);
                     if (ImGui.Selectable(DecorationName(item) + "###item", (byte)(_selectedDecorations.Contains(item) ? 1 : 0),
@@ -100,7 +119,10 @@ internal sealed unsafe partial class EditorWindow
                         {
                             int from = *(int*)payload->Data;
                             if (from >= 0 && from < decorations.Count && decorations[from] is JObject moved)
-                                _document.MoveDecoration(moved, item);
+                            {
+                                moveFrom = moved;
+                                moveTo = item;
+                            }
                         }
                         ImGui.EndDragDropTarget();
                     }
@@ -118,6 +140,21 @@ internal sealed unsafe partial class EditorWindow
             ImGui.EndChild();
         }
         ImGui.End();
+    }
+
+    private void UpdateDecorationRows()
+    {
+        var key = (_document.ChangeVersion, _decorationFilter, L.Language);
+        if (_decorationRowsKey == key)
+            return;
+
+        _decorationRowsKey = key;
+        _decorationRows.Clear();
+        string[] terms = _decorationFilter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var decorations = _document.Decorations;
+        for (int i = 0; i < decorations.Count; i++)
+            if (decorations[i] is JObject item && (terms.Length == 0 || MatchesDecoration(item, terms)))
+                _decorationRows.Add(i);
     }
 
     private static void ToggleSet(HashSet<JObject> set, JObject item)
@@ -421,47 +458,31 @@ internal sealed unsafe partial class EditorWindow
                 continue;
             if (type == "AddParticle" && EditorCatalog.ParticleTabs.Any(tab => tab.Keys.Contains(field.Key)))
                 continue;
-            DrawField(target, field);
+            DrawField(target, field, type, fields);
         }
 
         if (type == "SetFilterAdvanced" && fields.All(field => field.Key != "filterProperties"))
             DrawAdvancedFilter(target);
-        if (ImGui.CollapsingHeader(L.T("OtherFields")) != 0)
-        {
-            foreach (JProperty property in target.Properties().ToArray())
-            {
-                if (property.Name is "floor" or "eventType" or "active" or "locked" or "visible" or "disabled" ||
-                    fields.Any(field => field.Key == property.Name) || type == "SetFilterAdvanced" &&
-                    (property.Name == "filterProperties" || EditorFilterCatalog.Fields(target.Value<string>("filter") ?? "").Any(field => field.Key == property.Name)))
-                    continue;
-                DrawField(target, EditorCatalog.Infer(property.Name, property.Value));
-            }
-        }
+        EditorField[] otherFields = InspectorFields.OtherFields(target, fields, type).ToArray();
+        if (otherFields.Length > 0 && ImGui.CollapsingHeader(L.T("OtherFields")) != 0)
+            foreach (EditorField field in otherFields)
+                DrawField(target, field, type, fields);
         ImGui.PopID();
     }
 
-    private void DrawField(JObject target, EditorField field)
+    private void DrawField(JObject target, EditorField field, string? owner = null, EditorField[]? fields = null)
     {
         string key = field.Key;
-        bool dependencyDisabled = false;
-        if (field.DisableIf is { Count: >= 2 } condition)
-        {
-            string? dependency = condition[0]?.Value<string>();
-            string? expected = condition[1]?.ToString();
-            JToken? dependencyValue = dependency is null ? null : target[dependency];
-            dependencyDisabled = string.Equals(dependencyValue?.ToString(), expected, StringComparison.OrdinalIgnoreCase) ||
-                dependencyValue?.Type == JTokenType.Boolean && expected is "Enabled" or "Disabled" &&
-                dependencyValue.Value<bool>() == (expected == "Enabled");
-        }
-        if (EditorDocument.Type(target) == "SetSpeed" &&
-            (key == "beatsPerMinute" && target.Value<string>("speedType") == "Multiplier" ||
-             key == "bpmMultiplier" && target.Value<string>("speedType") != "Multiplier"))
-            return;
+        owner ??= EditorDocument.Type(target);
+        fields ??= _catalog.Find(owner)?.Fields;
+        var condition = InspectorFields.GetState(target, field, fields, owner);
+        if (!condition.Visible) return;
 
         ImGui.PushID(key);
-        string label = EditorCatalog.Name(key);
+        string label = L.Name(key, owner);
         JObject propertyOwner = EditorPropertyEdit.Capture(_document, target, key).Owner;
         bool enabled = target.ContainsKey(key) && propertyOwner["disabled"]?[key]?.Value<bool>() != true;
+        ImGui.BeginDisabled((byte)(condition.Enabled ? 0 : 1));
         ImGui.AlignTextToFramePadding();
         if (field.Optional)
         {
@@ -482,111 +503,68 @@ internal sealed unsafe partial class EditorWindow
             WidgetDraw.TextDisabled(label);
         else
             ImGui.TextUnformatted(label);
+        JToken? value = target[key] ?? field.Default;
+        bool vector = field.Type is "Vector2" or "FloatPair" or "Vector2Range" || key == "velocity" && value is JArray;
         float width = ImGui.GetContentRegionAvail().x;
         float column = Math.Clamp(width * .40f, 94 * _uiScale, 175 * _uiScale);
         float labelWidth = ImGui.CalcTextSize(label).x + (field.Optional ? ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x : 0);
-        if (labelWidth + ImGui.GetStyle()->ItemSpacing.x <= column && width - column >= 86 * _uiScale)
+        if (!vector && labelWidth + ImGui.GetStyle()->ItemSpacing.x <= column && width - column >= 86 * _uiScale)
             ImGui.SameLine(column + ImGui.GetStyle()->WindowPadding.x);
         ImGui.SetNextItemWidth(-1);
-        ImGui.BeginDisabled((byte)(dependencyDisabled || field.Optional && !enabled ? 1 : 0));
-        JToken? value = target[key] ?? field.Default;
+        ImGui.BeginDisabled((byte)(field.Optional && !enabled ? 1 : 0));
         JToken? updated = null;
-        string[]? choices = key == "filter" && EditorDocument.Type(target) == "SetFilterAdvanced" ? EditorFilterCatalog.Names
-            : EditorCatalog.Options(field) ?? Choices(key, EditorDocument.Type(target));
-        if (choices is not null)
+        string[]? choices = EditorCatalog.Options(field);
+        if (owner == "PlaySound" && key == "hitsound")
+            updated = DrawSoundChoice(field, value, choices ?? []);
+        else if (choices is { Length: > 0 })
+            updated = DrawPropertyChoice("##value", field, value, choices);
+        else if (choices is { Length: 0 })
+            updated = DrawRawField(value);
+        else if (field.Type == "Bool" && (value is null || InspectorFields.TryBoolean(value, out _)))
         {
-            string current = value?.Type == JTokenType.String ? value.Value<string>() ?? "" : choices.FirstOrDefault() ?? "";
-            if (ImGui.BeginCombo("##value", L.Option(current)) != 0)
-            {
-                foreach (string option in choices.Append(current).Distinct())
-                    if (ImGui.Selectable(L.Option(option) + "###" + option, (byte)(option == current ? 1 : 0), 0, default) != 0)
-                        updated = new JValue(option);
-                ImGui.EndCombo();
-            }
-        }
-        else if (field.Type == "Bool")
-        {
-            bool boolean = value?.Type == JTokenType.Boolean && value.Value<bool>() ||
-                           bool.TryParse(value?.ToString(), out bool parsed) && parsed;
+            InspectorFields.TryBoolean(value, out bool boolean);
             if (Toggle("##value", ref boolean))
-                updated = new JValue(boolean);
+                updated = InspectorFields.WithBoolean(value, boolean);
         }
-        else if (field.Type is "Int" or "Float")
+        else if (field.Type is "Int" or "Float" or "Rating")
         {
             if (key == "floor") field = field with { Minimum = 0, Maximum = _document.LastFloor };
-            DrawNumericInput(target, field, value, step: field.Type == "Int");
+            if (field.Type == "Rating") field = field with { Type = "Int", Minimum = field.Minimum ?? 1 };
+            if (value is null || value.Type == JTokenType.Null ||
+                double.IsFinite(Number(value, double.NaN)))
+                DrawNumericInput(target, field, value, step: field.Type == "Int");
+            else
+                updated = DrawRawField(value);
         }
-        else if (field.Type is "Vector2" or "FloatPair" or "Vector2Range" || key == "velocity" && value is JArray)
+        else if (vector)
         {
             if (key == "velocity" && value is JArray { Count: 2 } velocity && velocity[0] is JArray)
                 field = field with { Type = "Vector2Range" };
-            bool range = field.Type == "Vector2Range";
-            for (int axis = 0; axis < (range ? 4 : 2); axis++)
-            {
-                JToken? part = range ? ((value as JArray)?.ElementAtOrDefault(axis / 2) as JArray)?.ElementAtOrDefault(axis % 2)
-                    : (value as JArray)?.ElementAtOrDefault(axis);
-                ImGui.TextUnformatted(range ? (axis < 2 ? "Min " : "Max ") + (axis % 2 == 0 ? "X" : "Y") : axis == 0 ? "X" : "Y");
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(-1);
-                DrawNumericInput(target, field, part, axis);
-            }
+            DrawVectorInput(target, field, value as JArray);
         }
-        else if (field.Type == "Tile" || value is JArray { Count: 2 } tile && tile[1]?.Type == JTokenType.String)
-        {
-            JArray? range = value as JArray;
-            string relative = range?.ElementAtOrDefault(1)?.Value<string>() ?? "ThisTile";
-            DrawNumericInput(target, field with { Type = "Tile" }, range?.ElementAtOrDefault(0), 0);
-
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##relative", L.Option(relative)) != 0)
-            {
-                foreach (string option in new[] { "ThisTile", "Start", "End" }.Append(relative).Distinct())
-                    if (ImGui.Selectable(L.Option(option) + "###" + option, (byte)(option == relative ? 1 : 0), 0, default) != 0)
-                    {
-                        FinishNumericEdit();
-                        var latest = EditorPropertyEdit.Capture(_document, target, key).Read() as JArray;
-                        updated = new JArray(latest?.ElementAtOrDefault(0)?.DeepClone() ?? new JValue(0), option);
-                    }
-                ImGui.EndCombo();
-            }
-        }
+        else if (field.Type == "Tile")
+            updated = DrawTileField(target, field, value);
         else if (field.Type == "MinMaxGradient")
             DrawMinMaxGradient(target, field, value);
         else if (field.Type == "Color")
             DrawColorInput(target, field, value);
         else if (field.Type == "FilterProperties" || key == "filterProperties" && EditorDocument.Type(target) == "SetFilterAdvanced")
             DrawAdvancedFilter(target);
-        else if (field.Type is "String" or "File" or "Text" or "LongText" or "LongString" ||
-                 field.Type.StartsWith("Enum:", StringComparison.Ordinal))
+        else if (InspectorFields.IsMultiline(field) && value?.Type is null or JTokenType.Null or JTokenType.String)
+            updated = DrawMultilineField(target, field, value);
+        else if (InspectorFields.AssetType(field) is { } assetType)
+            updated = DrawAssetField(field, value, assetType);
+        else if (field.Type == "String" && value?.Type is null or JTokenType.Null or JTokenType.String)
         {
-            bool file = field.Type == "File" || key is "songFilename" or "bgImage" or "bgVideo" or "decorationImage";
-            if (file) ImGui.SetNextItemWidth(-38);
-            if (EditText("##value", field.Unit ?? "", value?.Type == JTokenType.String ? value.Value<string>() ?? "" : "", false) is { } text)
+            if (InspectorFields.TagSource(owner, key) is { } tagSource)
+                updated = DrawTagField(field, value, tagSource);
+            else if (EditText("##value", field.Unit ?? "", value?.Value<string>() ?? "", false) is { } text)
                 updated = new JValue(text);
-            if (file)
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("…") != 0)
-                {
-                    try
-                    {
-                        string? basePath = Path.GetDirectoryName(_document.Path);
-                        string[]? paths = NativeFileDialog.NativeFileDialog.GetFileDialog()?.OpenFile(L.T("ChooseAsset"),
-                            basePath ?? "", new OpenFileFilter { IncludeAllFiles = true, Filter = [] });
-                        if (paths is { Length: > 0 })
-                            updated = new JValue(key == "decorationImage" ? _document.ImportDecorationImage(paths[0]) :
-                                basePath is not null ? Path.GetRelativePath(basePath, paths[0]) : paths[0]);
-                    }
-                    catch (Exception error) { ShowError(error); }
-                }
-            }
         }
-        else if (EditText("##json", "JSON", value?.ToString(Formatting.None) ?? "null", false) is { } json)
-        {
-            try { updated = JToken.Parse(json); }
-            catch (JsonReaderException error) { ShowError(error); }
-        }
+        else
+            updated = DrawRawField(value);
 
+        ImGui.EndDisabled();
         ImGui.EndDisabled();
         if (updated is not null)
         {

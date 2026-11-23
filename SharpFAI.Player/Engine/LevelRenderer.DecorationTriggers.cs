@@ -32,7 +32,6 @@ public sealed unsafe partial class LevelRenderer
     private HitboxFrame[]? _decorationHitboxes;
     private int _lastDecorationConditionFloor = -1;
     private double _lastDecorationTriggerTime = double.NegativeInfinity;
-    private Action<HitRecord>? _decorationJudgmentCallback;
 
     private void ResetDecorationTriggers()
     {

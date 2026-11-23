@@ -53,7 +53,7 @@ public static class Program
         int exportBitrate = 0;
         bool exportHidePassed = false;
         bool exportPreferHardware = true;
-        bool skipHitsound = false;
+        bool skipAudio = false;
 
         // Allow loading a level straight from the command line
         for (int i = 0; i < args.Length; i++)
@@ -76,9 +76,9 @@ public static class Program
                 continue;
             }
 
-            if (args[i] == "--no-hitsound")
+            if (args[i] == "--no-audio")
             {
-                skipHitsound = true;
+                skipAudio = true;
                 continue;
             }
             if (i + 1 >= args.Length)
@@ -159,7 +159,7 @@ public static class Program
         // 视频导出需要在关卡加载完成后再开始，所以先记下请求，由窗口自己接管
         // Video export has to start after the level loads, so record the request and let the window
         // take over from there
-        window.SkipHitsound = skipHitsound;
+        window.SkipAudioFromCommandLine = skipAudio;
         VideoExporter.Request? exportRequest = exportOutput is null || window.PendingLevelPath is null
             ? null
             : new VideoExporter.Request(

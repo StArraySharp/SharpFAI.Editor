@@ -1,11 +1,38 @@
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using SharpFAI.Editor;
+using SharpFAI.Editor.Widgets;
 
 namespace SharpFAI.Editor.Tests;
 
 public sealed class PropertyControlRegressionTests
 {
+    [Test]
+    public void OtherFieldsExcludeMetadataAndOnlyListUnrecognizedProperties()
+    {
+        var target = JObject.Parse("""
+            {"floor":2,"eventType":"MoveDecorations","active":false,"locked":true,"visible":true,"disabled":{},"opacity":50}
+            """);
+        EditorField[] fields = [new("opacity", "Float", null)];
+        Assert.That(InspectorFields.OtherFields(target, fields, "MoveDecorations"), Is.Empty);
+
+        target["futureProperty"] = 42;
+        Assert.That(InspectorFields.OtherFields(target, fields, "MoveDecorations").Select(field => field.Key),
+            Is.EqualTo(new[] { "futureProperty" }));
+    }
+
+    [Test]
+    public void AdvancedFilterFieldsAreNotRepeatedOutsideTheFilterEditor()
+    {
+        var target = JObject.Parse("""
+            {"eventType":"SetFilterAdvanced","filter":"CameraFilterPack_Colors_Brightness","filterProperties":{"futureParameter":42}}
+            """);
+        EditorField parameter = EditorFilterCatalog.Fields(target.Value<string>("filter")!).First();
+        target[parameter.Key] = parameter.Default!.DeepClone();
+        EditorField[] fields = [new("filter", "AdvancedFilter", null)];
+        Assert.That(InspectorFields.OtherFields(target, fields, "SetFilterAdvanced"), Is.Empty);
+    }
+
     [Test]
     public void ContinuousPreviewChangesUndoAndRedoAsOneEdit()
     {

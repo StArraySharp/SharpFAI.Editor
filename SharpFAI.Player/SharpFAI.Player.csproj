@@ -101,14 +101,18 @@
       <_AdofaiManaged>$(AdofaiGameDir)/A Dance of Fire and Ice_Data/Managed</_AdofaiManaged>
       <_AdofaiManaged Condition="!Exists('$(_AdofaiManaged)')">$(AdofaiGameDir)/ADanceOfFireAndIce_Data/Managed</_AdofaiManaged>
     </PropertyGroup>
-    <ItemGroup Condition="'$(AdofaiGameDir)' != ''">
-      <_AdofaiAssembly Include="$(_AdofaiManaged)/Assembly-CSharp-firstpass.dll;$(_AdofaiManaged)/Assembly-CSharp.dll" />
+    <PropertyGroup>
+      <_AdofaiGameFiles>$(MSBuildProjectDirectory)\..\GameFiles</_AdofaiGameFiles>
+      <_AdofaiManaged Condition="Exists('$(_AdofaiGameFiles)\Assembly-CSharp.dll') Or Exists('$(_AdofaiGameFiles)\Assembly-CSharp-firstpass.dll')">$(_AdofaiGameFiles)</_AdofaiManaged>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_AdofaiManaged)' != ''">
+      <_AdofaiAssembly Include="$(_AdofaiManaged)\Assembly-CSharp-firstpass.dll;$(_AdofaiManaged)\Assembly-CSharp.dll" />
     </ItemGroup>
-    <Error Condition="!Exists('%(_AdofaiAssembly.Identity)') And '@(_AdofaiAssembly)' != ''" Text="ADOFAI filter input missing: %(_AdofaiAssembly.FullPath). Check AdofaiGameDir." />
+    <Error Condition="!Exists('%(_AdofaiAssembly.Identity)') And '@(_AdofaiAssembly)' != ''" Text="ADOFAI filter input missing: %(_AdofaiAssembly.FullPath). GameFiles and AdofaiGameDir each require both Assembly-CSharp.dll and Assembly-CSharp-firstpass.dll from the same game version." />
     <GetFileHash Files="@(_AdofaiAssembly)" Condition="'@(_AdofaiAssembly)' != ''">
       <Output TaskParameter="Items" ItemName="_AdofaiHashedAssembly" />
     </GetFileHash>
-    <CollectAdofaiFilterResources ShaderAssets="$(AdofaiFilterAssetsDir)" UnityAssets="$(AdofaiUnityAssetsDir)" TextureDirectory="$(AdofaiFilterTexturesDir)" Condition="'$(AdofaiGameDir)' != '' And ('$(AdofaiFilterAssetsDir)' != '' Or '$(AdofaiUnityAssetsDir)' != '' Or '$(AdofaiFilterTexturesDir)' != '')">
+    <CollectAdofaiFilterResources ShaderAssets="$(AdofaiFilterAssetsDir)" UnityAssets="$(AdofaiUnityAssetsDir)" TextureDirectory="$(AdofaiFilterTexturesDir)" Condition="'@(_AdofaiAssembly)' != '' And ('$(AdofaiFilterAssetsDir)' != '' Or '$(AdofaiUnityAssetsDir)' != '' Or '$(AdofaiFilterTexturesDir)' != '')">
       <Output TaskParameter="Resources" ItemName="_AdofaiFilterResource" />
     </CollectAdofaiFilterResources>
     <ItemGroup>

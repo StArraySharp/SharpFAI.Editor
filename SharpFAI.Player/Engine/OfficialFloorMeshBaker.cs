@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using OpenTK.Mathematics;
 using SharpFAI.Framework;
@@ -7,26 +8,41 @@ using Thrust.Graphics;
 
 namespace SharpFAI.Player.Engine;
 
-internal readonly record struct FloorVariant(FloorMaterial Material, System.Numerics.Vector2[] Outline, int Batch);
+internal readonly record struct FloorVariant(FloorMaterial Material, System.Numerics.Vector2[] Outline, int Batch, float Radius = 0f);
 
-internal sealed record FloorGeometry(
-    Mesh Mesh,
-    IReadOnlyList<FloorTextureBatch> Batches,
-    Vector2[] Centers,
-    FloorVariant[] Primary,
-    FloorVariant[]?[] Alternates,
-    Aabb Bounds,
-    FloorStreamFrame? Stream = null,
-    int[]? IndexStarts = null) : IDisposable
+internal sealed class FloorGeometry(
+    Mesh mesh,
+    IReadOnlyList<FloorTextureBatch> batches,
+    Vector2[] centers,
+    FloorVariant[] primary,
+    FloorVariant[]?[] alternates,
+    Aabb bounds,
+    FloorStreamFrame? stream,
+    int[] indexStarts,
+    bool primaryPooled) : IDisposable
 {
+    private FloorVariant[] _primary = primary;
+
+    public Mesh Mesh { get; } = mesh;
+    public IReadOnlyList<FloorTextureBatch> Batches { get; } = batches;
+    public Vector2[] Centers { get; } = centers;
+    public Aabb Bounds { get; } = bounds;
+    public FloorStreamFrame? Stream { get; } = stream;
+    public int[] IndexStarts { get; } = indexStarts;
+    public bool IsLevelStream { get; init; }
     public int IndexCount => Stream?.IndexCount ?? Mesh.IndexCount;
     public ReadOnlySpan<FloorVariant> GetVariants(int floor) =>
-        Alternates[floor] is { } variants ? variants : Primary.AsSpan(floor, 1);
+        alternates[floor] is { } variants ? variants : _primary.AsSpan(floor, 1);
 
     public void Dispose()
     {
         Stream?.Dispose();
         Mesh.Dispose();
+        if (primaryPooled && _primary.Length != 0)
+        {
+            ArrayPool<FloorVariant>.Shared.Return(_primary, clearArray: true);
+            _primary = [];
+        }
     }
 }
 
@@ -83,13 +99,25 @@ internal static unsafe class OfficialFloorMeshBaker
         internal readonly ConcurrentDictionary<string, FloorTexture> OutlineTextures = new(StringComparer.Ordinal);
 
         public (FloorTexture Edge, FloorTexture Perlin, FloorTexture Tile) GetStyleTextures(TrackStyleInfo style) =>
-            _styleTextures.GetOrAdd(style, static value => (
-                new FloorTexture(value.EdgeResolved, Filter: FloorTextureFilter.Bilinear),
-                value.PerlinResolved is string perlin ? Mipmapped(perlin) : default,
-                value.TileResolved is string tile ? Mipmapped(tile) : default));
+            _styleTextures.GetOrAdd(style, static value =>
+            {
+                string edge = value.EdgeResolved;
+                FloorTexture border = value.EdgeTextureSuffix switch
+                {
+                    "rs13.png" => new(edge, Wrap: FloorTextureWrap.Mirror, Filter: FloorTextureFilter.Bilinear),
+                    "basic_edge.png" or "minimal_edge.png" => new(edge, Filter: FloorTextureFilter.Point),
+                    _ => new(edge, Filter: FloorTextureFilter.Bilinear),
+                };
+                FloorTexture perlin = value.PerlinResolved is string noise ? MirroredMipmapped(noise) : default;
+                FloorTexture tile = value.TileResolved is not string surface ? default
+                    : value.Sprite ? new(surface, FlipVertically: false, Filter: FloorTextureFilter.Bilinear)
+                    : MirroredMipmapped(surface);
+                return (border, perlin, tile);
+            });
 
-        private static FloorTexture Mipmapped(string resource) =>
-            new(resource, Repeat: true, FlipVertically: false, Filter: FloorTextureFilter.BilinearMipmapped);
+        private static FloorTexture MirroredMipmapped(string resource) =>
+            new(resource, Wrap: FloorTextureWrap.Mirror, FlipVertically: false,
+                Filter: FloorTextureFilter.BilinearMipmapped);
 
         public FloorMeshResult GetShape(Shape shape)
         {
@@ -119,7 +147,6 @@ internal static unsafe class OfficialFloorMeshBaker
         int count = floorIndices?.Length ?? floors.Count;
         Vector2[] centers = new Vector2[count];
         int[] indexStarts = new int[count];
-        FloorVariant[] primary = new FloorVariant[count];
         FloorVariant[]?[] alternates = new FloorVariant[count][];
         FloorTexture[] textures = new FloorTexture[5];
         Span<int> slots = stackalloc int[5];
@@ -128,11 +155,12 @@ internal static unsafe class OfficialFloorMeshBaker
         Vector3 max = new(float.NegativeInfinity);
         System.Diagnostics.Debug.Assert(sizeof(FloorVertex) == Layout.Stride);
         int vertexCapacity = 0, indexCapacity = 0, instanceCapacity = 0;
-        if (floorIndices is not null)
+        if (floorIndices is not null || shapes is not null)
         {
-            foreach (int i in floorIndices)
+            for (int local = 0; local < count; local++)
             {
                 token.ThrowIfCancellationRequested();
+                int i = floorIndices?[local] ?? local;
                 FloorMaterial material = states[i].Material;
                 ReserveShape(floors[i], material);
                 if (materialOptions?[i] is { } options)
@@ -150,8 +178,11 @@ internal static unsafe class OfficialFloorMeshBaker
         Mesh mesh = new(Layout, vertexCapacity, IndexFormat.UInt32, shapes is null ? indexCapacity : 0)
             { Name = "OfficialFloorMesh" };
         FloorStreamFrame? stream = null;
+        FloorVariant[] primary = [];
+        bool poolPrimary = shapes is not null && count > 0;
         try
         {
+            primary = poolPrimary ? ArrayPool<FloorVariant>.Shared.Rent(count) : new FloorVariant[count];
             if (shapes is not null)
             {
                 stream = new FloorStreamFrame(shapes, indexCapacity, instanceCapacity);
@@ -199,12 +230,12 @@ internal static unsafe class OfficialFloorMeshBaker
                     textures[0] = edge;
                     textures[1] = perlin;
                     string? custom = style.Sprite ? null : ResolveTexture(material.TextureName, levelDirectory, cache.TexturePaths);
-                    textures[2] = custom is not null ? new FloorTexture(custom, Repeat: true, External: true) : tile;
+                    textures[2] = custom is not null ? new FloorTexture(custom, Wrap: FloorTextureWrap.Repeat, External: true) : tile;
                     textures[3] = FloorIconTextures.Resolve(floor, material);
                     FloorIcon? icon = material.HideIcon ? null : material.Icon ?? floor.icon;
                     textures[4] = FloorIconTextures.ResolveOutline(textures[3], icon, levelDirectory, cache.OutlineTextures);
                     batches.AddFloor(textures, slots, stream?.IndexCount ?? mesh.IndexCount);
-                    baked[variant] = new FloorVariant(material, result.Collider, batches.Batches.Count);
+                    baked[variant] = new FloorVariant(material, result.Collider, batches.Batches.Count, template.Radius);
 
                     Vector4 textureIds = new(slots[0], slots[1], slots[2], slots[3]);
                     float marker = icon == FloorIcon.Vfx ? 1f : 0f;
@@ -264,12 +295,15 @@ internal static unsafe class OfficialFloorMeshBaker
                 mesh.AddSubMeshForAll();
             }
             Aabb bounds = computeBounds && mesh.VertexCount > 0 ? new Aabb(min, max) : new Aabb(Vector3.Zero, Vector3.Zero);
-            return new FloorGeometry(mesh, batches.Batches, centers, primary, alternates, bounds, stream, indexStarts);
+            return new FloorGeometry(mesh, batches.Batches, centers, primary, alternates, bounds, stream, indexStarts,
+                primaryPooled: poolPrimary) { IsLevelStream = shapes is not null && floorIndices is null };
         }
         catch
         {
             stream?.Dispose();
             mesh.Dispose();
+            if (poolPrimary && primary.Length != 0)
+                ArrayPool<FloorVariant>.Shared.Return(primary, clearArray: true);
             throw;
         }
 

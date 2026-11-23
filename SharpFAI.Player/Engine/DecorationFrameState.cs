@@ -90,7 +90,7 @@ internal sealed class DecorationFrameState
             _assignedImages[item.Index] = pose.Image;
         }
         bool mask = pose.Masking == DecorationMasking.Mask;
-        if (pose.Visible && (!(pose.Opacity <= 0) || (mask && timeline.LegacyMasks)) &&
+        if (pose.Visible && (!(pose.Opacity <= 0) || pose.UsesDepthMask(timeline.LegacyMasks)) &&
             (mask || _collectEditorQuads || pose.Tint.W != 0f) &&
             timeline.Images.TryGetValue(pose.Image, out var image))
         {

@@ -38,7 +38,7 @@ internal sealed class DenseHitsoundMixer
         Transform(_kernel, inverse: false);
     }
 
-    public void Mix(ReadOnlySpan<int> notes, int start, Span<float> destination)
+    public void Mix(ReadOnlySpan<int> notes, int start, Span<float> destination, ReadOnlySpan<float> gains = default)
     {
         Complex[] buffer = ArrayPool<Complex>.Shared.Rent(_size);
         try
@@ -46,9 +46,9 @@ internal sealed class DenseHitsoundMixer
             Span<Complex> spectrum = buffer.AsSpan(0, _size);
             spectrum.Clear();
             int first = start - _history;
-            foreach (int note in notes)
+            for (int i = 0; i < notes.Length; i++)
             {
-                spectrum[note - first] += Complex.One;
+                spectrum[notes[i] - first] += gains.IsEmpty ? 1f : gains[i];
             }
 
             Transform(spectrum, inverse: false);

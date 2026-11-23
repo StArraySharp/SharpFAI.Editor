@@ -45,26 +45,34 @@ public sealed class PlanetTrail
     /// <summary>Sample spacing in pixels.</summary>
     private const float SpacingArc = 10f;
     private const int MaximumSamplesPerPlanet = 32768;
+    private static readonly Lazy<float[]> MaximumDensityFade = new(() =>
+    {
+        var values = new float[MaximumSamplesPerPlanet];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = MathF.Pow(i / (float)(values.Length - 1), 1.8f);
+        return values;
+    });
 
     /// <summary>World-unit to pixel scale.</summary>
     private const float WorldScale = 100f;
 
     /// <summary>History buffer capacity.</summary>
     private const int Capacity = 4096;
+    private const int MaximumHistoryCapacity = 65536;
 
     /// <summary>Threshold below which a move counts as "no move".</summary>
     private const float DuplicateEpsilonSquared = 0.25f;
 
     // One history per planet: position, timestamp and the colour in effect at that moment
-    private readonly Vector2[] _positionsRed = new Vector2[Capacity];
-    private readonly Vector2[] _positionsBlue = new Vector2[Capacity];
-    private readonly double[] _timesRed = new double[Capacity];
-    private readonly double[] _timesBlue = new double[Capacity];
-    private readonly Vector4[] _tintsRed = new Vector4[Capacity];
-    private readonly Vector4[] _tintsBlue = new Vector4[Capacity];
-    private readonly Vector2[] _positionsThird = new Vector2[Capacity];
-    private readonly double[] _timesThird = new double[Capacity];
-    private readonly Vector4[] _tintsThird = new Vector4[Capacity];
+    private Vector2[] _positionsRed = new Vector2[Capacity];
+    private Vector2[] _positionsBlue = new Vector2[Capacity];
+    private double[] _timesRed = new double[Capacity];
+    private double[] _timesBlue = new double[Capacity];
+    private Vector4[] _tintsRed = new Vector4[Capacity];
+    private Vector4[] _tintsBlue = new Vector4[Capacity];
+    private Vector2[] _positionsThird = new Vector2[Capacity];
+    private double[] _timesThird = new double[Capacity];
+    private Vector4[] _tintsThird = new Vector4[Capacity];
 
     private int _headRed;
     private int _headBlue;
@@ -107,18 +115,21 @@ public sealed class PlanetTrail
         RecordPlanet(swapped ? 0 : 1, secondary, secondaryTint, now);
     }
 
-    internal void RecordPlanet(int id, Vector2 position, Vector4 tint, double now)
+    internal void RecordPlanet(int id, Vector2 position, Vector4 tint, double now, bool preserveHistory = false)
     {
         switch (id)
         {
             case 0:
-                Push(_positionsBlue, _timesBlue, _tintsBlue, ref _headBlue, ref _countBlue, position, tint, now);
+                Push(ref _positionsBlue, ref _timesBlue, ref _tintsBlue,
+                    ref _headBlue, ref _countBlue, position, tint, now, preserveHistory);
                 break;
             case 1:
-                Push(_positionsRed, _timesRed, _tintsRed, ref _headRed, ref _countRed, position, tint, now);
+                Push(ref _positionsRed, ref _timesRed, ref _tintsRed,
+                    ref _headRed, ref _countRed, position, tint, now, preserveHistory);
                 break;
             default:
-                Push(_positionsThird, _timesThird, _tintsThird, ref _headThird, ref _countThird, position, tint, now);
+                Push(ref _positionsThird, ref _timesThird, ref _tintsThird,
+                    ref _headThird, ref _countThird, position, tint, now, preserveHistory);
                 break;
         }
     }
@@ -137,7 +148,9 @@ public sealed class PlanetTrail
     /// Resample the histories by arc length into drawable particles. The returned span stays valid
     /// until the next call.
     /// </summary>
-    public ReadOnlySpan<Sample> Build(double now)
+    public ReadOnlySpan<Sample> Build(double now) => Build(now, null);
+
+    internal ReadOnlySpan<Sample> Build(double now, FloorRegion? view)
     {
         // Expire every history, including planets that are no longer being recorded.
         Trim(_timesRed, _headRed, now, ref _countRed);
@@ -153,9 +166,9 @@ public sealed class PlanetTrail
         }
 
         int written = 0;
-        written += Resample(_positionsRed, _timesRed, _tintsRed, _headRed, _countRed, now, _samples, written);
-        written += Resample(_positionsBlue, _timesBlue, _tintsBlue, _headBlue, _countBlue, now, _samples, written);
-        written += Resample(_positionsThird, _timesThird, _tintsThird, _headThird, _countThird, now, _samples, written);
+        written += Resample(_positionsRed, _timesRed, _tintsRed, _headRed, _countRed, now, _samples, written, view);
+        written += Resample(_positionsBlue, _timesBlue, _tintsBlue, _headBlue, _countBlue, now, _samples, written, view);
+        written += Resample(_positionsThird, _timesThird, _tintsThird, _headThird, _countThird, now, _samples, written, view);
 
         SampleCount = written;
         return _samples.AsSpan(0, written);
@@ -170,11 +183,12 @@ public sealed class PlanetTrail
         }
 
         float length = 0f;
+        int mask = positions.Length - 1;
 
         for (int i = 1; i < count; i++)
         {
-            int a = Index(head, count, i - 1);
-            int b = Index(head, count, i);
+            int a = Index(head, count, i - 1, mask);
+            int b = Index(head, count, i, mask);
             length += Vector2.Distance(positions[a], positions[b]);
         }
 
@@ -187,7 +201,7 @@ public sealed class PlanetTrail
     /// </summary>
     private static int Resample(
         Vector2[] positions, double[] times, Vector4[] tints,
-        int head, int count, double now, Sample[] output, int offset)
+        int head, int count, double now, Sample[] output, int offset, FloorRegion? view)
     {
         if (count < 2)
         {
@@ -196,12 +210,13 @@ public sealed class PlanetTrail
 
         // Total arc length
         float totalLength = 0f;
+        int mask = positions.Length - 1;
 
         for (int i = 1; i < count; i++)
         {
             totalLength += Vector2.Distance(
-                positions[Index(head, count, i - 1)],
-                positions[Index(head, count, i)]);
+                positions[Index(head, count, i - 1, mask)],
+                positions[Index(head, count, i, mask)]);
         }
 
         if (totalLength <= 1e-4f)
@@ -210,17 +225,18 @@ public sealed class PlanetTrail
         }
 
         int points = (int)Math.Clamp(totalLength / SpacingArc + 1f, 2f, MaximumSamplesPerPlanet);
+        float[]? fades = points == MaximumSamplesPerPlanet ? MaximumDensityFade.Value : null;
         float step = totalLength / (points - 1);
 
         int segment = 0;
         float segmentStart = 0f;
         float segmentLength = Vector2.Distance(
-            positions[Index(head, count, 0)],
-            positions[Index(head, count, 1)]);
+            positions[Index(head, count, 0, mask)],
+            positions[Index(head, count, 1, mask)]);
 
         int written = 0;
 
-        double age = now - times[Index(head, count, count - 1)];
+        double age = now - times[Index(head, count, count - 1, mask)];
         float activity = (float)Math.Clamp(1.0 - age / Lifetime, 0.0, 1.0) * MathF.Min(1f, totalLength / SpacingArc);
         for (int i = 0; i < points; i++)
         {
@@ -231,25 +247,27 @@ public sealed class PlanetTrail
                 segmentStart += segmentLength;
                 segment++;
                 segmentLength = Vector2.Distance(
-                    positions[Index(head, count, segment)],
-                    positions[Index(head, count, segment + 1)]);
+                    positions[Index(head, count, segment, mask)],
+                    positions[Index(head, count, segment + 1, mask)]);
             }
 
-            int a = Index(head, count, segment);
-            int b = Index(head, count, segment + 1);
+            int a = Index(head, count, segment, mask);
+            int b = Index(head, count, segment + 1, mask);
 
             float local = segmentLength > 1e-4f
                 ? Math.Clamp((target - segmentStart) / segmentLength, 0f, 1f)
                 : 0f;
 
             Vector2 position = Vector2.Lerp(positions[a], positions[b], local);
-            Vector4 baseTint = tints[a];
-
-            // t = 0 is the oldest sample and t = 1 hugs the planet; the 1.6 power accelerates the fade
+            // The oldest sample has t = 0 and the one nearest the planet has t = 1.
             float t = i / (float)(points - 1);
-            float fade = MathF.Pow(t, 1.8f);
+            float fade = fades?[i] ?? MathF.Pow(t, 1.8f);
             float size = fade * StartSize * WorldScale;
+            Vector2 halfSize = new(size * .5f);
+            if (view is { } bounds && !bounds.Intersects(new FloorRegion(position - halfSize, position + halfSize)))
+                continue;
 
+            Vector4 baseTint = tints[a];
             Vector4 tint = new(
                 float.Lerp(baseTint.X, RampEndRed, 1f - t),
                 float.Lerp(baseTint.Y, 0f, 1f - t),
@@ -264,20 +282,17 @@ public sealed class PlanetTrail
     }
 
     /// <summary>Map a logical index onto the ring buffer.</summary>
-    private static int Index(int head, int count, int index)
-    {
-        int start = (head - count + Capacity) % Capacity;
-        return (start + index) % Capacity;
-    }
+    private static int Index(int head, int count, int index, int mask) =>
+        (head - count + index) & mask;
 
     /// <summary>Push a point, updating only the timestamp when stationary.</summary>
     private static void Push(
-        Vector2[] positions, double[] times, Vector4[] tints,
-        ref int head, ref int count, Vector2 position, Vector4 tint, double now)
+        ref Vector2[] positions, ref double[] times, ref Vector4[] tints,
+        ref int head, ref int count, Vector2 position, Vector4 tint, double now, bool preserveHistory)
     {
         if (count > 0)
         {
-            int last = (head - 1 + Capacity) % Capacity;
+            int last = (head - 1) & (positions.Length - 1);
 
             if (Vector2.DistanceSquared(positions[last], position) < DuplicateEpsilonSquared)
             {
@@ -286,15 +301,39 @@ public sealed class PlanetTrail
             }
         }
 
+        if (preserveHistory && count == positions.Length)
+        {
+            Trim(times, head, now, ref count);
+            if (count == positions.Length && positions.Length < MaximumHistoryCapacity)
+            {
+                // Sub-frame sampling can fill the ring before any point expires.
+                Vector2[] nextPositions = GrowRing(positions, head);
+                double[] nextTimes = GrowRing(times, head);
+                Vector4[] nextTints = GrowRing(tints, head);
+                positions = nextPositions;
+                times = nextTimes;
+                tints = nextTints;
+                head = count;
+            }
+        }
+
         positions[head] = position;
         times[head] = now;
         tints[head] = tint;
-        head = (head + 1) % Capacity;
+        head = (head + 1) & (positions.Length - 1);
 
-        if (count < Capacity)
+        if (count < positions.Length)
         {
             count++;
         }
+    }
+
+    private static T[] GrowRing<T>(T[] data, int head)
+    {
+        T[] larger = new T[data.Length * 2];
+        data.AsSpan(head).CopyTo(larger);
+        data.AsSpan(0, head).CopyTo(larger.AsSpan(data.Length - head));
+        return larger;
     }
 
     /// <summary>Drop history points past the lifetime.</summary>
@@ -302,7 +341,7 @@ public sealed class PlanetTrail
     {
         while (count > 0)
         {
-            int start = (head - count + Capacity) % Capacity;
+            int start = (head - count) & (times.Length - 1);
 
             if (now - times[start] <= Lifetime)
             {

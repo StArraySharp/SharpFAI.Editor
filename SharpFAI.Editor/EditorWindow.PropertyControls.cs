@@ -35,19 +35,44 @@ internal sealed unsafe partial class EditorWindow
         var binding = EditorPropertyEdit.Capture(_document, target, field.Key);
         ColorDraft? draft = _colorDraft is { } previous && SameBinding(previous.Binding, binding) ? previous : null;
         if (draft is not null && draft.Version != _document.ChangeVersion) draft = _colorDraft = null;
-        string text = draft?.Text ?? (value?.Type == JTokenType.String ? value.Value<string>() : null) ?? "";
-        string? update = EditText("##hex", L.T("HexColor"), text, true);
-        bool active = ImGui.IsItemActive() != 0;
-        bool finished = ImGui.IsItemDeactivated() != 0;
-        bool enter = active && (ImGui.IsKeyPressed(ImGuiKey.ImGuiKey_Enter, 0) != 0 ||
-            ImGui.IsKeyPressed(ImGuiKey.ImGuiKey_KeypadEnter, 0) != 0);
+        string stored = (value?.Type == JTokenType.String ? value.Value<string>() : null) ?? "";
+        string text = draft?.Text ?? stored;
+        const string hexId = "##hex";
+        const string pickerId = "##color-picker";
+        const int alphaBar = (int)ImGuiColorEditFlags.ImGuiColorEditFlags_AlphaBar;
+        float swatch = ImGui.GetFrameHeight();
+        bool enter = ImGui.GetCurrentContext()->ActiveId == ImGui.GetID(hexId) &&
+            (Pressed(ImGuiKey.ImGuiKey_Enter) || Pressed(ImGuiKey.ImGuiKey_KeypadEnter));
+        bool cancel = draft is not null && Pressed(ImGuiKey.ImGuiKey_Escape);
+        ImGui.BeginGroup();
+        ImGui.SetNextItemWidth(Math.Max(1, ImGui.GetContentRegionAvail().x - swatch));
+        string? update = EditText(hexId, L.T("HexColor"), text, true,
+            extraFlags: (int)ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll);
+        bool textActive = ImGui.IsItemActive() != 0;
         bool valid = EditorPropertyEdit.TryColor(update ?? text, out var rgba);
+        if (!valid) EditorPropertyEdit.TryColor(stored, out rgba);
+        ImGui.SameLine(0, 0);
+        if (ImGui.ColorButton("##color-swatch", WidgetDraw.V4(rgba.X, rgba.Y, rgba.Z, rgba.W), 0,
+            WidgetDraw.V2(swatch, swatch)) != 0)
+            ImGui.OpenPopup(pickerId, 0);
+        ImGui.EndGroup();
+
         float* color = stackalloc float[4] { rgba.X, rgba.Y, rgba.Z, rgba.W };
-        bool changed = ImGui.ColorEdit4("##color", color, (int)(ImGuiColorEditFlags.ImGuiColorEditFlags_AlphaBar |
-            ImGuiColorEditFlags.ImGuiColorEditFlags_NoInputs)) != 0;
-        bool popup = ImGui.IsPopupOpen("picker", 0) != 0;
-        active |= ImGui.IsItemActive() != 0 || popup;
-        finished |= ImGui.IsItemDeactivated() != 0;
+        bool changed = false;
+        bool popup = ImGui.BeginPopup(pickerId, 0) != 0;
+        if (popup)
+        {
+            if (_smokeTest && _frames == 42 && field.Key == ColorSmokeKey)
+            {
+                ImVec2 origin = ImGui.GetCursorScreenPos();
+                _colorSmokePicker = WidgetDraw.V2(origin.x + 35, origin.y + 35);
+            }
+            ImGui.SetNextItemWidth(220 * _uiScale);
+            changed = ImGui.ColorPicker4("##picker", color,
+                alphaBar | (int)ImGuiColorEditFlags.ImGuiColorEditFlags_NoInputs, null) != 0;
+            ImGui.EndPopup();
+        }
+        bool active = textActive || popup;
         if (active || update is not null || changed)
         {
             if (draft is null)
@@ -72,15 +97,15 @@ internal sealed unsafe partial class EditorWindow
         }
         if (draft is not null)
         {
-            if (ImGui.IsKeyPressed(ImGuiKey.ImGuiKey_Escape, 0) != 0)
+            if (cancel)
             {
                 draft.Binding.Document.CancelEditGroup(draft.Group);
                 _colorDraft = null;
                 _invalidColor = null;
             }
-            else if (enter || !active && (finished || draft.Changed)) FinishColorEdit();
+            else if (enter || !active) FinishColorEdit();
         }
-        if (!valid || _invalidColor == string.Join("/", binding.Path))
+        if (!changed && !cancel && (!valid || _invalidColor == string.Join("/", binding.Path)))
             WidgetDraw.TextDisabled(L.T("InvalidColor"));
     }
 

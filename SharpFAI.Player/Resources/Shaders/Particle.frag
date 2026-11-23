@@ -4,6 +4,7 @@ in vec2 vUv;
 in vec4 vTint;
 
 uniform sampler2D uParticleTex;
+uniform bool uStraightAlpha;
 
 out vec4 FragColor;
 
@@ -19,6 +20,8 @@ void main()
     // Blend One OneMinusSrcAlpha (premultiplied alpha) that makes opaque particles cover the
     // background outright instead of merely adding to it.
     vec4 texel = texture(uParticleTex, vUv);
+    if (uStraightAlpha)
+        texel.rgb *= texel.a;
     FragColor = vTint * texel * vTint.a;
 
     if (FragColor.a <= 0.0001 && FragColor.r + FragColor.g + FragColor.b <= 0.0001)

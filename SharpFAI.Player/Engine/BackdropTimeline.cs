@@ -141,6 +141,8 @@ internal sealed class BackdropTimeline
         return index >= 0 ? _backgrounds[index].State : Initial;
     }
 
+    public bool UsesHistory => _history.Count > 0;
+
     public bool HistoryAt(double time)
     {
         int index = LastAt(_history, time, item => item.Time);

@@ -11,81 +11,156 @@ public sealed unsafe partial class LevelRenderer
 // 音频：解码结果接管、混音来源、音量与对时。
 // Audio: decoded sources, export mixing inputs, volume and sync.
 
+    internal readonly record struct EditorAudioReuse(string? MusicPath, DecodedAudio? Music, DecodedAudio? Hitsound, double Rate = 1.0);
+
     /// <summary>
     /// Background side: decode the music and synthesize the hitsound (CPU only, no OpenAL calls).
+    /// The caller may set <paramref name="reuseHitsound"/> when the timing and hitsound settings are unchanged.
     /// </summary>
-    private static (string? MusicPath, DecodedAudio? Music, DecodedAudio? Hitsound) BuildAudio(
+    internal static (string? MusicPath, DecodedAudio? Music, DecodedAudio? Hitsound) BuildAudio(
         Level level,
         string levelPath,
         List<Floor> floors,
         PlaybackTimeline timeline,
         LevelPlaybackSettings settings,
-        Action<string, double>? markPhase = null)
+        Action<string, double>? markPhase = null,
+        EditorAudioReuse? reuse = null,
+        bool reuseHitsound = false)
     {
-        string directory = Path.GetDirectoryName(levelPath) ?? string.Empty;
+        if (settings.SkipAudio)
+            return default;
 
-        // .wav
-        // Music: prefer the song filename from the level settings, accepting .ogg and .wav
         string? musicPath = LevelAudioLocator.Find(level, levelPath);
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        DecodedAudio? music = musicPath is null ? null : AudioDecoder.Decode(musicPath);
+        DecodedAudio? music = reuse is { } prior && string.Equals(musicPath, prior.MusicPath, StringComparison.Ordinal)
+            ? prior.Music : musicPath is null ? null : AudioDecoder.Decode(musicPath);
         markPhase?.Invoke("解码音乐", clock.Elapsed.TotalMilliseconds);
 
         clock.Restart();
-        DecodedAudio? hitsound = settings.SkipHitsound ||
-            string.Equals(settings.Hitsound, "None", StringComparison.OrdinalIgnoreCase)
-            ? null : SynthesizeHitsound(level, directory, floors, timeline, music);
+        DecodedAudio? hitsound = null;
+        if (!string.Equals(settings.Hitsound, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            hitsound = reuseHitsound && reuse is { } previous && previous.Rate == timeline.Pitch &&
+                ReferenceEquals(music, previous.Music)
+                ? previous.Hitsound : SynthesizeHitsound(floors, timeline);
+        }
         markPhase?.Invoke("合成打击音", clock.Elapsed.TotalMilliseconds);
         return (musicPath, music, hitsound);
     }
+
+    private bool _audioBackendReady;
+    private string? _musicLoadWarning;
+    private string? _hitsoundPresetWarning;
 
     /// <summary>
     /// Main thread: hand the decoded audio to the OpenAL sources.
     /// </summary>
     private void ApplyAudio(LevelLoadResult result)
     {
-        // 导出混音需要原始 PCM，先留一份引用（OpenAL 不可用时也能导出）
-        // Keep the raw PCM for export mixing; it is needed even when OpenAL is unavailable
-        _audioMusicPath = result.MusicPath;
-        _audioMusic = result.Music;
-        _audioHitsound = result.Hitsound;
+        SetAudioData(result.MusicPath, result.Music, result.Hitsound);
+        UpdateHitsoundPresetWarning();
+
+        _audioBackendReady = !_settings.SkipAudio && AudioEngine.Initialize();
+        if (_audioBackendReady)
+        {
+            _music = new AudioClip { Name = "Music", Volume = _musicVolume * _musicOutputGain };
+            _hitsound = new AudioClip { Name = "Hitsound", Volume = _hitsoundVolume * _hitsoundOutputGain };
+            if (result.Music is { } music)
+                _music.LoadDecoded(AtPlaybackRate(music));
+            if (result.Hitsound is { } hitsound)
+                _hitsound.LoadDecoded(hitsound);
+        }
+
+        UpdateAudioStatus(_audioBackendReady);
+    }
+
+    /// <summary>
+    /// Main thread: apply audio after installing the new settings and timeline (including pitch).
+    /// Changed clips are stopped and rewound; the caller restores the chart playhead and playback
+    /// intent through seek/restart as needed. Unchanged clips retain their stream and position unless
+    /// the caller explicitly realigns them. Gain-only edits never reset the stream.
+    /// </summary>
+    private void ApplyEditorAudio(string? musicPath, DecodedAudio? music, DecodedAudio? hitsound, double previousPitch)
+    {
+        bool pitchChanged = previousPitch != _pitch;
+        bool musicChanged = !ReferenceEquals(_audioMusic, music) || (pitchChanged && music is not null);
+        bool hitsoundChanged = !ReferenceEquals(_audioHitsound, hitsound);
+        SetAudioData(musicPath, music, hitsound);
+        UpdateHitsoundPresetWarning();
+
+        bool backendReady = _audioBackendReady && AudioEngine.IsInitialized;
+        if (backendReady)
+        {
+            if (musicChanged)
+                UpdateEditorClip(ref _music, music is null ? null : AtPlaybackRate(music));
+            if (hitsoundChanged)
+                UpdateEditorClip(ref _hitsound, hitsound);
+
+            float musicGain = _musicVolume * _musicOutputGain;
+            if (_music.Volume != musicGain)
+                _music.Volume = musicGain;
+            float hitsoundGain = _hitsoundVolume * _hitsoundOutputGain;
+            if (_hitsound.Volume != hitsoundGain)
+                _hitsound.Volume = hitsoundGain;
+        }
+
+        UpdateAudioStatus(backendReady);
+    }
+
+    private void UpdateEditorClip(ref AudioClip clip, DecodedAudio? audio)
+    {
+        if (audio is not null)
+        {
+            clip.LoadDecoded(audio);
+        }
+        else if (clip.IsLoaded)
+        {
+            // AudioClip has no unload operation. Replace only the clip whose PCM was removed.
+            clip.Dispose();
+            clip = new AudioClip { Name = clip.Name };
+        }
+    }
+
+    private void SetAudioData(string? musicPath, DecodedAudio? music, DecodedAudio? hitsound)
+    {
+        // Retain the original PCM and path for export, even without OpenAL.
+        _audioMusicPath = musicPath;
+        _audioMusic = music;
+        _audioHitsound = hitsound;
         _musicVolume = _settings.MusicVolume;
         _hitsoundVolume = _settings.HitsoundVolume;
         UpdateAudioDuration();
+    }
 
-        if (!string.Equals(_settings.Hitsound, "Kick", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(_settings.Hitsound, "None", StringComparison.OrdinalIgnoreCase))
-        {
-            _warnings.Add($"打击音预设 {_settings.Hitsound} 暂无素材，使用 Kick");
-        }
+    private void UpdateHitsoundPresetWarning()
+    {
+        string? warning = !_settings.SkipAudio && !string.Equals(_settings.Hitsound, "Kick", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_settings.Hitsound, "None", StringComparison.OrdinalIgnoreCase)
+            ? $"打击音预设 {_settings.Hitsound} 暂无素材，使用 Kick" : null;
+        SetAudioWarning(ref _hitsoundPresetWarning, warning);
+    }
 
-        if (!AudioEngine.Initialize())
+    private void UpdateAudioStatus(bool backendReady)
+    {
+        if (!backendReady)
         {
             _audioAvailable = false;
-            _audioStatus = "OpenAL 不可用";
+            _audioStatus = _settings.SkipAudio ? "已跳过音频加载" : "OpenAL 不可用";
+            SetAudioWarning(ref _musicLoadWarning, null);
             return;
         }
 
-        _music = new AudioClip { Name = "Music", Volume = _musicVolume };
-        _hitsound = new AudioClip { Name = "Hitsound", Volume = _hitsoundVolume };
-        bool musicLoaded = result.Music is not null && _music.LoadDecoded(AtPlaybackRate(result.Music));
-
-        if (result.MusicPath is null)
+        bool musicLoaded = _music.IsLoaded;
+        bool hitsoundLoaded = _hitsound.IsLoaded;
+        string? warning = _audioMusicPath switch
         {
-            _warnings.Add("未找到音乐文件 / No music file found");
-        }
-        else if (!musicLoaded)
-        {
-            // 明确区分「格式不支持」与「解码失败」：前者导出仍可用，后者是真的坏了
-            // Tell "unsupported format" apart from "failed to decode": the former still exports, the
-            // latter is genuinely broken
-            _warnings.Add(LevelAudioLocator.IsDecodable(result.MusicPath)
-                ? $"音乐加载失败 / Music failed to load: {result.MusicPath}"
-                : $"音乐格式不受支持（导出仍可混入）/ Unsupported music format, export still muxes it: {result.MusicPath}");
-        }
-
-        bool hitsoundLoaded = result.Hitsound is not null && _hitsound.LoadDecoded(AtPlaybackRate(result.Hitsound));
-
+            null => "未找到音乐文件 / No music file found",
+            _ when musicLoaded => null,
+            // Unsupported formats still export by path via ffmpeg.
+            string path when LevelAudioLocator.IsDecodable(path) => $"音乐加载失败 / Music failed to load: {path}",
+            string path => $"音乐格式不受支持（导出仍可混入）/ Unsupported music format, export still muxes it: {path}",
+        };
+        SetAudioWarning(ref _musicLoadWarning, warning);
         _audioAvailable = musicLoaded || hitsoundLoaded;
         _audioStatus = (musicLoaded, hitsoundLoaded) switch
         {
@@ -94,7 +169,15 @@ public sealed unsafe partial class LevelRenderer
             (false, true) => "仅打击音",
             _ => "未找到音频文件",
         };
+    }
 
+    private void SetAudioWarning(ref string? previous, string? warning)
+    {
+        if (previous is not null && previous != warning)
+            _warnings.Remove(previous);
+        if (warning is not null && !_warnings.Contains(warning))
+            _warnings.Add(warning);
+        previous = warning;
     }
 
     private DecodedAudio AtPlaybackRate(DecodedAudio source) => _pitch == 1.0 ? source : new DecodedAudio
@@ -104,51 +187,14 @@ public sealed unsafe partial class LevelRenderer
         SampleRate = Math.Max(1, (int)Math.Round(source.SampleRate * _pitch)),
     };
 
-    /// <summary>
-    /// Synthesize the hitsound from the embedded kick at the level's note times (CPU only, safe on a
-    /// worker thread). Results are cached per level path. When consecutive tiles land on the exact
-    /// same instant, only the first is kept: stacking two samples on one frame just doubles the
-    /// level and combs the transient, and it only ever sounds like a single louder hit.
-    /// </summary>
-    private static DecodedAudio? SynthesizeHitsound(
-        Level level,
-        string directory,
-        List<Floor> floors,
-        PlaybackTimeline timeline,
-        DecodedAudio? music)
+    private static DecodedAudio? SynthesizeHitsound(List<Floor> floors, PlaybackTimeline timeline)
     {
         if (floors.Count == 0)
-        {
             return null;
-        }
 
         try
         {
-            List<double> noteTimes = HitsoundTimes(timeline.EntryTimes);
-            if (noteTimes.Count == 0)
-            {
-                return null;
-            }
-
-            // Match the song length so hitsounds cover the whole track
-            double totalDuration = Math.Max(timeline.LevelDuration, music?.Duration ?? 0.0);
-            if (totalDuration <= 0.0)
-            {
-                totalDuration = timeline.LevelDuration;
-            }
-
-            double tail = noteTimes.Count > 0 ? noteTimes[^1] : 0.0;
-            totalDuration = Math.Max(totalDuration, tail + 0.5);
-
-            HashCode timing = new();
-            timing.Add(totalDuration);
-            foreach (double time in noteTimes)
-            {
-                timing.Add(time);
-            }
-
-            string cacheKey = $"{level.pathToLevel ?? directory}:{timing.ToHashCode():X8}";
-            return HitsoundSynth.Synthesize(cacheKey, noteTimes, totalDuration, 0.85f);
+            return HitsoundSynth.SynthesizeTimeline(timeline.EntryTimes, timeline.Pitch);
         }
         catch (Exception ex)
         {
@@ -157,25 +203,10 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    internal static List<double> HitsoundTimes(ReadOnlySpan<double> entryTimes)
-    {
-        List<double> times = new(entryTimes.Length);
-        for (int i = 1; i < entryTimes.Length; i++)
-        {
-            double time = entryTimes[i];
-            if (time >= 0.0 && (times.Count == 0 || Math.Abs(time - times[^1]) >= 1e-6))
-            {
-                times.Add(time);
-            }
-        }
-
-        return times;
-    }
-
     /// <summary>Hot-swap the hitsound.</summary>
     public bool ReloadHitsound(string wavPath)
     {
-        if (!File.Exists(wavPath))
+        if (_settings.SkipAudio || !File.Exists(wavPath))
         {
             return false;
         }
@@ -184,12 +215,12 @@ public sealed unsafe partial class LevelRenderer
         double position = _playTime;
 
         DecodedAudio? decoded = AudioDecoder.Decode(wavPath);
-        if (decoded is null || decoded.Pcm.Length == 0 || !_hitsound.LoadDecoded(AtPlaybackRate(decoded)))
+        if (decoded is null || decoded.Pcm.Length == 0 || !_hitsound.LoadDecoded(decoded))
         {
             return false;
         }
 
-        _hitsound.Volume = _hitsoundVolume;
+        _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
         _audioHitsound = decoded;
 
         double target = (position + HitsoundClockShift) / _pitch;
@@ -283,8 +314,21 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     public float MusicVolumeExport => _musicVolume;
 
-    /// <summary>打击音音量，导出混音时使用 / Hitsound volume, used when mixing the export audio.</summary>
-    public float HitsoundVolumeExport => _hitsoundVolume;
+    /// <summary>导出时将谱面打击音增益翻倍 / Double the chart hitsound gain for the export mix.</summary>
+    public float HitsoundVolumeExport => _hitsoundVolume * 2f;
+
+    private float _musicOutputGain = 1f;
+    private float _hitsoundOutputGain = 1f;
+
+    // Local monitoring gains are independent of the chart and the export mix.
+    public void SetPlaybackOutputVolumes(int master, int music, int hitsound)
+    {
+        float gain = Math.Clamp(master, 0, 100) / 100f;
+        _musicOutputGain = gain * (Math.Clamp(music, 0, 100) / 100f);
+        _hitsoundOutputGain = gain * (Math.Clamp(hitsound, 0, 100) / 100f);
+        _music.Volume = _musicVolume * _musicOutputGain;
+        _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
+    }
 
     /// <summary>Music volume.</summary>
     public float MusicVolume
@@ -293,7 +337,7 @@ public sealed unsafe partial class LevelRenderer
         set
         {
             _musicVolume = Math.Clamp(value, 0f, 1f);
-            _music.Volume = _musicVolume;
+            _music.Volume = _musicVolume * _musicOutputGain;
         }
     }
 
@@ -304,7 +348,7 @@ public sealed unsafe partial class LevelRenderer
         set
         {
             _hitsoundVolume = Math.Clamp(value, 0f, 1f);
-            _hitsound.Volume = _hitsoundVolume;
+            _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
         }
     }
 
@@ -340,7 +384,7 @@ public sealed unsafe partial class LevelRenderer
     private double AudioTimelineDuration(double musicShift, double hitsoundShift)
     {
         double musicEnd = _audioMusic is { } music ? music.Duration - musicShift : 0.0;
-        double hitsoundEnd = _audioHitsound is { } hitsound ? hitsound.Duration - hitsoundShift : 0.0;
+        double hitsoundEnd = _audioHitsound is { } hitsound ? hitsound.Duration * _pitch - hitsoundShift : 0.0;
         return Math.Max(_levelDuration, Math.Max(musicEnd, hitsoundEnd));
     }
 

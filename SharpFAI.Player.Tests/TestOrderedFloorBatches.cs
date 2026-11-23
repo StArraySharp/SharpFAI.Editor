@@ -69,6 +69,37 @@ public class TestOrderedFloorBatches
     }
 
     [Test]
+    public void LevelStreamPreservesGlobalFloorIdsAndIndexRanges()
+    {
+        Floor[] floors =
+        [
+            new(0, 180, new System.Numerics.Vector2(-150, 0)),
+            new(90, 180, default),
+            new(0, 180, new System.Numerics.Vector2(150, 0)),
+        ];
+        FloorTrackState state = new(TrackStyleInfo.Standard, Vector4.One, Vector4.One,
+            TrackColorMode.Single, 0, 1, 1, 0, 0, 0);
+        FloorTrackState[] states = [state, state, state];
+        FloorShapeLibrary shapes = new();
+        foreach (Floor floor in floors)
+            shapes.Add(OfficialFloorMeshBaker.Shape.Create(floor, state.Material));
+
+        using FloorGeometry level = OfficialFloorMeshBaker.BakeLevel(floors, states, 16,
+            computeBounds: false, shapes: shapes);
+        FloorStreamFrame stream = level.Stream!;
+        Assert.That(level.IsLevelStream, Is.True);
+        Assert.That(stream.InstanceTexels, Is.EqualTo(floors.Length * FloorStreamFrame.TexelsPerInstance));
+        for (int floor = floors.Length - 1; floor >= 0; floor--)
+        {
+            int first = level.IndexStarts[floor];
+            int end = floor == 0 ? level.IndexCount : level.IndexStarts[floor - 1];
+            Assert.That(end, Is.GreaterThan(first));
+            int instance = stream.Indices[first] >> FloorShapeLibrary.VertexBits;
+            Assert.That(stream.Instances[instance].Address.Y, Is.EqualTo(floor));
+        }
+    }
+
+    [Test]
     public void TextureExhaustionDoesNotReorderOverlappingFloors()
     {
         Floor[] floors =

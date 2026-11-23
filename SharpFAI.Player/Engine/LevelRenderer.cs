@@ -30,6 +30,13 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     public float TileSpacing => Floor.length * 2f * _settings.TileLength;
 
     public bool ShowDecorations { get; set; } = true;
+
+    /// <summary>
+    /// Progress preparing the chart's filter programs and textures, or <c>null</c> when ready.
+    /// </summary>
+    public (int Done, int Total)? ShaderPrewarmProgress =>
+        _shaderPrewarm is { Count: > 0 } ? (_shaderPrewarmDone, _shaderPrewarmTotal) : null;
+
     public Vector4 BackgroundColor => _backdrop?.BackgroundAt(_playTime).Settings.Background ?? _settings.Background;
     private BackdropTimeline? _backdrop;
     private BackdropTimeline.ImageState? _uploadedBackdrop;
@@ -51,11 +58,6 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     private const double FullTurnEpsilonDegrees = 1e-6 * 180.0 / Math.PI;
 
     private const double FullTurnDegrees = 6.283184482025146 * 180.0 / Math.PI;
-
-    // Distance ramp (world units) where the camera starts catching up and where it saturates
-    private const float CameraCatchUpStartDistance = 500f;
-
-    private const float CameraCatchUpEndDistance = 1000f;
 
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
@@ -130,13 +132,33 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     private Dictionary<int, PauseAngleCorrection>? _pauseAngles;
     private CameraTimeline? _cameraTimeline;
     private Filters.FilterTimeline? _filterTimeline;
+    private Filters.FilterTimeline? _backgroundFilterTimeline;
     private SceneEffectTimeline? _sceneEffects;
     private ImageDecorationTimeline? _imageDecorations;
     private ImageDecorationRenderer? _decorationRenderer;
     private bool _decorationShaderFailed;
     private readonly List<Filters.FilterTimeline.Entry> _scenePasses = [];
+    private IReadOnlyList<Filters.FilterTimeline.Entry> _backgroundPasses = [];
     private Filters.OpenGlFilterBackend? _filterBackend;
+    private Queue<(string Name, int? Pass)>? _shaderPrewarm;
+    private int _shaderPrewarmTotal;
+    private int _shaderPrewarmDone;
+    private bool _preparingLevelEffects;
+    private readonly List<(Filters.FilterTimeline Timeline, string Name)> _componentPrewarm = [];
+    private int _componentPrewarmIndex;
+    private bool _schedulesPrewarmed;
+    private bool _scenePrewarmed;
+    private int _staticTextureIndex;
+    private long _prewarmedTextureBytes;
+    private int _filterCamerasToPrewarm;
+    private bool _prewarmBloom;
+    private bool _prewarmMotionBlur;
     private double _lastFilterTime = double.NaN;
+    private double _lastFilterWallTime;
+    private double _liveFilterClock;
+    private bool _filterClockPaused;
+    private double _filterClock;
+    private float _filterDelta;
     private Vector2 _cameraFollowCenter;
     private bool _cameraEventActive;
     private bool _cameraEventZoomApplied;
@@ -167,12 +189,17 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
     private double _cameraElapsed;
 
-    private double _cameraDuration;
-
     private int _cameraIndex = -1;
 
     private double _lastCameraTime;
     private Vector2 _cameraShake;
+    private double _cameraPulseTime = double.NegativeInfinity;
+    private int _cameraPulseFloor = -1;
+    private Vector2 _cameraHoldOffset;
+    private Vector2 _cameraHoldReleaseOffset;
+    private double _cameraHoldReleaseTime = double.NaN;
+    private bool _cameraRenderDisabled;
+    private Action<HitRecord>? _cameraHitCallback;
 
     // Request a hard camera snap (set by Seek/Restart) so a frame hitch is not mistaken for a jump
     private bool _cameraSnap;
@@ -184,12 +211,8 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     // Planet rotation
     private float _rotationAngle;
 
-    // Continuous (unwrapped) rotation, used by the secondary planet and the trail so a wrap past
-    // 360 degrees cannot cause a jump
+    // Continuous (unwrapped) rotation used for hit timing.
     private float _rotationAngleContinuous;
-
-    // Display angle used when interpolating trail samples during offline rendering.
-    private float _sweepAngleNow;
 
     private bool _isCw = true;
 
@@ -272,13 +295,14 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     private double _lastLoadTotalMs;
 
     /// <summary>Whether a load is running in the background.</summary>
-    public bool IsLoading => _loadTask is not null;
+    public bool IsLoading => _loadTask is not null || _preparingLevelEffects;
 
     /// <summary>
     /// Skip hit-sound synthesis on the next load. It renders every note's kick up front and
     /// dominates load time on long charts, so previews and captures can turn it off.
     /// </summary>
-    public bool SkipHitsound { get; set; }
+    /// <summary>Skip music and hitsounds on subsequent level loads.</summary>
+    public bool SkipAudio { get; set; }
 
     /// <summary>Whether the last load failed.</summary>
     public string? LoadError => _loadError;
@@ -312,6 +336,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public PlaybackEvent[]? EditorEvents { get; init; }
         public CameraTimeline? CameraTimeline { get; init; }
         public Filters.FilterTimeline? FilterTimeline { get; init; }
+        public Filters.FilterTimeline? BackgroundFilterTimeline { get; init; }
         public SceneEffectTimeline? SceneEffects { get; init; }
         public ImageDecorationTimeline? Decorations { get; init; }
         public required ManualTrack ManualTrack { get; init; }
@@ -325,7 +350,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     }
 
     /// <summary>Timeline data computed off the render thread.</summary>
-    internal sealed class PlaybackTimeline
+    internal sealed record PlaybackTimeline
     {
         public double[] EntryTimes { get; init; } = [];
         public double[] FloorBpms { get; init; } = [];
@@ -412,16 +437,11 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     /// </summary>
     private const double TrailAngleStepDegrees = 15.0;
 
-    private Vector2 _previousPlanetCenter;
-
-    private Vector2 _previousSecondaryCenter;
-
-    private double _previousAngleContinuous;
-
     private double _previousPlayTime;
 
     private int _previousCurrentIndex = -1;
-
+    private double _offlineTrailTime = double.NaN;
+    private int _offlineTrailFloor = -1;
 
     private bool _offlineSubSample;
 

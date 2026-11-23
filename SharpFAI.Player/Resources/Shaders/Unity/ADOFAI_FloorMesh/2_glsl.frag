@@ -115,58 +115,35 @@ vec4 addIconOutline(vec4 icon, vec4 outline)
     return vec4(premultiplied / max(alpha, 0.00001), alpha);
 }
 
-layout(location = 0) out vec4 SV_Target0;
-vec4 u_xlat0;
-bool u_xlatb0;
-vec4 u_xlat1;
-vec4 u_xlat2;
-vec4 u_xlat3;
-vec4 u_xlat4;
-float u_xlat6;
-float u_xlat7;
-vec2 u_xlat8;
-vec2 u_xlat12;
-bool u_xlatb12;
-vec2 u_xlat13;
-bvec2 u_xlatb13;
-float u_xlat18;
-bool u_xlatb18;
-float u_xlat19;
-float u_xlat20;
+layout(location = 0) out vec4 outColor;
+
+vec2 rotateUv(vec2 uv, float angle)
+{
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, s, -s, c) * uv;
+}
+
 void main()
 {
-    u_xlat0.xy = (int(vs_STYLEPARAMS.y) != 0) ? vec2(0.5, 0.5) : _TileTex_ST.zw;
-    u_xlat1.xyz = (int(vs_STYLEPARAMS.y) != 0) ? vec3(0.0, 0.0, 0.0) : vs_TILEOFFSET;
-    u_xlat12.x = (vs_STYLEPARAMS.y != 0) ? 1.0 : vs_ICONDATA.w;
-    u_xlat18 = u_xlat1.z * 3.14152908;
-    u_xlat2.x = sin(u_xlat18);
-    u_xlat3.x = cos(u_xlat18);
-    u_xlat13.xy = u_xlat2.xx * vs_TEXCOORD1.yx;
-    u_xlat2.x = vs_TEXCOORD1.x * u_xlat3.x + (-u_xlat13.x);
-    u_xlat2.y = vs_TEXCOORD1.y * u_xlat3.x + u_xlat13.y;
-    u_xlat0.xy = u_xlat0.xy + u_xlat1.xy;
-    u_xlat12.xy = u_xlat2.xy / u_xlat12.xx;
-    u_xlat1.xy = u_xlat0.xy + u_xlat12.xy;
+    bool sprite = vs_STYLEPARAMS.y != 0.0;
+    vec2 localUv = vs_TEXCOORD1;
+    vec2 edgeUv = vs_TEXCOORD0;
+    vec3 tileTransform = sprite ? vec3(0.0) : vs_TILEOFFSET;
+    vec2 tileOrigin = (sprite ? vec2(0.5) : _TileTex_ST.zw) + tileTransform.xy;
+    float tileScale = sprite ? 1.0 : vs_ICONDATA.w;
+    const float tileRotationScale = 3.14152908;
+    vec2 tileUv = tileOrigin + rotateUv(localUv, tileTransform.z * tileRotationScale) / tileScale;
     int tileSlot = vs_TEXTURESLOTS.z;
-    u_xlat1.z = u_xlat1.y * (tileSlot >= 0 ? uTextureRatio[tileSlot] : 1.0);
-    vec2 edgeUv = vs_TEXCOORD0.xy;
-    vec2 tileUv = u_xlat1.xz;
-    vec2 perlinUv = u_xlat0.xy + vs_TEXCOORD1.xy / _PerlinScale;
-    u_xlat2.x = sin(vs_ICONDATA.x);
-    u_xlat3.x = cos(vs_ICONDATA.x);
-    u_xlat13.xy = u_xlat2.xx * vs_TEXCOORD1.yx;
-    u_xlat8.x = vs_TEXCOORD1.x * u_xlat3.x + (-u_xlat13.x);
-    u_xlat8.y = vs_TEXCOORD1.y * u_xlat3.x + u_xlat13.y;
-    u_xlat13.xy = u_xlat8.xy / vec2(vec2(vs_ICONDATA.y, vs_ICONDATA.y));
-    u_xlat2.yz = u_xlat13.xy + vec2(0.5, 0.5);
-    u_xlat13.x = (-u_xlat2.y) + 1.0;
-    u_xlat20 = vs_ICONDATA.z;
-    u_xlat13.x = (-u_xlat2.y) + u_xlat13.x;
-    u_xlat2.x = u_xlat20 * u_xlat13.x + u_xlat2.y;
-    u_xlat13.x = u_xlat2.x + -0.5;
-    u_xlatb13.xy = lessThan(vec4(0.5, 0.5, 0.5, 0.5), abs(u_xlat13.xyxy)).xy;
-    u_xlatb13.x = u_xlatb13.y || u_xlatb13.x;
-    vec2 iconUv = u_xlat2.xz;
+    tileUv.y *= tileSlot >= 0 ? uTextureRatio[tileSlot] : 1.0;
+    vec2 perlinUv = tileOrigin + localUv / _PerlinScale;
+
+    vec2 iconLocalUv = rotateUv(localUv, vs_ICONDATA.x) / vs_ICONDATA.y;
+    vec2 iconUv = iconLocalUv + vec2(0.5);
+    iconUv.x += vs_ICONDATA.z * ((1.0 - iconUv.x) - iconUv.x);
+    bool iconInBounds = abs(iconUv.x - 0.5) <= 0.5 && abs(iconLocalUv.y) <= 0.5;
+
+    // Compute derivatives before any branches that can diverge within a fragment quad.
     vec2 edgeDx = dFdx(edgeUv);
     vec2 edgeDy = dFdy(edgeUv);
     vec2 tileDx = dFdx(tileUv);
@@ -175,82 +152,53 @@ void main()
     vec2 perlinDy = dFdy(perlinUv);
     vec2 iconDx = dFdx(iconUv);
     vec2 iconDy = dFdy(iconUv);
-    u_xlatb0 = 1.0<vs_TEXCOORD0.y;
-    if(u_xlatb0){
-        u_xlat0.x = (-vs_TEXCOORD0.y) + 2.0;
-        u_xlat0.x = log2(u_xlat0.x);
-        u_xlat0.x = u_xlat0.x * 1.29999995;
-        u_xlat0.x = exp2(u_xlat0.x);
-        u_xlat1.xyz = vs_SHADOWCOLOR.xyz;
-        u_xlat1.w = 1.0;
-        u_xlat0 = u_xlat0.xxxx * u_xlat1;
-        u_xlat0 = u_xlat0 * vs_SHADOWCOLOR.wwww;
-        u_xlat0 = u_xlat0 * vec4(vs_OPACITY);
-        u_xlat1.x = float(_Active);
-        u_xlat0 = u_xlat0 * u_xlat1.xxxx;
-        SV_Target0 = u_xlat0 * vs_COLOR0.wwww;
+
+    float opacity = vs_COLOR0.a * vs_OPACITY;
+    if (edgeUv.y > 1.0)
+    {
+        float falloff = pow(2.0 - edgeUv.y, 1.3);
+        float shadowAlpha = falloff * vs_SHADOWCOLOR.a * float(_Active) * opacity;
+        outColor = vec4(vs_SHADOWCOLOR.rgb * shadowAlpha, shadowAlpha);
         return;
     }
-    u_xlatb12 = _Inset<vs_TEXCOORD0.y;
-    u_xlatb18 = _AbsoluteInset!=0;
-    u_xlatb12 = u_xlatb18 || u_xlatb12;
-    if(u_xlatb12){
-        u_xlat2 = sampleFloorTexture(vs_TEXTURESLOTS.x, edgeUv, edgeDx, edgeDy, vec4(1.0));
-        u_xlat2 = u_xlat2 * _Tint;
-    } else {
-        u_xlat2.x = float(1.0);
-        u_xlat2.y = float(1.0);
-        u_xlat2.z = float(1.0);
-        u_xlat2.w = float(1.0);
-    }
-    u_xlat3.xyz = u_xlat2.xyz * vec3(vec3(vs_STYLEPARAMS.x, vs_STYLEPARAMS.x, vs_STYLEPARAMS.x));
-    u_xlat0 = sampleFloorTexture(vs_TEXTURESLOTS.y, perlinUv, perlinDx, perlinDy, vec4(0.0));
-    u_xlat0.x = u_xlat0.x * _PerlinStrength;
-    u_xlat6 = u_xlat0.x * u_xlat0.x;
-    u_xlat0.xyz = vec3(u_xlat6) * u_xlat0.xxx + u_xlat3.xyz;
-    u_xlat2.xyz = min(u_xlat0.xyz, vec3(1.0, 1.0, 1.0));
-    u_xlat0 = sampleFloorTexture(vs_TEXTURESLOTS.z, tileUv, tileDx, tileDy, vec4(1.0));
-    u_xlat1 = u_xlat0 * vs_COLOR0;
-    u_xlat0.x = (-u_xlat0.w) * vs_COLOR0.w + 1.0;
-    u_xlat0.w = _CommentColor.w * u_xlat0.x + u_xlat1.w;
-    u_xlat19 = (-_CommentColor.w) + 1.0;
-    u_xlat1.xyz = vec3(u_xlat19) * u_xlat1.xyz;
-    u_xlat0.xyz = _CommentColor.xyz * _CommentColor.www + u_xlat1.xyz;
-    u_xlat0 = u_xlat2 * u_xlat0;
-    u_xlat1.x = float(_Active);
-    u_xlat7 = u_xlat0.w * u_xlat1.x;
-    u_xlat4 = vec4(0.0);
-    bool outlineIcon = uForceIconOutline || vs_STYLEPARAMS.z > 0.5;
-    bool hasOutlineTexture = vs_OUTLINESLOT >= 0 && uTextureRatio[vs_OUTLINESLOT] > 0.0;
-    if (!u_xlatb13.x && vs_TEXTURESLOTS.w >= 0)
+
+    vec4 edge = vec4(1.0);
+    if (_AbsoluteInset != 0 || edgeUv.y > _Inset)
     {
-        u_xlat4 = sampleFloorTexture(vs_TEXTURESLOTS.w, iconUv, iconDx, iconDy, vec4(0.0)) * _IconColor;
+        edge = sampleFloorTexture(vs_TEXTURESLOTS.x, edgeUv, edgeDx, edgeDy, vec4(1.0)) * _Tint;
+    }
+    float noise = sampleFloorTexture(vs_TEXTURESLOTS.y, perlinUv, perlinDx, perlinDy, vec4(0.0)).r;
+    noise *= _PerlinStrength;
+    edge.rgb = min(edge.rgb * vs_STYLEPARAMS.x + vec3(noise * noise * noise), vec3(1.0));
+
+    vec4 tile = sampleFloorTexture(tileSlot, tileUv, tileDx, tileDy, vec4(1.0)) * vs_COLOR0;
+    tile.rgb = mix(tile.rgb, _CommentColor.rgb, _CommentColor.a);
+    tile.a += _CommentColor.a * (1.0 - tile.a);
+    tile *= edge;
+    float tileAlpha = tile.a * float(_Active);
+
+    vec4 icon = vec4(0.0);
+    if (iconInBounds && vs_TEXTURESLOTS.w >= 0)
+    {
+        icon = sampleFloorTexture(vs_TEXTURESLOTS.w, iconUv, iconDx, iconDy, vec4(0.0)) * _IconColor;
     }
     else if (vs_STYLEPARAMS.w > 0.5)
     {
-        vec2 marker = abs(iconUv - vec2(0.5));
-        u_xlat4 = vec4(0.98, 0.94, 0.74, 1.0 - smoothstep(0.15, 0.18, length(marker)));
+        float radius = length(iconUv - vec2(0.5));
+        icon = vec4(0.98, 0.94, 0.74, 1.0 - smoothstep(0.15, 0.18, radius));
     }
-    if (outlineIcon && hasOutlineTexture && !u_xlatb13.x && u_xlat4.a < 1.0)
+    bool outlineIcon = uForceIconOutline || vs_STYLEPARAMS.z > 0.5;
+    bool hasOutlineTexture = vs_OUTLINESLOT >= 0 && uTextureRatio[vs_OUTLINESLOT] > 0.0;
+    if (outlineIcon && hasOutlineTexture && iconInBounds && icon.a < 1.0)
     {
         vec4 outline = sampleFloorTexture(vs_OUTLINESLOT, iconUv, iconDx, iconDy, vec4(0.0));
-        u_xlat4 = addIconOutline(u_xlat4, outline);
+        icon = addIconOutline(icon, outline);
     }
 
-    u_xlat19 = u_xlat4.w;
-    u_xlat2.xyz = u_xlat4.xyz;
-    u_xlat18 = (-u_xlat0.w) * u_xlat1.x + 1.0;
-    u_xlat18 = u_xlat19 * u_xlat18 + u_xlat7;
-    u_xlat1.x = (-u_xlat19) + 1.0;
-    u_xlat0.xyz = u_xlat0.xyz * u_xlat1.xxx;
-    u_xlat0.xyz = u_xlat2.xyz * vec3(u_xlat19) + u_xlat0.xyz;
-    u_xlat1.x = vs_COLOR0.w * vs_OPACITY;
-    u_xlat18 = u_xlat18 * u_xlat1.x;
-    u_xlat1.xyz = (-u_xlat0.xyz) + vec3(1.0, 1.0, 1.0);
-    u_xlat0.xyz = vec3(_Flash) * u_xlat1.xyz + u_xlat0.xyz;
+    float alpha = (tileAlpha + icon.a * (1.0 - tileAlpha)) * opacity;
+    vec3 color = mix(tile.rgb, icon.rgb, icon.a);
+    color += _Flash * (vec3(1.0) - color);
     float glow = clamp(vs_GLOW, 0.0, 4.0) * smoothstep(0.65, 1.0, edgeUv.y) * 0.12;
-    u_xlat0.rgb += glow * vs_COLOR0.rgb;
-    SV_Target0.xyz = vec3(u_xlat18) * u_xlat0.xyz;
-    SV_Target0.w = u_xlat18;
-    return;
+    color += glow * vs_COLOR0.rgb;
+    outColor = vec4(color * alpha, alpha);
 }

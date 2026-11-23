@@ -6,6 +6,21 @@ namespace SharpFAI.Editor.Tests;
 [TestFixture]
 public sealed class CanvasInputRegressionTests
 {
+    [Test]
+    public void OverlappingFloorsCycleByOrderedHitsAndWrap()
+    {
+        FloorHitCycle cycle = new();
+        Assert.That(cycle.Pick([2, 6, 9]), Is.EqualTo(2));
+        Assert.That(cycle.Pick([2, 6, 9]), Is.EqualTo(6));
+        Assert.That(cycle.Pick([2, 6, 9]), Is.EqualTo(9));
+        Assert.That(cycle.Pick([2, 6, 9]), Is.EqualTo(2));
+        Assert.That(cycle.Pick([2, 9]), Is.EqualTo(2));
+        Assert.That(cycle.Pick([9, 2]), Is.EqualTo(9));
+        Assert.That(cycle.Pick([9, 2]), Is.EqualTo(2));
+        Assert.That(cycle.Pick([]), Is.EqualTo(-1));
+        Assert.That(cycle.Pick([9, 2]), Is.EqualTo(9));
+    }
+
     [TestCase(false, false, 8)]
     [TestCase(false, true, 8)]
     [TestCase(true, false, 10)]

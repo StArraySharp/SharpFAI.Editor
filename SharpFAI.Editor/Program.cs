@@ -1,3 +1,4 @@
+using System.Runtime;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -38,6 +39,9 @@ internal static class Program
 
         try
         {
+            // Large charts can keep millions of live objects. Favor background collections
+            // during interactive playback, as the standalone player does.
+            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
             if (language is not null)
                 L.Language = System.Globalization.CultureInfo.GetCultureInfo(language);
             EditorCatalog catalog = new(propertiesPath);
@@ -68,7 +72,7 @@ internal static class Program
                 Profile = ContextProfile.Core,
                 Vsync = VSyncMode.On,
                 StartVisible = !(smokeTest || effectBenchmark)
-            }, catalog, document, smokeTest, effectBenchmark);
+            }, catalog, document, smokeTest, effectBenchmark, language);
             if (archiveChoices is not null)
                 window.ChooseArchiveLevel(archiveChoices);
             using EditorWebMirror? mirror = webUi ? EditorWebMirror.Start() : null;

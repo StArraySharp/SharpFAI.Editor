@@ -28,7 +28,7 @@ internal interface IFilterBackend
 }
 
 internal readonly record struct LegacyFilterBinding(string Component, float DefaultIntensity, int Order,
-    Action<IGeneratedFilter, float>? SetIntensity);
+    Action<IGeneratedFilter, float>? SetIntensity, Action<IGeneratedFilter, double>? OnEnabled = null);
 
 internal interface IFilterShader;
 

@@ -23,6 +23,8 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
 
     public void Open() => _opening = true;
 
+    public void SetOutputVolume(int master) => _clicks.Volume = .65f * (master / 100f);
+
     public void Tap(LevelRenderer renderer)
     {
         if (!IsMeasuring || !_clicks.IsPlaying || _measurement.AddTap(_clicks.Position) is not int delay)

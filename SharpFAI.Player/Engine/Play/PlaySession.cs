@@ -98,6 +98,8 @@ public sealed class PlaySession
         }
     }
 
+    internal void UpdateTrackRules(ManualTrack track) => _track = track;
+
     internal HitBoundaries GetBoundaries(double multiplier) =>
         _track is { } track && TargetFloor >= 0
             ? HitJudge.GetBoundaries(track.Bpm(CurrentFloor), multiplier * track.RulesAt(TargetFloor).Margin, track.Pitch)

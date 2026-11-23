@@ -27,6 +27,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
         public Vector2 Center;
         public Vector2 HalfSize;
         public Vector4 Tint;
+        public float Rotation;
+        public int Frame;
     }
 
     private const int MaxInstances = 16384;
@@ -53,6 +55,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
     private readonly int _particleInstanceVbo;
     private int _particleLvp;
     private int _particleLtexture;
+    private int _particleLcolumns;
+    private int _particleLstraightAlpha;
 
     // Instance staging buffer, reused every frame
     private float[]? _particleInstances;
@@ -136,6 +140,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
 
         _particleLvp = GL.GetUniformLocation(_particleProgram, "uViewProjection");
         _particleLtexture = GL.GetUniformLocation(_particleProgram, "uParticleTex");
+        _particleLcolumns = GL.GetUniformLocation(_particleProgram, "uColumns");
+        _particleLstraightAlpha = GL.GetUniformLocation(_particleProgram, "uStraightAlpha");
 
         if (previous != 0)
         {
@@ -229,9 +235,13 @@ public sealed unsafe class SpriteRenderer : IDisposable
     /// <summary>
     /// Draw the particles using <c>Blend One OneMinusSrcAlpha</c> (premultiplied alpha).
     /// </summary>
-    public void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles)
+    public void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles) =>
+        DrawParticles(viewProjection, particles, _particleTexture, 1, straightAlpha: false);
+
+    internal void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles,
+        int texture, int columns, bool straightAlpha)
     {
-        if (particles.IsEmpty || _particleTexture == 0)
+        if (particles.IsEmpty || texture == 0)
         {
             return;
         }
@@ -242,8 +252,10 @@ public sealed unsafe class SpriteRenderer : IDisposable
         GL.UniformMatrix4(_particleLvp, false, ref vp);
 
         GL.ActiveTexture(TextureUnit.Texture0);
-        GL.BindTexture(TextureTarget.Texture2D, _particleTexture);
+        GL.BindTexture(TextureTarget.Texture2D, texture);
         GL.Uniform1(_particleLtexture, 0);
+        GL.Uniform1(_particleLcolumns, (float)columns);
+        GL.Uniform1(_particleLstraightAlpha, straightAlpha ? 1 : 0);
 
         GL.BindVertexArray(_particleVao);
 
@@ -254,10 +266,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
         GL.Disable(EnableCap.DepthTest);
         GL.Disable(EnableCap.CullFace);
 
-        // Eight floats per instance: centre xy, half size xy, colour rgba. All particles are uploaded
-        // and drawn in one DrawArraysInstanced, so draw cost is independent of the count; a
-        // per-particle DrawArrays would destroy the frame rate once tens of thousands are alive.
-        const int FloatsPerInstance = 8;
+        const int FloatsPerInstance = 10;
 
         int count = particles.Length;
         int needed = count * FloatsPerInstance * sizeof(float);
@@ -285,6 +294,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
             buffer[o + 5] = particle.Tint.Y;
             buffer[o + 6] = particle.Tint.Z;
             buffer[o + 7] = particle.Tint.W;
+            buffer[o + 8] = particle.Rotation;
+            buffer[o + 9] = particle.Frame;
         }
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _particleInstanceVbo);
@@ -336,9 +347,9 @@ public sealed unsafe class SpriteRenderer : IDisposable
         GL.EnableVertexAttribArray(0);
         GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
 
-        // Instance data: 8 floats = centre xy, half size xy, colour rgba
+        // Centre, half size, colour, rotation and atlas frame.
         GL.BindBuffer(BufferTarget.ArrayBuffer, instanceVbo);
-        const int stride = 8 * sizeof(float);
+        const int stride = 10 * sizeof(float);
 
         GL.EnableVertexAttribArray(1);
         GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, stride, 0);
@@ -351,6 +362,10 @@ public sealed unsafe class SpriteRenderer : IDisposable
         GL.EnableVertexAttribArray(3);
         GL.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, 4 * sizeof(float));
         GL.VertexAttribDivisor(3, 1);
+
+        GL.EnableVertexAttribArray(4);
+        GL.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, 8 * sizeof(float));
+        GL.VertexAttribDivisor(4, 1);
 
         GL.BindVertexArray(0);
         GL.BindBuffer(BufferTarget.ArrayBuffer, 0);

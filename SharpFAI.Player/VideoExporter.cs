@@ -32,7 +32,7 @@ internal static class VideoExporter
     /// <param name="Fps">帧率。</param>
     /// <param name="KeepFrames">是否保序帧图片。</param>
     /// <param name="BitrateKbps">视频码率（kbps），0 表示用 CRF。</param>
-    /// <param name="Zoom">取景缩放，0 表示用默认 50%。</param>
+    /// <param name="Zoom">正值固定为每世界单位的像素数，0 使用谱面的摄像机缩放。</param>
     /// <param name="HidePassedFloors">经过的砖块是否立即消失。</param>
     /// <param name="PreferHardware">优先使用可用的硬件编码器。</param>
     public readonly record struct Request(
@@ -98,8 +98,10 @@ internal static class VideoExporter
             "-pixel_format", packedNv12 ? "nv12" : "rgba",
             "-video_size", $"{width}x{height}",
             "-framerate", request.Fps.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            "-i", "pipe:0",
         ];
+        if (packedNv12)
+            arguments.AddRange(["-colorspace", "bt709", "-color_range", "tv"]);
+        arguments.AddRange(["-i", "pipe:0"]);
 
         // 视频文件永远不能作为音频输入：ffmpeg 会取它的音轨，听起来就像「误读了目录里的 mp4」
         // A video must never be an audio input: ffmpeg would take its soundtrack, which is exactly
@@ -111,11 +113,11 @@ internal static class VideoExporter
             arguments.AddRange(["-i", audioPath!]);
         }
 
-        if (packedNv12)
-            arguments.AddRange(["-colorspace", "smpte170m", "-color_range", "tv"]);
-        else
-            // Raw OpenGL rows are bottom-up. ffmpeg reverses the stride before conversion.
-            arguments.AddRange(["-vf", "vflip", "-filter_threads", "2"]);
+        if (!packedNv12)
+            // Raw OpenGL rows are bottom-up; convert full-range RGB to limited-range BT.709 after flipping.
+            arguments.AddRange(["-vf", "vflip,scale=in_range=pc:out_color_matrix=bt709:out_range=tv",
+                "-filter_threads", "2"]);
+        arguments.AddRange(["-colorspace", "bt709", "-color_range", "tv"]);
         AddVideoOptions(arguments, codec, request.BitrateKbps, packedNv12);
 
         if (hasAudio)
@@ -407,9 +409,11 @@ internal static class VideoExporter
     /// <param name="music">音乐 PCM；可为 null。</param>
     /// <param name="hitsound">打击音 PCM；可为 null。</param>
     /// <param name="musicVolume">音乐音量 0..1。</param>
-    /// <param name="hitsoundVolume">打击音音量 0..1。</param>
+    /// <param name="hitsoundVolume">打击音的线性增益，0 表示静音，1 表示原音量。</param>
     /// <param name="totalSeconds">视频总时长（秒）；混音不足处补静音。</param>
     /// <param name="path">输出 WAV。</param>
+    /// <param name="playbackRate">Music playback rate.</param>
+    /// <param name="hitsoundRate">Hitsound playback rate; pass 1 for PCM already on the output clock.</param>
     public static void WriteMixedWav(
         DecodedAudio? music,
         DecodedAudio? hitsound,
@@ -417,7 +421,8 @@ internal static class VideoExporter
         float hitsoundVolume,
         double totalSeconds,
         string path,
-        double playbackRate = 1.0)
+        double playbackRate = 1.0,
+        double? hitsoundRate = null)
     {
         // 混音统一到 48 kHz 立体声：两条轨采样率可能不同，重采样在这里一次做完
         // Mix at 48 kHz stereo: the two tracks may differ in rate, so resample once here
@@ -430,7 +435,7 @@ internal static class VideoExporter
         float[] mix = new float[sampleCount * Channels];
 
         Accumulate(music, musicVolume, mix, Rate, Channels, playbackRate);
-        Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, playbackRate);
+        Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, hitsoundRate ?? playbackRate);
 
         WriteWav(path, mix, Rate, Channels);
     }

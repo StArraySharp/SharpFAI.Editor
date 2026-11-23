@@ -48,9 +48,9 @@ public sealed record TrackStyleInfo(
     /// <summary>summary>
     public static readonly TrackStyleInfo Standard = new(
         "Standard",
-        "Edge.png",
-        "Tile.png",
-        "Perlin.png",
+        "rs13.png",
+        "tile_texture_2020_cracks_tiled_2048.png",
+        "perlin.png",
         TileScale: 10f,
         ShadowTune: 1.23f,
         ShadowColor: new Vector4(0f, 0f, 0f, 0.45f),
@@ -62,7 +62,7 @@ public sealed record TrackStyleInfo(
     /// <summary>summary>
     public static readonly TrackStyleInfo Neon = new(
         "Neon",
-        "EdgeNeon.png",
+        "neon_edge.png",
         TileTextureSuffix: null,
         PerlinTextureSuffix: null,
         TileScale: 10f,
@@ -76,7 +76,7 @@ public sealed record TrackStyleInfo(
     /// <summary>summary>
     public static readonly TrackStyleInfo NeonLight = new(
         "NeonLight",
-        "EdgeNeonLight.png",
+        "neonLight_edge.png",
         TileTextureSuffix: null,
         PerlinTextureSuffix: null,
         TileScale: 10f,
@@ -90,7 +90,7 @@ public sealed record TrackStyleInfo(
     /// <summary>summary>
     public static readonly TrackStyleInfo Basic = new(
         "Basic",
-        "EdgeBasic.png",
+        "basic_edge.png",
         TileTextureSuffix: null,
         PerlinTextureSuffix: null,
         TileScale: 10f,
@@ -109,8 +109,8 @@ public sealed record TrackStyleInfo(
     /// </summary>
     public static readonly TrackStyleInfo Gems = new(
         "Gems",
-        "Edge.png",
-        "Gem.png",
+        "rs13.png",
+        "gem_floorMesh.png",
         PerlinTextureSuffix: null,
         TileScale: 10f,
         ShadowTune: 1.23f,
@@ -124,7 +124,7 @@ public sealed record TrackStyleInfo(
     /// <summary>summary>
     public static readonly TrackStyleInfo Minimal = new(
         "Minimal",
-        "EdgeMinimal.png",
+        "minimal_edge.png",
         TileTextureSuffix: null,
         PerlinTextureSuffix: null,
         TileScale: 10f,

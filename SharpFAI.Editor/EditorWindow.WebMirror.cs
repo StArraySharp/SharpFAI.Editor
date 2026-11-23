@@ -54,18 +54,7 @@ internal sealed unsafe partial class EditorWindow
                         input.Shift ?? modifiers.HasFlag(KeyModifiers.Shift));
                     break;
                 case "key":
-                    Keys key = BrowserKey(input.Code!);
-                    if (key == Keys.Unknown) break;
-                    bool changed = input.Down ? _webKeys.Add(key) : _webKeys.Remove(key);
-                    if (!changed && (key is not (Keys.LeftControl or Keys.RightControl or Keys.LeftShift or Keys.RightShift) || input.Down)) break;
-                    KeyModifiers keyModifiers = WebModifiers();
-                    if (input.Ctrl is bool ctrl)
-                        keyModifiers = ctrl ? keyModifiers | KeyModifiers.Control : keyModifiers & ~KeyModifiers.Control;
-                    if (input.Shift is bool shift)
-                        keyModifiers = shift ? keyModifiers | KeyModifiers.Shift : keyModifiers & ~KeyModifiers.Shift;
-                    var args = new KeyboardKeyEventArgs(key, 0, keyModifiers, false);
-                    FeedKey(args, input.Down);
-                    FeedPlaybackKey(args, input.Down);
+                    FeedWebKey(input.Code!, input.Down, input.Ctrl, input.Shift);
                     break;
                 case "text":
                     foreach (Rune rune in input.Text!.EnumerateRunes())
@@ -74,6 +63,21 @@ internal sealed unsafe partial class EditorWindow
                     break;
             }
         }
+    }
+
+    private void FeedWebKey(string code, bool down, bool? ctrl, bool? shift)
+    {
+        Keys key = BrowserKey(code);
+        if (key == Keys.Unknown) return;
+        bool changed = down ? _webKeys.Add(key) : _webKeys.Remove(key);
+        if (!changed && (down || key is not (Keys.LeftControl or Keys.RightControl or Keys.LeftShift or Keys.RightShift))) return;
+        KeyModifiers modifiers = WebModifiers();
+        if (ctrl is bool control)
+            modifiers = control ? modifiers | KeyModifiers.Control : modifiers & ~KeyModifiers.Control;
+        if (shift is bool shifted)
+            modifiers = shifted ? modifiers | KeyModifiers.Shift : modifiers & ~KeyModifiers.Shift;
+        var args = new KeyboardKeyEventArgs(key, 0, modifiers, false);
+        FeedEditorKey(args, down);
     }
 
     private void ReleaseWebInput()

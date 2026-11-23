@@ -86,7 +86,7 @@ public sealed unsafe partial class LevelRenderer
 
         _camera.Position = LevelCameraTarget(_cameraOrigin);
         _cameraFrom = _cameraTo = _camera.Position;
-        _camera.Rotation = -_settings.CameraRotation;
+        _camera.Rotation = _settings.CameraRotation;
         if (_settings.CameraZoom is float zoom)
         {
             _camera.Zoom = AuthoredZoom(_camera.ViewportHeight, zoom);
@@ -159,6 +159,20 @@ public sealed unsafe partial class LevelRenderer
         _floorVisualTime = double.NaN;
     }
 
+    private void CommitLoadedFloorGeometry(FloorGeometry geometry)
+    {
+        if (geometry.IsLevelStream && geometry.Stream is { } stream)
+        {
+            int capacity = _floorStreamTexels ??= FloorStreamGpu.GetTexelCapacity();
+            if (Math.Max(stream.Shapes.TexelCount, stream.InstanceTexels) > capacity)
+            {
+                geometry.Dispose();
+                return;
+            }
+        }
+        CommitFloorGeometry(geometry);
+    }
+
     private FloorRegion ResidentCoverage()
     {
         FloorRegion view = FloorRegion.FromView(_camera);
@@ -180,6 +194,17 @@ public sealed unsafe partial class LevelRenderer
     private void SetResidentGeometry(VisibleFloorIndex visibility, FloorRegion coverage, TrackStyleInfo? style, string? directory)
     {
         FloorTimeRange time = _runtimeTrackActive ? new FloorTimeRange(_playTime, _playTime + .10) : FloorTimeRange.All;
+        if (_officialRenderer is { } levelRenderer && levelRenderer.UsesLevelStream(visibility.Shapes))
+        {
+            levelRenderer.SetLevelSelection(visibility.Select(coverage, time));
+            _residentFloors = null;
+            _activeFloorChunks = null;
+            _activeFloorGroups = [];
+            _residentRegion = coverage;
+            _residentTime = time;
+            _floorVisualTime = double.NaN;
+            return;
+        }
         if (TrySetStreamedFloors(visibility, coverage, time, style, directory))
         {
             return;
@@ -431,22 +456,30 @@ public sealed unsafe partial class LevelRenderer
         _floorVisualTime = double.NaN;
     }
 
-    /// <summary>
-    /// Convert a screen point to world space and return the floor under it, or -1.
-    /// The lowest index is drawn last and gets priority on overlaps.
-    /// </summary>
-    public int PickFloor(Vector2 screenPoint)
+    /// <summary>Return the frontmost floor under the screen point, or -1.</summary>
+    public int PickFloor(Vector2 screenPoint) => PickFloorsCore(screenPoint, null);
+
+    /// <summary>Replace the results with all floors under the screen point, front to back.</summary>
+    public void PickFloors(Vector2 screenPoint, List<int> results)
+    {
+        results.Clear();
+        PickFloorsCore(screenPoint, results);
+        // Chunk residency is independent of the global floor sorting order.
+        results.Sort();
+    }
+
+    private void EnsureFloorVisuals()
     {
         EnsureVisibleFloors();
         if (_floorVisualTime != _playTime)
-        {
             UpdateTrackVisuals();
-        }
-        Vector2 centered = new(screenPoint.X - _camera.ViewportWidth * .5f,
-            _camera.ViewportHeight * .5f - screenPoint.Y);
-        (float sin, float cos) = MathF.SinCos(MathHelper.DegreesToRadians(_camera.Rotation));
-        Vector2 cameraRelativePoint = new Vector2(centered.X * cos + centered.Y * sin,
-            -centered.X * sin + centered.Y * cos) / _camera.Zoom;
+    }
+
+    private int PickFloorsCore(Vector2 screenPoint, List<int>? results)
+    {
+        EnsureFloorVisuals();
+        Vector2 center = new(_camera.ViewportWidth * .5f, _camera.ViewportHeight * .5f);
+        Vector2 cameraRelativePoint = _camera.ScreenDeltaToWorld(screenPoint - center);
         if (_activeFloorChunks is { } chunks)
         {
             foreach (ResidentFloorChunk chunk in chunks)
@@ -467,16 +500,71 @@ public sealed unsafe partial class LevelRenderer
 
         int Pick(OfficialFloorRenderer renderer, int[]? indices)
         {
-            for (int i = 0; i < renderer.FloorCount; i++)
+            int[]? selection = renderer.LevelSelection;
+            int count = selection?.Length ?? renderer.FloorCount;
+            for (int candidate = 0; candidate < count; candidate++)
             {
+                int i = selection?[candidate] ?? candidate;
                 if (renderer.FloorOpacity(i) > 0f
                     && renderer.TryToFloorLocal(i, _camera.Position, cameraRelativePoint, out Vector2 local)
                     && PointInPolygon(renderer.GetOutline(i), local))
                 {
-                    return indices?[i] ?? i;
+                    int floor = indices?[i] ?? i;
+                    if (results is null)
+                        return floor;
+                    results.Add(floor);
                 }
             }
             return -1;
+        }
+    }
+
+    public delegate void FloorOutlineVisitor(int floor, ReadOnlySpan<Vector2> screenOutline);
+
+    /// <summary>Visit the projected outlines of resident floors in an inclusive range.</summary>
+    public void VisitFloorOutlines(int first, int last, FloorOutlineVisitor visit)
+    {
+        if (first > last)
+            return;
+        EnsureFloorVisuals();
+        (float sin, float cos) = MathF.SinCos(MathHelper.DegreesToRadians(_camera.Rotation));
+        if (_activeFloorChunks is { } chunks)
+        {
+            foreach (ResidentFloorChunk chunk in chunks)
+                Visit(chunk.Renderer, chunk.Floors);
+        }
+        else if (_officialRenderer is { HasGeometry: true } renderer)
+            Visit(renderer, _residentFloors);
+
+        void Visit(OfficialFloorRenderer renderer, int[]? indices)
+        {
+            int[]? selection = renderer.LevelSelection;
+            int[]? visible = selection ?? indices;
+            int start = visible is null ? Math.Max(first, 0) : Array.BinarySearch(visible, first);
+            if (start < 0) start = ~start;
+            Span<Vector2> buffer = stackalloc Vector2[128];
+            int count = selection?.Length ?? renderer.FloorCount;
+            for (int local = start; local < count; local++)
+            {
+                int i = selection?[local] ?? local;
+                int floor = indices?[i] ?? i;
+                if (floor > last) break;
+                ReadOnlySpan<System.Numerics.Vector2> outline = renderer.GetOutline(i);
+                if (outline.Length < 3) continue;
+                Span<Vector2> projected = outline.Length <= buffer.Length ? buffer[..outline.Length] : new Vector2[outline.Length];
+                renderer.ProjectFloorOutline(i, _camera.Position, outline, projected);
+                Vector2 min = new(float.PositiveInfinity), max = new(float.NegativeInfinity);
+                for (int j = 0; j < projected.Length; j++)
+                {
+                    Vector2 p = projected[j] * _camera.Zoom;
+                    projected[j] = new(p.X * cos + p.Y * sin + _camera.ViewportWidth * .5f,
+                        _camera.ViewportHeight * .5f - (-p.X * sin + p.Y * cos));
+                    min = Vector2.ComponentMin(min, projected[j]);
+                    max = Vector2.ComponentMax(max, projected[j]);
+                }
+                if (max.X >= 0 && max.Y >= 0 && min.X <= _camera.ViewportWidth && min.Y <= _camera.ViewportHeight)
+                    visit(floor, projected);
+            }
         }
     }
 
@@ -550,6 +638,7 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
+        _playbackZoomNeedsReset = true;
         Pause();
         Seek(_entryTimes[index]);
     }
