@@ -36,8 +36,13 @@ public sealed unsafe partial class LevelRenderer
     private void ResetDecorationTriggers()
     {
         _imageDecorations?.ResetTriggers();
-        _decorationHitboxes = null;
         _lastDecorationConditionFloor = -1;
+        ResetDecorationContacts();
+    }
+
+    private void ResetDecorationContacts()
+    {
+        _decorationHitboxes = null;
         _lastDecorationTriggerTime = double.NegativeInfinity;
     }
 
@@ -49,23 +54,40 @@ public sealed unsafe partial class LevelRenderer
             _lastDecorationConditionFloor = floor;
     }
 
-    private void UpdateDecorationTriggers(bool manual, int? autoFrom = null)
+    private void BindDecorationEffects(double[]? bpms)
+    {
+        if (_imageDecorations is { } triggers)
+        {
+            triggers.BindTimedEffects(_floors, bpms, _filterTimeline, _backgroundFilterTimeline,
+                _cameraTimeline, _backdrop, _sceneEffects, _trackRuntime);
+            return;
+        }
+        _filterTimeline?.SetAutomaticSchedule(null);
+        _backgroundFilterTimeline?.SetAutomaticSchedule(null);
+        _cameraTimeline?.Triggers.SetAutomatic(null);
+        _cameraTimeline?.FollowTrackTriggers?.SetAutomatic(null);
+        _backdrop?.Triggers.SetAutomatic(null);
+        _sceneEffects?.Triggers.SetAutomatic(null);
+        _trackRuntime?.Triggers.SetAutomatic(null);
+    }
+
+    private void UpdateAutomaticConditions(int floor)
+    {
+        if (_imageDecorations is not { HasConditions: true } timeline)
+            return;
+        if (floor < _lastDecorationConditionFloor || _playTime < _lastDecorationTriggerTime)
+            ResetDecorationTriggers();
+        timeline.TriggerAutomaticConditions(_lastDecorationConditionFloor + 1, floor, _entryTimes);
+        _lastDecorationConditionFloor = floor;
+    }
+
+    private void UpdateDecorationTriggers(bool manual)
     {
         if (_imageDecorations is not { } timeline || _lastDecorationTriggerTime == _playTime)
             return;
         if (_playTime < _lastDecorationTriggerTime)
             ResetDecorationTriggers();
         _lastDecorationTriggerTime = _playTime;
-        if (!manual && timeline.HasConditions)
-        {
-            int first = _lastDecorationConditionFloor + 1;
-            if (autoFrom is { } start)
-                first = Math.Max(first, start);
-            for (int floor = first; floor <= _currentIndex; floor++)
-                timeline.TriggerCondition(floor, HitMargin.Auto, _entryTimes[floor]);
-            _lastDecorationConditionFloor = _currentIndex;
-        }
-
         if (timeline.Hitboxes.Count == 0 || manual && (PlaySession.Failed || PlaySession.Countdown > 0))
             return;
 

@@ -24,8 +24,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     private readonly VideoRenderWindow _videoRenderWindow = new();
     private readonly AudioCalibrationWindow _audioCalibration = new();
     private bool _showDemo;
-    private bool _fullscreenTogglePending;
-    private WindowState _windowedState = WindowState.Normal;
 
     // View drag state
     private bool _panning;
@@ -60,6 +58,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     public double CaptureTime { get; set; } = -1;
 
     public bool SkipAudioFromCommandLine { get; set; }
+    public string? FireColorFromCommandLine { get; set; }
+    public string? IceColorFromCommandLine { get; set; }
 
     /// <summary>
     /// Command-line shader conversion request: (game shader root, output directory). Runs once a GL
@@ -98,10 +98,10 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
                 return;
             }
 
-            if (e.Alt && e.Key is (Keys.Enter or Keys.KeyPadEnter))
+            if (ApplicationWindowModeController.IsToggleShortcut(e))
             {
                 if (!e.IsRepeat)
-                    _fullscreenTogglePending = !_fullscreenTogglePending;
+                    _windowMode.RequestToggle();
                 return;
             }
 
@@ -432,6 +432,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
 
     protected override void OnUnload()
     {
+        _displayFrameLimit.Dispose();
         _inputMethod?.Dispose();
         _videoExport.Dispose();
         _audioCalibration.Dispose();
@@ -502,11 +503,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     {
         base.OnRenderFrame(e);
 
-        if (_fullscreenTogglePending)
-        {
-            _fullscreenTogglePending = false;
-            ToggleFullscreen();
-        }
+        ApplyPendingApplicationSettings();
 
         // 命令行导出接管整帧：不画 ImGui，一次回调里尽量多渲几帧
         // A command-line export owns the frame: no ImGui, and as many frames per callback as it can
@@ -522,7 +519,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
 
         _renderer.Tick(_clock.Elapsed.TotalSeconds);
-        if (ExportRequest is not null)
+        bool rendering = ExportRequest is not null;
+        if (rendering)
         {
             RenderExportFrame();
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
@@ -530,37 +528,26 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         else
             UpdatePan();
 
+        _menuBarFrameRate.Sample(e.Time);
+        ImDrawData* drawData = BuildOverlay((float)e.Time, rendering);
         GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
         Vector4 background = _renderer.BackgroundColor;
         GL.ClearColor(background.X, background.Y, background.Z, background.W);
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-        if (ExportRequest is null)
+        if (!rendering)
         {
             GL.Disable(EnableCap.CullFace);
             GL.Disable(EnableCap.DepthTest);
-            _renderer.Render();
+            _renderer.RenderAfterClear(background);
         }
 
-        _menuBarFrameRate.Sample(e.Time);
-        DrawOverlay((float)e.Time);
+        ImGui_ImplOpenGL3.RenderDrawData(drawData);
+        UpdateCapture(drawData);
+        SwapBuffers();
     }
 
-    private void ToggleFullscreen()
-    {
-        if (IsFullscreen)
-        {
-            WindowState = _windowedState;
-        }
-        else
-        {
-            _windowedState = WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
-            WindowState = WindowState.Fullscreen;
-        }
-    }
-
-    /// <summary>绘制菜单与面板并提交 ImGui。</summary>
-    private void DrawOverlay(float lastDeltaTime)
+    private ImDrawData* BuildOverlay(float lastDeltaTime, bool rendering)
     {
         ImGuiIO* io = ImGui.GetIO();
         io->DeltaTime = lastDeltaTime;
@@ -571,7 +558,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
 
-        bool rendering = ExportRequest is not null;
         float menuBottom = DrawMenuBar(rendering);
         _levelPanel.Draw(_renderer, menuBottom, rendering, _audioCalibration);
         _videoRenderWindow.Draw(_videoExport.Status, RequestVideoExport, CancelVideoExport,
@@ -592,12 +578,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         _inputMethod?.Update(IsFocused, !rendering && !_audioCalibration.IsOpen && _renderer.Level is not null &&
             (_renderer.IsPlaying || _renderer.ManualPlayEnabled || _renderer.SelectedFloor >= 0));
         ImGui.Render();
-        ImDrawData* drawData = ImGui.GetDrawData();
-        ImGui_ImplOpenGL3.RenderDrawData(drawData);
-
-        UpdateCapture(drawData);
-
-        SwapBuffers();
+        return ImGui.GetDrawData();
     }
 
     /// <summary>
@@ -737,7 +718,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         if (ImGui.BeginMenu("视图") != 0)
         {
             if (ImGui.MenuItem("全屏", "Alt+Enter", (byte)(IsFullscreen ? 1 : 0)) != 0)
-                _fullscreenTogglePending = !_fullscreenTogglePending;
+                _windowMode.RequestToggle();
 
             if (rendering)
                 ImGui.BeginDisabled();

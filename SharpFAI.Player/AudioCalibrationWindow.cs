@@ -7,7 +7,6 @@ namespace SharpFAI.Player;
 
 internal sealed unsafe class AudioCalibrationWindow : IDisposable
 {
-    private const string Title = "音画校准场景";
     private const double FirstBeat = 1.5;
     private const double BeatInterval = .5;
     private const int BeatCount = 24;
@@ -35,8 +34,12 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
         IsMeasuring = false;
     }
 
-    public void Draw(LevelRenderer renderer)
+    public void Draw(LevelRenderer renderer, bool chinese = true)
     {
+        if (!IsOpen)
+            return;
+
+        string title = Tr(chinese, "音画校准场景###audio-calibration", "Audio Calibration###audio-calibration");
         if (_opening)
         {
             _opening = false;
@@ -45,11 +48,8 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
             if (!_clicks.IsLoaded)
                 _clicks.LoadDecoded(CreateClickTrack());
             BeginMeasurement();
-            ImGui.OpenPopup(Title, 0);
+            ImGui.OpenPopup(title, 0);
         }
-
-        if (!_open)
-            return;
 
         ImGuiViewport* viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(new ImVec2
@@ -60,10 +60,11 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
 
         bool open = _open;
         int flags = (int)(ImGuiWindowFlags.ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags.ImGuiWindowFlags_NoSavedSettings);
-        if (ImGui.BeginPopupModal(Title, ref open, flags) != 0)
+        if (ImGui.BeginPopupModal(title, ref open, flags) != 0)
         {
-            ImGui.TextUnformatted(IsMeasuring ? "跟着节拍按空格，前两拍用于准备。"
-                : "可跟拍自动校准，也可对照声音和闪光微调。");
+            ImGui.TextUnformatted(IsMeasuring
+                ? Tr(chinese, "跟着节拍按空格，前两拍用于准备。", "Press Space on each beat. The first two beats are for practice.")
+                : Tr(chinese, "可跟拍自动校准，也可对照声音和闪光微调。", "Tap to calibrate or match the flash to the sound manually."));
             if (_clicks.IsLoaded)
             {
                 _clicks.Update();
@@ -72,38 +73,38 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
             }
             else
             {
-                ImGui.TextUnformatted("音频设备不可用");
+                ImGui.TextUnformatted(Tr(chinese, "音频设备不可用", "Audio device unavailable"));
             }
 
             DrawFlash(IsMeasuring ? 0.0 : _clicks.Position + renderer.AudioDelayMs / 1000.0);
             if (IsMeasuring)
             {
                 ImGui.ProgressBar(_measurement.Count / (float)TapMeasurement.RequiredTaps, new ImVec2 { x = -1f },
-                    $"有效跟拍 {_measurement.Count} / {TapMeasurement.RequiredTaps}");
-                if (ImGui.Button("取消跟拍", default) != 0)
+                    $"{Tr(chinese, "有效跟拍", "Valid taps")} {_measurement.Count} / {TapMeasurement.RequiredTaps}");
+                if (ImGui.Button(Tr(chinese, "取消跟拍", "Cancel tapping"), default) != 0)
                     IsMeasuring = false;
             }
             else
             {
                 if (_measuredDelay is int measured)
-                    ImGui.TextUnformatted($"跟拍结果 {measured:+0;-0;0} ms，已应用");
-                DrawDelay(renderer);
+                    ImGui.TextUnformatted(chinese ? $"跟拍结果 {measured:+0;-0;0} ms，已应用" : $"Applied {measured:+0;-0;0} ms");
+                DrawDelay(renderer, chinese);
                 if (!_clicks.IsLoaded)
                     ImGui.BeginDisabled();
-                if (ImGui.Button("开始跟拍", default) != 0)
+                if (ImGui.Button(Tr(chinese, "开始跟拍", "Start tapping"), default) != 0)
                     BeginMeasurement();
                 if (!_clicks.IsLoaded)
                     ImGui.EndDisabled();
             }
             ImGui.SameLine();
-            if (ImGui.Button("完成", default) != 0)
+            if (ImGui.Button(Tr(chinese, "完成", "Done"), default) != 0 || ImGui.IsKeyPressed(ImGuiKey.ImGuiKey_Escape, 0) != 0)
             {
                 open = false;
                 ImGui.CloseCurrentPopup();
             }
             ImGui.EndPopup();
         }
-        else if (ImGui.IsPopupOpen(Title, 0) == 0)
+        else if (ImGui.IsPopupOpen(title, 0) == 0)
         {
             open = false;
         }
@@ -116,15 +117,17 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
         }
     }
 
-    internal static void DrawDelay(LevelRenderer renderer)
+    private static string Tr(bool chinese, string zh, string en) => chinese ? zh : en;
+
+    internal static void DrawDelay(LevelRenderer renderer, bool chinese = true)
     {
-        ImGui.TextUnformatted("音频延迟 (ms)，正值让声音晚一点");
+        ImGui.TextUnformatted(Tr(chinese, "音频延迟 (ms)，正值让声音晚一点", "Audio delay (ms). Positive values delay the sound."));
         int delay = renderer.AudioDelayMs;
         ImGui.SetNextItemWidth(-68f);
         if (ImGui.InputInt("##music-delay", ref delay, 1, 10) != 0)
             renderer.AudioDelayMs = delay;
         ImGui.SameLine();
-        if (ImGui.Button("重置##music-delay", default) != 0)
+        if (ImGui.Button(Tr(chinese, "重置##music-delay", "Reset##music-delay"), default) != 0)
             renderer.AudioDelayMs = 0;
     }
 

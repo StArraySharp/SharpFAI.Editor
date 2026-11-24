@@ -24,7 +24,7 @@ internal sealed unsafe partial class EditorWindow
     private (int First, int Last) FloorRange =>
         (Math.Min(_rangeAnchor ?? _floor, _floor), Math.Max(_rangeAnchor ?? _floor, _floor));
 
-    private bool ShortcutContextBlocked => _settingsWindow.IsOpen || _playbackView == PlaybackView.Manual ||
+    private bool ShortcutContextBlocked => _settingsWindow.IsOpen || _audioCalibration.IsOpen || _playbackView == PlaybackView.Manual ||
         _pending is not null || _error is not null || _openFindFloor || _openFindComment ||
         ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId |
             (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupLevel) != 0;
@@ -147,7 +147,11 @@ internal sealed unsafe partial class EditorWindow
     private void HandleControlShortcuts(bool shift, bool alt)
     {
         if (Pressed(ImGuiKey.ImGuiKey_N)) Confirm(() => SetDocument(new()));
-        if (Pressed(ImGuiKey.ImGuiKey_O)) Confirm(Open);
+        if (Pressed(ImGuiKey.ImGuiKey_O))
+        {
+            if (shift) OpenLastChart();
+            else Confirm(Open);
+        }
         if (Pressed(ImGuiKey.ImGuiKey_S)) Save(shift);
         if (Pressed(ImGuiKey.ImGuiKey_Z)) { CancelPropertyEdits(); if (shift) Redo(); else Undo(); }
         if (Pressed(ImGuiKey.ImGuiKey_Y)) { CancelPropertyEdits(); Redo(); }
@@ -178,11 +182,15 @@ internal sealed unsafe partial class EditorWindow
                 _document.SetDecorationLocks(_selectedDecorations,
                     _selectedDecorations.Any(item => item.Value<bool?>("locked") != true));
             else
-                TransformSelection(shift ? a => -a : a => 180 - a);
+                TransformSelection(shift ? TrackTransform.VerticalFlip : TrackTransform.HorizontalFlip);
         }
-        if (Pressed(ImGuiKey.ImGuiKey_Comma)) TransformSelection(a => a + 90);
-        if (Pressed(ImGuiKey.ImGuiKey_Period)) TransformSelection(a => a - 90);
-        if (Pressed(ImGuiKey.ImGuiKey_Slash)) TransformSelection(a => a + 180);
+        if (!alt || _applicationSettings.FineTrackRotation)
+        {
+            double step = alt ? _applicationSettings.TrackRotationStep : 90;
+            if (Pressed(ImGuiKey.ImGuiKey_Comma)) TransformSelection(new(step));
+            if (Pressed(ImGuiKey.ImGuiKey_Period)) TransformSelection(new(-step));
+        }
+        if (Pressed(ImGuiKey.ImGuiKey_Slash)) TransformSelection(new(180));
         if (_hasFloorSelection && !_inspectDecoration)
         {
             int first = FloorRange.First;
@@ -271,13 +279,13 @@ internal sealed unsafe partial class EditorWindow
         SelectFloor(select, false);
     }
 
-    private void TransformSelection(Func<double, double> transform)
+    private void TransformSelection(TrackTransform transform)
     {
         if (_pathLocked || !_hasFloorSelection || _inspectDecoration)
             return;
         _pendingTiles.Clear();
         var (first, last) = FloorRange;
-        _document.TransformTiles(first, last, transform);
+        _document.TransformTiles(first, last, transform.Angle, _applicationSettings.SyncTrackEventPositions ? transform : null);
     }
 
     private void CycleEventInstance(int direction)

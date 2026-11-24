@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using Thrust.Graphics;
@@ -13,9 +14,36 @@ internal sealed class ImageDecorationRenderer : IDisposable
         public int ParticleOrder { get; init; }
     }
 
+    private readonly record struct PainterOrder(int Depth, uint Item, int Particle, int Index) : IComparable<PainterOrder>
+    {
+        public int CompareTo(PainterOrder other)
+        {
+            int depth = Depth.CompareTo(other.Depth);
+            if (depth != 0)
+                return depth;
+            int item = Item.CompareTo(other.Item);
+            return item != 0 ? item : Particle.CompareTo(other.Particle);
+        }
+    }
+
     private readonly List<ParticleDecorationTimeline.Sample> _particleSamples = [];
+    private readonly OfficialFloorRenderer? _floorPipeline;
+    private ObjectFloorRenderer? _floorObjects;
+    private double _floorObjectTime;
+    private bool _editFloorIcons;
+    private bool _forceFloorOutlines;
+
+    private ObjectFloorRenderer FloorObjects => _floorObjects ??= new ObjectFloorRenderer(_floorPipeline);
 
     private readonly record struct SpriteInstance(Matrix4 Clip, Vector4 Tint, Vector4 Settings, float TextureSlot);
+    private readonly record struct TextureBinding(int Texture, int Sampler)
+    {
+        public void Bind(int unit)
+        {
+            GL.BindTexture(TextureTarget.Texture2D, Texture);
+            GL.BindSampler(unit, Sampler);
+        }
+    }
 
     // OpenGL 3.3 guarantees 16 fragment texture units. Units 0–2 are used by
     // the scalar, framebuffer blend and mask paths.
@@ -33,9 +61,11 @@ internal sealed class ImageDecorationRenderer : IDisposable
         layout(location = 0) in vec2 _Corner;
         out vec2 spriteUv;
         flat out vec2 pixelFootprint;
+        flat out vec2 inverseFootprint;
         void main()
         {
             pixelFootprint = vec2(0.0);
+            inverseFootprint = vec2(0.0);
             if (_SmoothEdges != 0)
             {
                 // Project a one-pixel footprint into the quad's UV axes. Expand the
@@ -44,12 +74,22 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 vec2 y = _Clip[1].xy * (_ViewportSize * 0.5);
                 float area = abs(x.x * y.y - x.y * y.x);
                 if (area > 1e-8)
+                {
                     pixelFootprint = vec2(abs(y.x) + abs(y.y), abs(x.x) + abs(x.y)) / area;
+                    inverseFootprint = 1.0 / pixelFootprint;
+                }
             }
             vec2 corner = _Corner * (1.0 + pixelFootprint);
             gl_Position = _Clip * vec4(corner, 0.0, 1.0);
             spriteUv = corner + 0.5;
         }
+        """;
+
+    private const string SampleBaseTexture = "return textureLod(_MainTex, sampleUv, 0.0);";
+    private const string SampleMipmappedTexture = """
+        // Keep background mip selection independent of the edge clamp.
+        vec2 uv = spriteUv * _Repeat.xy;
+        return textureGrad(_MainTex, sampleUv, dFdx(uv), dFdy(uv));
         """;
 
     private const string SpriteFragmentHeader = """
@@ -62,19 +102,22 @@ internal sealed class ImageDecorationRenderer : IDisposable
         uniform int _MaskMode;
         in vec2 spriteUv;
         flat in vec2 pixelFootprint;
+        flat in vec2 inverseFootprint;
         out vec4 fragColor;
 
         vec4 SampleSprite()
         {
-            vec2 uv = spriteUv * _Repeat.xy;
-            vec2 sampleUv = clamp(spriteUv, 0.0, 1.0) * _Repeat.xy;
-            if (_Repeat.z != 0.0)
+            vec2 sampleUv = spriteUv;
+            if (_Repeat.z >= 0.0)
             {
-                bvec2 tiled = notEqual(_Repeat.xy, vec2(1.0));
-                sampleUv = mix(sampleUv, fract(sampleUv), tiled);
+                sampleUv = clamp(spriteUv, 0.0, 1.0) * _Repeat.xy;
+                if (_Repeat.z > 0.0)
+                {
+                    bvec2 tiled = notEqual(_Repeat.xy, vec2(1.0));
+                    sampleUv = mix(sampleUv, fract(sampleUv), tiled);
+                }
             }
-            // Clamping the expanded border must not change mip selection.
-            return textureGrad(_MainTex, sampleUv, dFdx(uv), dFdy(uv));
+            return textureLod(_MainTex, sampleUv, 0.0);
         }
 
         float EdgeCoverage()
@@ -83,7 +126,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 return 1.0;
             vec2 lo = max(spriteUv - 0.5 * pixelFootprint, 0.0);
             vec2 hi = min(spriteUv + 0.5 * pixelFootprint, 1.0);
-            vec2 coverage = clamp((hi - lo) / pixelFootprint, 0.0, 1.0);
+            vec2 coverage = clamp((hi - lo) * inverseFootprint, 0.0, 1.0);
             return coverage.x * coverage.y;
         }
 
@@ -110,6 +153,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 return;
             }
             c *= _Color;
+            if (c.a == 0.0)
+                discard;
             c.a *= coverage * MaskCoverage();
             c.rgb *= c.a;
             fragColor = c;
@@ -135,6 +180,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         void main()
         {
             vec4 c = SampleSprite() * _Color;
+            if (c.a == 0.0)
+                discard;
             c.a *= EdgeCoverage() * MaskCoverage();
             vec3 base = texture(_GrabTex, (gl_FragCoord.xy - _GrabViewport.xy) / _GrabViewport.zw).rgb;
             c.rgb = BlendColors(base, c.rgb, _BlendMode);
@@ -144,20 +191,24 @@ internal sealed class ImageDecorationRenderer : IDisposable
         """;
 
     private readonly int _program;
+    private readonly int _layerProgram;
     private readonly int _vao;
     private readonly int _vbo;
     private readonly int _blendProgram;
     private readonly SpriteUniforms _sprite;
     private readonly SpriteUniforms _blendSprite;
+    private readonly SpriteUniforms _layerSprite;
     private readonly int _blendGrabViewport;
     private readonly int _blendMode;
     private readonly int _batchProgram;
     private readonly int _batchVao;
     private readonly int _batchViewport;
     private readonly int _batchMaskMode;
+    private readonly bool _useMultiBind;
     private readonly GlStreamBuffer _batchBuffer = new();
     private readonly SpriteInstance[] _batch = new SpriteInstance[1024];
-    private readonly int[] _batchTextures = new int[BatchTextureCount];
+    private readonly TextureBinding[] _batchTextures = new TextureBinding[BatchTextureCount];
+    private readonly int[] _samplers = new int[8];
     private int _grabTexture;
     private int _grabWidth;
     private int _grabHeight;
@@ -174,7 +225,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
     private readonly Dictionary<string, int> _singleTagTextures = new(StringComparer.Ordinal);
     private readonly Stack<List<VisibleDecoration>> _stencilLists = [];
     private int _legacyGlobalMask;
-    private readonly Dictionary<DecorationTextureStream.Key, int> _textures = [];
+    private readonly Dictionary<string, int> _textures = new(StringComparer.Ordinal);
     private readonly DecorationTextureStream _animationTextures = new();
     private readonly DecorationTextureStream _staticTextures = new(1280L * 1024 * 1024, preferReuse: false);
     private long _residentStaticBytes;
@@ -183,8 +234,11 @@ internal sealed class ImageDecorationRenderer : IDisposable
     private int _nextAnimationUpload;
     private int _nextStaticUpload;
     private readonly List<VisibleDecoration> _visible = [];
+    private readonly List<PainterOrder> _painterOrder = [];
     private readonly List<VisibleDecoration> _synced = [];
     private bool _hasVisibleMask;
+    private bool _hasBackgroundBlend;
+    private bool _hasForegroundBlend;
     private readonly DecorationFrameState _frameState = new();
     private readonly Dictionary<int, Matrix4> _editorQuads = [];
 
@@ -200,22 +254,30 @@ internal sealed class ImageDecorationRenderer : IDisposable
         private readonly int _smoothEdges = GL.GetUniformLocation(program, "_SmoothEdges");
         private readonly int _viewport = GL.GetUniformLocation(program, "_ViewportSize");
 
-        public void Set(Matrix4 clip, Vector4 tint, Vector2 repeat, bool smooth, Vector2 viewport, bool wrapInShader = false)
+        public void Set(Matrix4 clip, Vector4 tint, Vector2 repeat, bool smooth, Vector2 viewport,
+            bool wrapInShader = false, bool clampWithSampler = false)
         {
             GL.UniformMatrix4(_clip, false, ref clip);
             GL.Uniform4(_color, tint);
-            GL.Uniform3(_repeat, repeat.X, repeat.Y, wrapInShader && repeat != Vector2.One ? 1f : 0f);
+            GL.Uniform3(_repeat, repeat.X, repeat.Y,
+                clampWithSampler ? -1f : wrapInShader && repeat != Vector2.One ? 1f : 0f);
             GL.Uniform1(_smoothEdges, smooth ? 1 : 0);
             GL.Uniform2(_viewport, viewport);
         }
     }
 
-    public ImageDecorationRenderer()
+    public ImageDecorationRenderer(OfficialFloorRenderer? floorPipeline = null)
     {
+        _floorPipeline = floorPipeline;
+        int major = GL.GetInteger(GetPName.MajorVersion);
+        _useMultiBind = major > 4 || (major == 4 && GL.GetInteger(GetPName.MinorVersion) >= 4);
         _program = SpriteRenderer.LinkSources(SpriteVertex, MaskFragment);
         _blendProgram = SpriteRenderer.LinkSources(SpriteVertex, BlendFragmentSource);
+        _layerProgram = SpriteRenderer.LinkSources(SpriteVertex,
+            MaskFragment.Replace(SampleBaseTexture, SampleMipmappedTexture));
         _sprite = new SpriteUniforms(_program);
         _blendSprite = new SpriteUniforms(_blendProgram);
+        _layerSprite = new SpriteUniforms(_layerProgram);
         _blendGrabViewport = GL.GetUniformLocation(_blendProgram, "_GrabViewport");
         _blendMode = GL.GetUniformLocation(_blendProgram, "_BlendMode");
         GL.UseProgram(_program);
@@ -249,25 +311,12 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 flat out int textureSlot;
                 """)
             .Replace("_SmoothEdges != 0", "_Settings.w != 0.0")
-            .Replace("pixelFootprint = vec2(0.0);", "_Color = _Tint; _Repeat = _Settings.xyz; textureSlot = int(_TextureSlot);\npixelFootprint = vec2(0.0);");
-        // GLSL 330 requires constant sampler indices. Explicit gradients preserve
-        // sampling when neighboring fragments select different textures.
-        string cases = string.Join("\n", Enumerable.Range(0, BatchTextureCount - 1)
-            .Select(slot => $"case {slot}: return textureGrad(_MainTex[{slot}], sampleUv, dx, dy);"));
-        string batchFragment = MaskFragment
-            .Replace("uniform sampler2D _MainTex;", $"uniform sampler2D _MainTex[{BatchTextureCount}];\nflat in int textureSlot;")
-            .Replace("return textureGrad(_MainTex, sampleUv, dFdx(uv), dFdy(uv));", $$"""
-                vec2 dx = dFdx(uv);
-                vec2 dy = dFdy(uv);
-                switch (textureSlot)
-                {
-                    {{cases}}
-                    default: return textureGrad(_MainTex[{{BatchTextureCount - 1}}], sampleUv, dx, dy);
-                }
-                """)
-            .Replace("uniform vec4 _Color;", "flat in vec4 _Color;")
-            .Replace("uniform vec3 _Repeat;", "flat in vec3 _Repeat;");
-        _batchProgram = SpriteRenderer.LinkSources(batchVertex, batchFragment);
+            .Replace("pixelFootprint = vec2(0.0);", """
+                _Color = _Tint; _Repeat = _Settings.xyz;
+                textureSlot = int(_TextureSlot);
+                pixelFootprint = vec2(0.0);
+                """);
+        _batchProgram = LinkBatchProgram(batchVertex);
         _batchViewport = GL.GetUniformLocation(_batchProgram, "_ViewportSize");
         _batchMaskMode = GL.GetUniformLocation(_batchProgram, "_MaskMode");
         GL.UseProgram(_batchProgram);
@@ -281,7 +330,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.EnableVertexAttribArray(0);
         GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
         GL.BindBuffer(BufferTarget.ArrayBuffer, _batchBuffer.Handle);
-        const int stride = 25 * sizeof(float);
+        int stride = Marshal.SizeOf<SpriteInstance>();
         for (int attribute = 0; attribute < 6; attribute++)
         {
             int location = attribute + 1;
@@ -296,26 +345,111 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
     }
 
+    private static int LinkBatchProgram(string vertex)
+    {
+        const string nonUniformIndexExtension = "GL_NV_gpu_shader5";
+        int count = GL.GetInteger(GetPName.NumExtensions);
+        for (int i = 0; i < count; i++)
+        {
+            if (GL.GetString(StringNameIndexed.Extensions, i) != nonUniformIndexExtension)
+                continue;
+            try
+            {
+                return SpriteRenderer.LinkSources(vertex, BatchFragment(
+                    "return textureLod(_MainTex[textureSlot], sampleUv, 0.0);", nonUniformIndexExtension));
+            }
+            catch (InvalidOperationException)
+            {
+                break;
+            }
+        }
+
+        // Portable GLSL 330 requires a constant sampler array index.
+        string cases = string.Join("\n", Enumerable.Range(0, BatchTextureCount - 1)
+            .Select(slot => $"case {slot}: return textureLod(_MainTex[{slot}], sampleUv, 0.0);"));
+        return SpriteRenderer.LinkSources(vertex, BatchFragment($$"""
+            switch (textureSlot)
+            {
+                {{cases}}
+                default: return textureLod(_MainTex[{{BatchTextureCount - 1}}], sampleUv, 0.0);
+            }
+            """));
+    }
+
+    private static string BatchFragment(string sample, string? extension = null)
+    {
+        // Decoration minification and magnification use the same filter and have
+        // only a base level. The source UV and wrap mode still apply unchanged.
+        string fragment = MaskFragment
+            .Replace("uniform sampler2D _MainTex;", $"uniform sampler2D _MainTex[{BatchTextureCount}];\nflat in int textureSlot;")
+            .Replace(SampleBaseTexture, sample)
+            .Replace("uniform vec4 _Color;", "flat in vec4 _Color;")
+            .Replace("uniform vec3 _Repeat;", "flat in vec3 _Repeat;");
+        return extension is null ? fragment : fragment.Replace("#version 330 core",
+            $"#version 330 core\n#extension {extension} : require");
+    }
+
+    private unsafe void BindBatchTextures(int count)
+    {
+        if (_useMultiBind)
+        {
+            int* textures = stackalloc int[BatchTextureCount];
+            int* samplers = stackalloc int[BatchTextureCount];
+            for (int slot = 0; slot < count; slot++)
+            {
+                textures[slot] = _batchTextures[slot].Texture;
+                samplers[slot] = _batchTextures[slot].Sampler;
+            }
+            GL.BindTextures(FirstBatchTextureUnit, count, textures);
+            GL.BindSamplers(FirstBatchTextureUnit, count, samplers);
+            return;
+        }
+        for (int slot = 0; slot < count; slot++)
+        {
+            GL.ActiveTexture(TextureUnit.Texture0 + FirstBatchTextureUnit + slot);
+            _batchTextures[slot].Bind(FirstBatchTextureUnit + slot);
+        }
+    }
+
     public void Prepare(ImageDecorationTimeline timeline, double time, Camera2D camera, float tileSize,
         float authoredZoom, Func<int, bool, (Vector2 Center, Vector2 Scale, float Rotation)> floor,
-        Func<string, Vector2> planet, bool collectEditorQuads = false, Func<int, float>? floorOpacity = null)
+        Func<string, Vector2> planet, bool collectEditorQuads = false, Func<int, float>? floorOpacity = null,
+        DecorationKinds visibleKinds = DecorationKinds.All, Func<float>? readVolume = null,
+        bool forceFloorOutlines = false, bool animateSpeedIcons = true)
     {
         _visible.Clear();
+        _painterOrder.Clear();
         _synced.Clear();
         _hasVisibleMask = false;
+        _hasBackgroundBlend = _hasForegroundBlend = false;
         _editorQuads.Clear();
         _animationTextures.BeginFrame(time);
         _staticTextures.BeginFrame(time);
+        _floorObjectTime = time;
+        _editFloorIcons = !animateSpeedIcons || collectEditorQuads;
+        _forceFloorOutlines = forceFloorOutlines;
+        float? volume = null;
         Matrix4 view = camera.ViewProjection;
-        foreach (var (item, authoredPose, pixels) in _frameState.Update(timeline, time, collectEditorQuads))
+        var drawables = _frameState.Update(timeline, time, collectEditorQuads, visibleKinds);
+        foreach (ref readonly var drawable in CollectionsMarshal.AsSpan(drawables))
         {
+            var item = drawable.Item;
+            var authoredPose = drawable.Pose;
+            var pixels = drawable.Pixels;
             var pose = item.StickToFloor && floorOpacity is not null
                 ? authoredPose with { Opacity = authoredPose.Opacity * floorOpacity(item.Floor) } : authoredPose;
             if (item.IsPlayerBubble && !collectEditorQuads)
                 continue;
             if (pose.Image == ObjectDecorationArt.PlanetKey)
                 pose = pose with { Image = ObjectDecorationArt.PlanetImageAt(time) };
-            Matrix4 model = ModelFor(pixels, item, pose, camera, tileSize, authoredZoom, floor, planet);
+            if (pose.ObjectFloor is { ColorMode: not TrackColorMode.Single } color)
+            {
+                if (color.ColorMode == TrackColorMode.Volume)
+                    volume ??= readVolume?.Invoke() ?? 0f;
+                pose = pose with { Tint = color.EvaluateColor(pose.Tint, time, volume.GetValueOrDefault()) };
+            }
+            Matrix4 model = ModelFor(pose.ObjectFloor is null ? pixels : Vector2.One,
+                item, pose, camera, tileSize, authoredZoom, floor, planet);
             bool screen = IsScreenRelative(pose);
             Matrix4 clip = screen ? model : model * view;
             if (item.Particles is { } particles)
@@ -344,33 +478,24 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     Matrix4 particleClip = anchorScreen ? particleModel : particleModel * view;
                     if (!IsOutsideViewport(particleClip))
                     {
-                        _visible.Add(new(item, pose with { Tint = pose.Tint * particle.Tint }, particleClip) { ParticleOrder = i });
-                        _hasVisibleMask |= pose.Masking == DecorationMasking.Mask;
+                        AddVisible(new(item, pose with { Tint = pose.Tint * particle.Tint }, particleClip) { ParticleOrder = i });
                     }
                 }
                 continue;
             }
-            if (!IsOutsideViewport(clip))
+            // Floor meshes are in world units, so their unit transform covers more than a sprite quad.
+            if (!IsOutsideViewport(pose.ObjectFloor is null ? clip : Matrix4.CreateScale(400f, 400f, 1f) * clip))
             {
                 var decoration = new VisibleDecoration(item, pose, clip);
-                _visible.Add(decoration);
-                _hasVisibleMask |= pose.Masking == DecorationMasking.Mask;
+                AddVisible(decoration);
                 if (pose.SyncFloorDepth && pose.Opacity > 0f && pose.Masking != DecorationMasking.Mask && !IsTransparent(pose))
                     _synced.Add(decoration);
                 if (collectEditorQuads && item.DecorationIndex >= 0 && pose.Masking != DecorationMasking.Mask)
-                    _editorQuads[item.DecorationIndex] = clip;
+                    _editorQuads[item.DecorationIndex] = pose.ObjectFloor is { } objectFloor
+                        ? FloorObjects.BoundsFor(objectFloor, time, _editFloorIcons) * clip : clip;
             }
         }
-        // Unity paints in ascending sortingOrder, and the decoration uses sortingOrder = -depth,
-        // so depth = -10 (order 10) draws last and lands on top, while depth = 10 sinks below.
-        _visible.Sort(static (left, right) =>
-        {
-            int depth = DepthKey(left.Pose).CompareTo(DepthKey(right.Pose));
-            if (depth != 0)
-                return depth;
-            int item = left.Item.Index.CompareTo(right.Item.Index);
-            return item != 0 ? item : left.ParticleOrder.CompareTo(right.ParticleOrder);
-        });
+        _painterOrder.Sort();
         _synced.Sort(static (left, right) =>
         {
             int floor = right.Item.Floor.CompareTo(left.Item.Floor);
@@ -379,13 +504,32 @@ internal sealed class ImageDecorationRenderer : IDisposable
         PrefetchTextures(timeline, time);
     }
 
+    private void AddVisible(VisibleDecoration decoration)
+    {
+        var pose = decoration.Pose;
+        uint item = (uint)decoration.Item.Index;
+        // At equal depth, text appears above sprites and follows reverse decoration order.
+        uint order = decoration.Item.IsText ? uint.MaxValue - item : item;
+        _painterOrder.Add(new PainterOrder(DepthKey(pose), order, decoration.ParticleOrder, _visible.Count));
+        _visible.Add(decoration);
+        _hasVisibleMask |= pose.Masking == DecorationMasking.Mask;
+        if (pose.Blend == DecorationBlendMode.None || pose.SyncFloorDepth ||
+            pose.Masking == DecorationMasking.Mask || IsTransparent(pose))
+            return;
+
+        if (pose.Depth >= 0)
+            _hasBackgroundBlend = true;
+        else
+            _hasForegroundBlend = true;
+    }
+
     private void PrefetchTextures(ImageDecorationTimeline timeline, double time)
     {
         var animated = timeline.AnimationUploads;
         var statics = timeline.StaticTexturePrefetches;
-        const double animationLookahead = .16;
+        const double animationLookahead = .8;
         const double staticLookahead = 12;
-        if (!ReferenceEquals(timeline, _animationTimeline) || time < _animationTime || time - _animationTime > animationLookahead)
+        if (!ReferenceEquals(timeline, _animationTimeline) || time < _animationTime || time - _animationTime > .16)
         {
             _animationTimeline = timeline;
             _nextAnimationUpload = FirstUpcoming(animated, time, static frame => frame.Start);
@@ -404,35 +548,38 @@ internal sealed class ImageDecorationRenderer : IDisposable
         {
             while (_nextAnimationUpload < animated.Length && animated[_nextAnimationUpload].Start <= time + animationLookahead)
             {
-                var frame = animated[_nextAnimationUpload++];
-                if (frame.Start <= time || !timeline.Images.TryGetValue(frame.Image, out var image))
+                var frame = animated[_nextAnimationUpload];
+                if (frame.Start <= time || _textures.ContainsKey(frame.Image) ||
+                    !timeline.Images.TryGetValue(frame.Image, out var image))
+                {
+                    _nextAnimationUpload++;
                     continue;
-                var (repeatX, repeatY) = _frameState.Repeat(frame.Image);
-                var key = new DecorationTextureStream.Key(frame.Image, frame.Smoothing, frame.RepeatX || repeatX, frame.RepeatY || repeatY);
-                // At most one new transfer per rendered frame; drawing still resolves cache misses.
-                if (_animationTextures.Prefetch(key, image, frame.Start + .05))
+                }
+                bool transferred = _animationTextures.Prefetch(frame.Image, image, frame.Start + .05,
+                    4 * 1024 * 1024, out bool ready);
+                if (ready)
+                    _nextAnimationUpload++;
+                if (transferred || !ready)
                     break;
             }
             while (_nextStaticUpload < statics.Length && statics[_nextStaticUpload].Start <= time + staticLookahead)
             {
-                var (key, start) = statics[_nextStaticUpload];
+                var (name, start) = statics[_nextStaticUpload];
                 if (start <= time)
                 {
                     _nextStaticUpload++;
                     continue;
                 }
-                var (repeatX, repeatY) = _frameState.Repeat(key.Image);
-                key = key with { RepeatX = key.RepeatX || repeatX, RepeatY = key.RepeatY || repeatY };
-                if (_textures.ContainsKey(key))
+                if (_textures.ContainsKey(name))
                 {
                     _nextStaticUpload++;
                     continue;
                 }
-                var image = timeline.Images[key.Image];
+                var image = timeline.Images[name];
                 // Start large uploads farther ahead and keep the per-frame transfer
                 // small until the texture is close to its first use after a seek.
                 int transferBudget = (start - time <= 2 ? 4 : 1) * 1024 * 1024;
-                bool transferred = _staticTextures.Prefetch(key, image, start + .05, transferBudget, out bool ready);
+                bool transferred = _staticTextures.Prefetch(name, image, start + .05, transferBudget, out bool ready);
                 if (ready)
                     _nextStaticUpload++;
                 if (transferred || !ready)
@@ -468,16 +615,16 @@ internal sealed class ImageDecorationRenderer : IDisposable
     private static int DepthKey(ImageDecorationTimeline.Pose pose) => pose.SyncFloorDepth ? 0 : -pose.Depth;
 
     private static bool IsTransparent(ImageDecorationTimeline.Pose pose) =>
-        pose.Masking != DecorationMasking.Mask && pose.Tint.W == 0f;
+        pose.Masking != DecorationMasking.Mask && pose.Tint.W == 0f &&
+        pose.ObjectFloor is not { GlowEnabled: true, GlowColor.W: > 0f };
 
     public void DrawLayer(int texture, Matrix4 model, Vector4 tint, Vector2 repeat)
     {
-        GL.UseProgram(_program);
+        GL.UseProgram(_layerProgram);
         GL.BindVertexArray(_vao);
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, texture);
-        GL.Uniform1(_sprite.MaskMode, 0);
-        _sprite.Set(model, tint, repeat, false, Vector2.Zero);
+        _layerSprite.Set(model, tint, repeat, false, Vector2.Zero);
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
         GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
@@ -519,13 +666,37 @@ internal sealed class ImageDecorationRenderer : IDisposable
             }
         }
 
-        GL.BindVertexArray(_vao);
+        bool synced = syncedStart >= 0;
         GL.ActiveTexture(TextureUnit.Texture0);
+        // Unity submits the decoration GrabPass copies before drawing the sorted sprites in this layer.
+        // The subsequent blend sprites read the same snapshot, including when other sprites overlap them.
+        Vector4 layerGrab = !synced && (background ? _hasBackgroundBlend : _hasForegroundBlend)
+            ? CopyFramebuffer() : Vector4.Zero;
+        GL.BindVertexArray(_vao);
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
         int draws = 0;
         int batchCount = 0, textureCount = 0, batchMask = 0, batchMode = 0;
         int boundTextureCount = 0;
+        var scissors = new DecorationScissor();
+        void DrawSprite(Box2i? scissor)
+        {
+            if (scissor is not { } region)
+            {
+                GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+                return;
+            }
+            scissors.Apply(region);
+            try
+            {
+                GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+            }
+            finally
+            {
+                scissors.Restore();
+            }
+        }
+
         void Flush()
         {
             if (batchCount == 0) return;
@@ -541,10 +712,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     GL.BindTexture(TextureTarget.Texture2D, batchMask);
                 }
                 GL.ActiveTexture(TextureUnit.Texture0);
-                GL.BindTexture(TextureTarget.Texture2D, _batchTextures[0]);
+                _batchTextures[0].Bind(0);
                 var sprite = _batch[0];
                 _sprite.Set(sprite.Clip, sprite.Tint, new Vector2(sprite.Settings.X, sprite.Settings.Y),
-                    sprite.Settings.W != 0, viewport, sprite.Settings.Z != 0);
+                    sprite.Settings.W != 0, viewport, sprite.Settings.Z > 0, sprite.Settings.Z < 0);
                 GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
             }
             else
@@ -555,11 +726,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 GL.Uniform1(_batchMaskMode, batchMode);
                 GL.ActiveTexture(TextureUnit.Texture2);
                 GL.BindTexture(TextureTarget.Texture2D, batchMask);
-                for (int slot = 0; slot < textureCount; slot++)
-                {
-                    GL.ActiveTexture(TextureUnit.Texture0 + FirstBatchTextureUnit + slot);
-                    GL.BindTexture(TextureTarget.Texture2D, _batchTextures[slot]);
-                }
+                BindBatchTextures(textureCount);
                 boundTextureCount = Math.Max(boundTextureCount, textureCount);
                 GL.ActiveTexture(TextureUnit.Texture0);
                 _batchBuffer.Upload<SpriteInstance>(_batch.AsSpan(0, batchCount));
@@ -569,11 +736,13 @@ internal sealed class ImageDecorationRenderer : IDisposable
             textureCount = 0;
             draws++;
         }
-        bool synced = syncedStart >= 0;
-        var decorations = synced ? _synced : _visible;
-        for (int index = synced ? syncedStart : 0; index < (synced ? syncedEnd : decorations.Count); index++)
+        var decorations = CollectionsMarshal.AsSpan(synced ? _synced : _visible);
+        for (int index = synced ? syncedStart : 0; index < (synced ? syncedEnd : decorations.Length); index++)
         {
-            var (item, pose, clip) = decorations[index];
+            ref readonly var decoration = ref decorations[synced ? index : _painterOrder[index].Index];
+            var item = decoration.Item;
+            var pose = decoration.Pose;
+            var clip = decoration.Clip;
             if (!synced && (pose.SyncFloorDepth || (pose.Depth >= 0) != background))
                 continue;
 
@@ -589,10 +758,50 @@ internal sealed class ImageDecorationRenderer : IDisposable
             if (pose.Masking == DecorationMasking.VisibleInsideMask && mask == 0)
                 continue;
 
-            int texture = TextureFor(timeline, pose);
+            if (pose.ObjectFloor is { } objectFloor)
+            {
+                Flush();
+                GL.BindSampler(0, 0);
+                int maskMode = mask == 0 ? 0 : pose.Masking == DecorationMasking.VisibleOutsideMask ? 2 : 1;
+                if (pose.Tint.W != 0f)
+                    draws += FloorObjects.Draw(objectFloor, _floorObjectTime, _editFloorIcons, clip, viewport,
+                        pose.Tint, pose.Opacity, _forceFloorOutlines, mask, maskMode);
+                if (objectFloor.GlowEnabled && objectFloor.GlowColor.W > 0f &&
+                    timeline.Images.ContainsKey(ObjectDecorationArt.FloorGlowKey))
+                {
+                    // TopGlow uses the 128-pixel sprite at 50 pixels per unit, scaled by 1.28.
+                    const float glowSize = 128f / 50f * 100f * 1.28f;
+                    Vector4 glow = objectFloor.GlowColor;
+                    glow.W *= .8f * pose.Opacity;
+                    GL.UseProgram(_program);
+                    GL.BindVertexArray(_vao);
+                    GL.ActiveTexture(TextureUnit.Texture0);
+                    TextureFor(timeline, pose with { Image = ObjectDecorationArt.FloorGlowKey, Smoothing = true }).Bind(0);
+                    _sprite.Set(Matrix4.CreateScale(glowSize, glowSize, 1f) * clip, glow,
+                        Vector2.One, true, viewport, true);
+                    BindMask(_sprite, pose.Masking, mask);
+                    GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+                    draws++;
+                }
+                continue;
+            }
+
+            var image = timeline.Images[pose.Image];
+            var repeat = _frameState.Repeat(pose.Image);
+            // For untiled sprites, apply the edge clamp in the texture sampler.
+            bool clampWithSampler = item.Tile == Vector2.One && repeat == (false, false);
+            Box2i? scissor = null;
+            if (clampWithSampler && image.AlphaBounds is { } alpha)
+            {
+                scissor = scissors.Clip(clip, alpha, viewport, pose.Smoothing);
+                if (scissor is { } region && (region.Size.X == 0 || region.Size.Y == 0))
+                    continue;
+            }
+
+            TextureBinding texture = TextureFor(timeline, pose, repeat);
             Vector4 tint = pose.Tint;
             tint.W *= pose.Opacity;
-            if (UseInstancing && pose.Blend == DecorationBlendMode.None)
+            if (UseInstancing && pose.Blend == DecorationBlendMode.None && scissor is null)
             {
                 int mode = mask == 0 ? 0 : pose.Masking == DecorationMasking.VisibleOutsideMask ? 2 : 1;
                 if (batchCount == _batch.Length || batchMask != mask || batchMode != mode)
@@ -607,8 +816,9 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 }
                 batchMask = mask;
                 batchMode = mode;
+                float samplingMode = clampWithSampler ? -1f : !timeline.LegacyMasks && item.Tile != Vector2.One ? 1f : 0f;
                 _batch[batchCount++] = new SpriteInstance(clip, tint, new Vector4(item.Tile.X, item.Tile.Y,
-                    !timeline.LegacyMasks && item.Tile != Vector2.One ? 1f : 0f, pose.Smoothing ? 1f : 0f), slot);
+                    samplingMode, pose.Smoothing ? 1f : 0f), slot);
                 continue;
             }
             Flush();
@@ -616,28 +826,26 @@ internal sealed class ImageDecorationRenderer : IDisposable
             if (pose.Blend == DecorationBlendMode.None)
             {
                 GL.UseProgram(_program);
-                _sprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks);
+                _sprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks, clampWithSampler);
                 BindMask(_sprite, pose.Masking, mask);
-                GL.BindTexture(TextureTarget.Texture2D, texture);
-                GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+                texture.Bind(0);
+                DrawSprite(scissor);
             }
             else
             {
-                // The game blends against the framebuffer; copy it first because GLSL 330 has no
-                // framebuffer fetch. Each blend decoration needs a fresh copy of the result so far.
-                var grabViewport = CopyFramebuffer();
+                var grabViewport = synced ? CopyFramebuffer() : layerGrab;
                 if (grabViewport.Z <= 0 || grabViewport.W <= 0)
                     continue;
                 GL.UseProgram(_blendProgram);
-                _blendSprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks);
+                _blendSprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks, clampWithSampler);
                 GL.Uniform4(_blendGrabViewport, grabViewport);
                 GL.Uniform1(_blendMode, (int)pose.Blend);
                 BindMask(_blendSprite, pose.Masking, mask);
                 GL.ActiveTexture(TextureUnit.Texture1);
                 GL.BindTexture(TextureTarget.Texture2D, _grabTexture);
                 GL.ActiveTexture(TextureUnit.Texture0);
-                GL.BindTexture(TextureTarget.Texture2D, texture);
-                GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+                texture.Bind(0);
+                DrawSprite(scissor);
                 GL.ActiveTexture(TextureUnit.Texture1);
                 GL.BindTexture(TextureTarget.Texture2D, 0);
                 GL.ActiveTexture(TextureUnit.Texture0);
@@ -649,10 +857,12 @@ internal sealed class ImageDecorationRenderer : IDisposable
         {
             GL.ActiveTexture(TextureUnit.Texture0 + FirstBatchTextureUnit + slot);
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.BindSampler(FirstBatchTextureUnit + slot, 0);
         }
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.Disable(EnableCap.Blend);
         GL.BindTexture(TextureTarget.Texture2D, 0);
+        GL.BindSampler(0, 0);
         GL.ActiveTexture(TextureUnit.Texture2);
         GL.BindTexture(TextureTarget.Texture2D, 0);
         GL.ActiveTexture(TextureUnit.Texture0);
@@ -708,8 +918,9 @@ internal sealed class ImageDecorationRenderer : IDisposable
         _singleTagTextures.Clear();
         var legacyStencils = _legacyStencils;
         var taggedStencils = _taggedStencils;
-        foreach (var decoration in _visible)
+        foreach (var order in _painterOrder)
         {
+            var decoration = _visible[order.Index];
             var pose = decoration.Pose;
             if (pose.Masking != DecorationMasking.Mask)
                 continue;
@@ -741,8 +952,9 @@ internal sealed class ImageDecorationRenderer : IDisposable
     private void RenderTaggedMasks(ImageDecorationTimeline timeline, Vector2 viewport, List<VisibleDecoration> depthStencils)
     {
         int targetIndex = 0;
-        foreach (var receiver in _visible)
+        foreach (var order in _painterOrder)
         {
+            var receiver = _visible[order.Index];
             var pose = receiver.Pose;
             if (!IsMaskRecipient(pose))
                 continue;
@@ -796,8 +1008,9 @@ internal sealed class ImageDecorationRenderer : IDisposable
         // Build only the sets that visible recipients use. Different depths often share a stencil set.
         var groups = _maskGroups;
         var matching = _matchingStencils;
-        foreach (var decoration in _visible)
+        foreach (var order in _painterOrder)
         {
+            var decoration = _visible[order.Index];
             var pose = decoration.Pose;
             if (!IsMaskRecipient(pose))
                 continue;
@@ -851,22 +1064,40 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.UseProgram(_program);
         GL.BindVertexArray(_vao);
         GL.Uniform1(_sprite.MaskMode, depthCount != 0 ? 3 : 0);
+        bool spriteBound = true;
         for (int i = 0; i < stencils.Count; i++)
         {
             if (i == depthCount && depthCount != 0)
             {
                 GL.BlendEquation(BlendEquationMode.FuncAdd);
-                GL.Uniform1(_sprite.MaskMode, 0);
+                if (spriteBound)
+                    GL.Uniform1(_sprite.MaskMode, 0);
             }
             var (item, pose, clip) = stencils[i];
-            int spriteTexture = TextureFor(timeline, pose);
+            if (pose.ObjectFloor is { } objectFloor)
+            {
+                GL.BindSampler(0, 0);
+                FloorObjects.Draw(objectFloor, _floorObjectTime, _editFloorIcons, clip, viewport, Vector4.One,
+                    i < depthCount ? 1f : pose.Opacity, false, 0, 3);
+                spriteBound = false;
+                continue;
+            }
+            if (!spriteBound)
+            {
+                GL.UseProgram(_program);
+                GL.BindVertexArray(_vao);
+                GL.Uniform1(_sprite.MaskMode, i < depthCount ? 3 : 0);
+                spriteBound = true;
+            }
+            var spriteTexture = TextureFor(timeline, pose);
             _sprite.Set(clip, new Vector4(1f, 1f, 1f, pose.Opacity), item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks);
-            GL.BindTexture(TextureTarget.Texture2D, spriteTexture);
+            spriteTexture.Bind(0);
             GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
         }
 
         if (depthCount == stencils.Count)
             GL.BlendEquation(BlendEquationMode.FuncAdd);
+        GL.BindSampler(0, 0);
         GL.Disable(EnableCap.Blend);
         return texture;
     }
@@ -900,39 +1131,65 @@ internal sealed class ImageDecorationRenderer : IDisposable
         return texture;
     }
 
-    private int TextureFor(ImageDecorationTimeline timeline, ImageDecorationTimeline.Pose pose)
+    private TextureBinding TextureFor(ImageDecorationTimeline timeline, ImageDecorationTimeline.Pose pose,
+        (bool X, bool Y)? repeat = null)
     {
-        var (repeatX, repeatY) = _frameState.Repeat(pose.Image);
-        var key = new DecorationTextureStream.Key(pose.Image, pose.Smoothing, repeatX, repeatY);
-        if (_textures.TryGetValue(key, out int texture))
-            return texture;
+        var (repeatX, repeatY) = repeat ?? _frameState.Repeat(pose.Image);
+        int sampler = SamplerFor(pose.Smoothing, repeatX, repeatY);
+        if (_textures.TryGetValue(pose.Image, out int texture))
+            return new(texture, sampler);
 
         var image = timeline.Images[pose.Image];
         if (timeline.AnimationFrames.Contains(pose.Image))
-            return _animationTextures.Get(key, image);
-        long bytes = image.TextureBytes;
-        int handle = _staticTextures.Get(key, image);
+            return new(_animationTextures.Get(pose.Image, image), sampler);
+        long bytes = image.StorageBytes;
+        int handle = _staticTextures.Get(pose.Image, image);
         // Keep commonly reused smaller artwork from competing with upcoming large backgrounds.
         const long residentBudget = 640L * 1024 * 1024;
         if (bytes <= 16L * 1024 * 1024 && _residentStaticBytes + bytes <= residentBudget &&
-            _staticTextures.TryTake(key, out int resident))
+            _staticTextures.TryTake(pose.Image, out int resident))
         {
-            _textures.Add(key, resident);
+            _textures.Add(pose.Image, resident);
             _residentStaticBytes += bytes;
         }
-        return handle;
+        return new(handle, sampler);
     }
 
-    internal void PrewarmTexture(DecorationTextureStream.Key key, in DecorationImage image)
+    private int SamplerFor(bool smoothing, bool repeatX, bool repeatY)
     {
-        if (_textures.ContainsKey(key))
+        int index = (smoothing ? 4 : 0) | (repeatX ? 2 : 0) | (repeatY ? 1 : 0);
+        if (_samplers[index] != 0)
+            return _samplers[index];
+        int sampler = GL.GenSampler();
+        GL.SamplerParameter(sampler, SamplerParameterName.TextureMinFilter,
+            (int)(smoothing ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+        GL.SamplerParameter(sampler, SamplerParameterName.TextureMagFilter,
+            (int)(smoothing ? TextureMagFilter.Linear : TextureMagFilter.Nearest));
+        GL.SamplerParameter(sampler, SamplerParameterName.TextureWrapS,
+            (int)(repeatX ? TextureWrapMode.Repeat : TextureWrapMode.ClampToEdge));
+        GL.SamplerParameter(sampler, SamplerParameterName.TextureWrapT,
+            (int)(repeatY ? TextureWrapMode.Repeat : TextureWrapMode.ClampToEdge));
+        _samplers[index] = sampler;
+        return sampler;
+    }
+
+    internal void PrewarmTexture(string name, in DecorationImage image)
+    {
+        if (_textures.ContainsKey(name))
             return;
-        _staticTextures.Get(key, image);
-        if (_staticTextures.TryTake(key, out int handle))
+        _staticTextures.Get(name, image);
+        if (_staticTextures.TryTake(name, out int handle))
         {
-            _textures.Add(key, handle);
-            _residentStaticBytes += image.TextureBytes;
+            _textures.Add(name, handle);
+            _residentStaticBytes += image.StorageBytes;
         }
+    }
+
+    internal bool PrewarmLargeTexture(string name, in DecorationImage image, double firstUse,
+        out bool ready)
+    {
+        // Keep this within the existing streaming pool and protect it until its authored activation.
+        return _staticTextures.Prefetch(name, image, firstUse + .05, 8 * 1024 * 1024, out ready);
     }
 
     internal static bool IsOutsideViewport(Matrix4 clip)
@@ -998,10 +1255,15 @@ internal sealed class ImageDecorationRenderer : IDisposable
             position += parallaxOffset + Rotate(pivot, angle);
         }
 
-        Matrix4 model = Matrix4.CreateScale(size.X, size.Y, 1f) *
-            Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(angle));
+        Matrix4 model = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(angle));
+        model.Row0 *= size.X;
+        model.Row1 *= size.Y;
         if (screen)
-            model *= Matrix4.CreateScale(2f / camera.WorldViewWidth, 2f / camera.WorldViewHeight, 1f);
+        {
+            var projection = new Vector4(2f / camera.WorldViewWidth, 2f / camera.WorldViewHeight, 1f, 1f);
+            model.Row0 *= projection;
+            model.Row1 *= projection;
+        }
         // The linear part has homogeneous w=0. Post-multiplying by translation
         // only changes the last row.
         model.Row3 = new Vector4(position.X, position.Y, 0f, 1f);
@@ -1066,6 +1328,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
 
     public void Dispose()
     {
+        foreach (int sampler in _samplers)
+            if (sampler != 0)
+                GL.DeleteSampler(sampler);
+        _floorObjects?.Dispose();
         _animationTextures.Dispose();
         _staticTextures.Dispose();
         _batchBuffer.Dispose();
@@ -1082,6 +1348,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
         GL.DeleteProgram(_program);
+        GL.DeleteProgram(_layerProgram);
         GL.DeleteProgram(_blendProgram);
     }
 }

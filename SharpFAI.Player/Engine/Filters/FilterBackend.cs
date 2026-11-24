@@ -23,6 +23,7 @@ internal interface IFilterBackend
     IFilterMaterial CreateMaterial(IFilterShader shader);
     void ReleaseMaterial(IFilterMaterial material);
     IFilterTarget RentTarget(int width, int height, int depthBits);
+    IFilterTarget RentTargetLike(IFilterTarget source) => RentTarget(source.Width, source.Height, 0);
     void ReleaseTarget(IFilterTarget target);
     void Blit(IFilterTarget source, IFilterTarget destination, IFilterMaterial? material = null, int pass = -1);
 }

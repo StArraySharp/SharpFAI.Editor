@@ -8,6 +8,9 @@ internal sealed unsafe partial class EditorWindow
 {
     private readonly ApplicationSettingsStore _settingsStore = ApplicationSettingsStore.ForApplication(editor: true);
     private readonly ApplicationSettingsWindow _settingsWindow = new();
+    private readonly AudioCalibrationWindow _audioCalibration = new();
+    private readonly ApplicationWindowModeController _windowMode = new();
+    private readonly DisplayFrameLimit _displayFrameLimit = new();
     private ApplicationSettings _applicationSettings = ApplicationSettings.EditorDefaults;
     private ApplicationSettings? _pendingApplicationSettings;
     private readonly string? _commandLineLanguage;
@@ -25,16 +28,39 @@ internal sealed unsafe partial class EditorWindow
 
     private void ApplyApplicationSettings()
     {
+        _windowMode.Apply(this, _applicationSettings.WindowMode);
         _applicationSettings.ApplyFramePacing(this);
         L.Language = _applicationSettings.Language is { } language
             ? CultureInfo.GetCultureInfo(language)
             : CultureInfo.CurrentUICulture;
+        _audioCalibration.SetOutputVolume(_applicationSettings.MasterVolume);
         if (_playback is { } renderer)
-            ApplyPreviewAudioSettings(renderer);
+            ApplyPreviewSettings(renderer);
     }
 
-    private void ApplyPreviewAudioSettings(Player.Engine.LevelRenderer renderer)
+    private void ApplyPendingApplicationSettings()
     {
+        bool settingsChanged = _pendingApplicationSettings is not null;
+        if (_pendingApplicationSettings is { } settings)
+        {
+            _pendingApplicationSettings = null;
+            _applicationSettings = settings;
+            ApplyApplicationSettings();
+        }
+        var mode = _windowMode.ApplyPending(this);
+        if (mode is { } current)
+        {
+            _applicationSettings = _applicationSettings with { WindowMode = current };
+            if (!_smokeTest && !_effectBenchmark)
+                _settingsStore.TrySave(_applicationSettings);
+        }
+        if (!_smokeTest && !_effectBenchmark)
+            _displayFrameLimit.Update(this, _applicationSettings, settingsChanged || mode.HasValue);
+    }
+
+    private void ApplyPreviewSettings(Player.Engine.LevelRenderer renderer)
+    {
+        renderer.ApplyVisualSettings(_applicationSettings);
         renderer.SkipAudio = _applicationSettings.SkipAudio;
         renderer.SetPlaybackOutputVolumes(_applicationSettings.MasterVolume, _applicationSettings.MusicVolume,
             _applicationSettings.HitsoundVolume);

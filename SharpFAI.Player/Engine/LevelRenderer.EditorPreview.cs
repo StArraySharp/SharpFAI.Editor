@@ -31,6 +31,7 @@ public sealed unsafe partial class LevelRenderer
     private PlaybackEvent[]? _editorEvents;
     private bool _editorHasCameraMotion;
     private PlaybackTimeline? _editorTimeline;
+    internal PlaybackTimeline? EditorTiming => _editorTimeline;
 
     private void SetEditorEvents(PlaybackEvent[]? events)
     {
@@ -57,7 +58,7 @@ public sealed unsafe partial class LevelRenderer
 
     internal static bool SupportsEditorEffect(string type) => type is
         "AddDecoration" or "AddText" or "AddObject" or "AddParticle" or "MoveDecorations" or "SetText" or "SetObject" or
-        "SetParticle" or "EmitParticle" or "SetConditionalEvents" or
+        "SetParticle" or "EmitParticle" or
         "MoveCamera" or "SetFilter" or "SetFilterAdvanced" or "Flash" or "HallOfMirrors" or "CustomBackground" or
         "Bloom" or "ShakeScreen" or "ScreenTile" or "ScreenScroll" or "ScalePlanets" or "SetPlanetRotation";
 
@@ -77,6 +78,7 @@ public sealed unsafe partial class LevelRenderer
         var settings = _settings;
         var rawSettings = level.root["settings"] as JObject;
         var oldDecorations = _imageDecorations;
+        int texturePercent = _loadedDecorationTexturePercent;
         var oldBackdrop = _backdrop;
         var oldCamera = _cameraTimeline;
         var oldFilter = _filterTimeline;
@@ -101,13 +103,14 @@ public sealed unsafe partial class LevelRenderer
                         motions.Add(move.SourceIndex, move);
                         layers |= EffectLayer.Move;
                         break;
-                    case AddImageDecoration added when added is not (AddObjectDecoration or AddParticleDecoration) &&
+                    case AddImageDecoration added when added is not
+                        (AddParticleDecoration or AddObjectDecoration { ObjectType: not (null or "Floor") }) &&
                         oldDecorations?.EditableDecoration(patch.Index, patch.Decoration) is not null &&
                         CanEditDecorationParameters((JObject)(patch.Decoration ? (JArray)level.root["decorations"]! : level.actions)[patch.Index]!, patch.Value):
                         initials.Add((added, patch.Decoration));
                         layers |= EffectLayer.Initial;
                         break;
-                    case MoveImageDecoration or AddImageDecoration or ParticleControlEvent or ConditionalDecorationEvent:
+                    case MoveImageDecoration or AddImageDecoration or ParticleControlEvent:
                         layers |= EffectLayer.Decoration;
                         break;
                     case MoveCameraEvent:
@@ -191,7 +194,8 @@ public sealed unsafe partial class LevelRenderer
             }
             if (layers.HasFlag(EffectLayer.Decoration))
                 update.Decorations = ImageDecorationTimeline.Build(next, floors, timeline.EntryTimes, timeline.FloorBpms,
-                    directory, update.Warnings, token, legacyMasks, tileSize, editable: true, cachedImages: oldDecorations?.Images);
+                    directory, update.Warnings, token, legacyMasks, tileSize, editable: true,
+                    cachedImages: oldDecorations?.Images, texturePercent: texturePercent);
             return update;
         }
     }
@@ -219,6 +223,10 @@ public sealed unsafe partial class LevelRenderer
             return EditorEffectStatus.Failed;
 
         var layers = update.Layers;
+        bool rebindTriggers = (layers & (EffectLayer.Decoration | EffectLayer.Filter | EffectLayer.Camera |
+            EffectLayer.Backdrop | EffectLayer.Scene)) != 0;
+        if (rebindTriggers)
+            ResetDecorationTriggers();
         if (layers.HasFlag(EffectLayer.Camera))
             _cameraTimeline = update.Camera;
         if (layers.HasFlag(EffectLayer.Scene))
@@ -245,29 +253,20 @@ public sealed unsafe partial class LevelRenderer
         }
         if (layers.HasFlag(EffectLayer.Decoration))
         {
-            ResetDecorationTriggers();
             _imageDecorations = update.Decorations;
         }
         else if ((layers & (EffectLayer.Move | EffectLayer.Initial)) != 0)
         {
-            ResetDecorationTriggers();
+            if (!rebindTriggers)
+                ResetDecorationTriggers();
             LastEditorEffectTimings += $", reset={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}";
             foreach (var (item, decoration) in update.Initials)
                 _imageDecorations?.EditInitial(item, decoration);
             if (layers.HasFlag(EffectLayer.Move))
                 _imageDecorations?.EditMotions(update.Motions);
         }
-        if ((layers & (EffectLayer.Decoration | EffectLayer.Filter)) != 0)
-        {
-            ResetDecorationTriggers();
-            if (_imageDecorations is { } triggers)
-                triggers.BindCameraFilters(_floors, _editorTimeline?.FloorBpms, _filterTimeline, _backgroundFilterTimeline);
-            else
-            {
-                _filterTimeline?.SetAutomaticSchedule(null);
-                _backgroundFilterTimeline?.SetAutomaticSchedule(null);
-            }
-        }
+        if (rebindTriggers)
+            BindDecorationEffects(_editorTimeline?.FloorBpms);
         LastEditorEffectTimings += $", apply={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}";
         long patchStarted = Stopwatch.GetTimestamp();
         foreach (var patch in update.Patches)
@@ -281,7 +280,7 @@ public sealed unsafe partial class LevelRenderer
         _lastFilterTime = double.NaN;
         LastEditorEffectTimings += $", patch={Stopwatch.GetElapsedTime(patchStarted).TotalMilliseconds:F3}";
         long sampleStarted = Stopwatch.GetTimestamp();
-        ApplyTimeline(previewCameraEvents: !_cameraFree);
+        ApplyTimeline(previewCameraEvents: !_cameraFree, automaticConditions: _isPlaying || _playTime > 0);
         LastEditorEffectTimings += $", sample={Stopwatch.GetElapsedTime(sampleStarted).TotalMilliseconds:F3}";
         LastEditorEffectMilliseconds = Stopwatch.GetElapsedTime(_editorEffectStarted).TotalMilliseconds;
         LastEditorEffectMainThreadMilliseconds += Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -311,7 +310,7 @@ public sealed unsafe partial class LevelRenderer
         };
         for (int index = 0; index < events.Length; index++)
         {
-            if (events[index] is RepeatEvents)
+            if (events[index] is RepeatEvents or ConditionalDecorationEvent)
             {
                 foreach (var list in slots.Values)
                     list.Add(index);
@@ -333,10 +332,17 @@ public sealed unsafe partial class LevelRenderer
 
     internal static bool CanEditDecorationParameters(JObject before, JObject after)
     {
+        bool floor = (string?)before["eventType"] == "AddObject" &&
+            (string?)before["objectType"] is null or "Floor" or "0";
         foreach (string name in before.Properties().Select(property => property.Name)
             .Concat(after.Properties().Select(property => property.Name)).Distinct(StringComparer.Ordinal))
         {
             if (JToken.DeepEquals(before[name], after[name]))
+                continue;
+            if (floor && name is ("trackType" or "trackAngle" or "trackStyle" or "trackColorType" or "trackColor" or
+                "secondaryTrackColor" or "trackColorAnimDuration" or "trackOpacity" or "trackIcon" or "trackIconAngle" or
+                "trackIconFlipped" or "trackRedSwirl" or "trackGraySetSpeedIcon" or "trackSetSpeedIconBpm" or
+                "trackGlowEnabled" or "trackGlowColor" or "trackIconOutlines"))
                 continue;
             if (name is not ("position" or "pivotOffset" or "relativeTo" or "rotation" or "scale" or
                 "originalSize" or "scaleMultiplier" or "tile" or "color" or "opacity" or "depth" or

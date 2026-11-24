@@ -45,12 +45,16 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         {
             try
             {
-                Generate(output, input.Left.IsEmpty ? "" : input.Left.Single(), input.Right);
+                string manifest = input.Left.IsEmpty ? "" : input.Left.Single();
+                string assetDefaults = FilterAssetDefaultsGenerator.Generate(manifest);
+                Generate(output, manifest, input.Right);
+                output.AddSource("GeneratedFilterAssetDefaults.g.cs", assetDefaults);
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 output.ReportDiagnostic(Diagnostic.Create(InvalidInput, Location.None, error.Message));
                 EmitRegistry(output, [], [], [], [], Array.Empty<string>());
+                output.AddSource("GeneratedFilterAssetDefaults.g.cs", FilterAssetDefaultsGenerator.Generate(""));
             }
         });
     }
@@ -76,6 +80,8 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         foreach (string line in manifest.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
         {
             string[] fields = line.Split('|');
+            if (fields.Length == 3 && fields[0] == "T")
+                continue; // The corresponding R entry still supplies the texture's logical name.
             if (fields.Length == 4 && fields[0] == "R")
             {
                 packaged.Add(fields[1]);
@@ -115,16 +121,20 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
             output.CancellationToken.ThrowIfCancellationRequested();
             string name = component.FullName;
             string[] required = FindResources(component).Distinct(StringComparer.Ordinal).ToArray();
+            string? inspectorShader = name == "CameraFilterPack_Colors_HSV" &&
+                !required.Any(item => item.EndsWith(".glsl", StringComparison.Ordinal))
+                ? "CameraFilterPack/Colors_HSV" : null;
+            if (inspectorShader is not null)
+                required = required.Append(inspectorShader + ".glsl").ToArray();
             string[] missing = required.Where(item => !packaged.Contains(
                 (item.EndsWith(".glsl", StringComparison.Ordinal) ? "Resources.Shaders.Filters/" : "Resources.Filters.") + item)).ToArray();
             string resourceStatus = required.Length == 0 ? "unresolved" :
                 missing.Length == 0 ? "packaged" : "missing " + string.Join(", ", missing);
             bool initial = InitialComponents.Contains(name);
-            bool hasUnassignedShader = name == "CameraFilterPack_Colors_HSV" && required.Length == 0;
             string[] shaders = required.Where(item => item.EndsWith(".glsl", StringComparison.Ordinal)).ToArray();
             // Keep single-shader components whose only missing resource is the shader:
             // the backend passes through when the original Shader.Find name is unresolved.
-            if (!initial && !hasUnassignedShader && (missing.Any(item => !item.EndsWith(".glsl", StringComparison.Ordinal)) ||
+            if (!initial && (missing.Any(item => !item.EndsWith(".glsl", StringComparison.Ordinal)) ||
                 shaders.Length != 1 || multiExport.Contains("Resources.Shaders.Filters/" + shaders[0])))
             {
                 coverage[name] = Report(name, "pending conversion", resourceStatus,
@@ -138,7 +148,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                     .DecompileTypeAsString(new FullTypeName(name));
                 ClassDeclarationSyntax declaration = SyntaxFactory.ParseCompilationUnit(source)
                     .DescendantNodes().OfType<ClassDeclarationSyntax>().Single();
-                string generated = Convert(component, declaration);
+                string generated = Convert(component, declaration, inspectorShader);
                 Match mapping = Regex.Match(mappings, @"filterToComp\.Add\(Filter\.(\w+), GetFilter<" + name + @">\(\)\)");
                 string? binding = null;
                 string detail = string.Join(", ", required);
@@ -326,7 +336,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         }
     }
 
-    private static string Convert(TypeDefinition component, ClassDeclarationSyntax declaration)
+    private static string Convert(TypeDefinition component, ClassDeclarationSyntax declaration, string? inspectorShader)
     {
         string name = declaration.Identifier.ValueText;
         var lifecycle = new HashSet<string>(StringComparer.Ordinal) { "Awake", "Start", "OnEnable", "Update", "OnRenderImage", "OnDisable" };
@@ -361,6 +371,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                 (Name: variable.Identifier.ValueText, Type: field.Declaration.Type.ToString()))).ToArray();
         string Has(string method) => methods.Any(item => item.Identifier.ValueText == method &&
             (item.Body?.Statements.Count != 0 || item.ExpressionBody is not null)) ? method + "();" : "";
+        string assignShader = inspectorShader is null ? "" : "SCShader = backend.FindShader(" + Quote(inspectorShader) + ");";
         string members = string.Join("\n", selected.Select(member =>
         {
             rewriter.Member = member is MethodDeclarationSyntax method ? method.Identifier.ValueText : member.Kind().ToString();
@@ -384,7 +395,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
                     this.initializeLifecycle = initializeLifecycle;
                     if (cameraDefaults)
                         CameraFilterDefaults.Apply(this, "{{name}}");
-                    if (initializeLifecycle) { {{Has("Awake")}} }
+                    if (initializeLifecycle) { {{assignShader}} {{Has("Awake")}} }
                 }
                 public void Enable() { {{Has("OnEnable")}} }
                 public void Render(IFilterTarget source, IFilterTarget destination)
@@ -493,6 +504,7 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         "UnityEngine.Material::SetColor(System.String, UnityEngine.Color)",
         "UnityEngine.Material::SetVector(System.String, UnityEngine.Vector4)",
         "UnityEngine.Material::SetTexture(System.String, UnityEngine.Texture)",
+        "UnityEngine.Vector4::.ctor(System.Single, System.Single)",
         "UnityEngine.Vector4::.ctor(System.Single, System.Single, System.Single, System.Single)",
         "UnityEngine.Vector2::.ctor(System.Single, System.Single)",
         "UnityEngine.Vector2::get_zero()",
@@ -534,6 +546,8 @@ public sealed class AdofaiFilterGenerator : IIncrementalGenerator
         "UnityEngine.Texture::get_width()",
         "UnityEngine.Texture::get_height()",
         "UnityEngine.Texture::set_filterMode(UnityEngine.FilterMode)",
+        "UnityEngine.RenderTexture::get_descriptor()",
+        "UnityEngine.RenderTexture::GetTemporary(UnityEngine.RenderTextureDescriptor)",
         "UnityEngine.RenderTexture::GetTemporary(System.Int32, System.Int32, System.Int32)",
         "UnityEngine.RenderTexture::ReleaseTemporary(UnityEngine.RenderTexture)",
         "UnityEngine.Graphics::Blit(UnityEngine.Texture, UnityEngine.RenderTexture)",

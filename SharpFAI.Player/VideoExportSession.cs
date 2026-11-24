@@ -208,7 +208,7 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             _renderer.Camera.MarkDirty();
         }
 
-        _renderer.Render();
+        _renderer.RenderAfterClear(background);
     }
 
     private float _exportZoom = 0.5f;

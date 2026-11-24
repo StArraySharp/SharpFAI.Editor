@@ -170,6 +170,76 @@ public class TestCameraMotion
         Assert.That(renderer.Camera.Rotation, Is.EqualTo(-30));
     }
 
+    [Test]
+    public void AutomaticAndOfflinePlaybackTriggerConditionalCameraAndSceneOnTheLandingFrame()
+    {
+        using var renderer = CreatePlayback(
+            """{"floor":1,"eventType":"SetConditionalEvents","perfectTag":"hit"}""",
+            """{"floor":1,"eventType":"MoveCamera","eventTag":"hit","zoom":300}""",
+            """{"floor":1,"eventType":"ScalePlanets","eventTag":"hit","targetPlanet":"All","scale":200}""",
+            """{"floor":1,"eventType":"Flash","eventTag":"hit","plane":"Foreground","startOpacity":90,"endOpacity":90}""",
+            """{"floor":1,"eventType":"MoveTrack","eventTag":"hit","positionOffset":[2,0]}""",
+            """{"floor":1,"eventType":"RepeatEvents","tag":"hit","repetitions":2,"interval":1}""",
+            """{"floor":2,"eventType":"SetConditionalEvents","perfectTag":"NONE"}""");
+        var times = Get<double[]>(renderer, "_entryTimes");
+        var scene = Get<SceneEffectTimeline>(renderer, "_sceneEffects");
+        var backdrop = Get<BackdropTimeline>(renderer, "_backdrop");
+        var track = Get<RuntimeTrackTimeline>(renderer, "_trackRuntime");
+        var camera = Get<CameraTimeline>(renderer, "_cameraTimeline");
+        Assert.That(camera.Triggers.Authored, Has.Length.EqualTo(1));
+
+        renderer.Play();
+        renderer.Tick(times[1] - .01);
+        Assert.That(renderer.Camera.Zoom, Is.EqualTo(.6f).Within(1e-6f));
+        float untriggeredFollowX = camera.Evaluate(times[1] + .25, 150).Position.X;
+        renderer.Tick(times[1]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(renderer.Camera.Zoom, Is.EqualTo(.3f).Within(1e-6f));
+            Assert.That(scene.PlanetScale(0, times[1]), Is.EqualTo(2f));
+            Assert.That(backdrop.FlashAt(times[1], foreground: true).W, Is.EqualTo(.9f));
+            Assert.That(track.TransformAt(1, times[1], false).Transform.Offset.X, Is.EqualTo(2 * renderer.TileSpacing));
+            Assert.That(camera.Evaluate(times[1] + .25, 150).Position.X - untriggeredFollowX,
+                Is.EqualTo(renderer.TileSpacing / 2).Within(.001f));
+        });
+
+        renderer.Restart();
+        Assert.That(camera.Triggers.Active, Is.Empty);
+        renderer.SeekForOfflineRender(times[3]);
+        Assert.That(camera.Triggers.Active, Has.Count.EqualTo(1));
+        Assert.That(backdrop.FlashAt(times[3], foreground: true).W, Is.EqualTo(.9f));
+        renderer.SeekForOfflineRender(times[1] - .01);
+        Assert.That(camera.Triggers.Active, Is.Empty);
+        Assert.That(backdrop.FlashAt(times[1], foreground: true).W, Is.Zero);
+    }
+
+    [Test]
+    public void ManualPlaybackTriggersOnlyTheMatchingJudgmentAndCheckpoint()
+    {
+        using var renderer = CreatePlayback(
+            """{"floor":0,"eventType":"SetConditionalEvents","perfectTag":"hit","hitTag":"near","lossTag":"loss","onCheckpointTag":"retry"}""",
+            """{"floor":0,"eventType":"MoveCamera","eventTag":"hit","zoom":300}""",
+            """{"floor":0,"eventType":"MoveCamera","eventTag":"near","angleOffset":90,"rotation":45}""",
+            """{"floor":0,"eventType":"MoveCamera","eventTag":"loss","angleOffset":90,"rotation":60}""",
+            """{"floor":0,"eventType":"MoveCamera","eventTag":"retry","angleOffset":90,"rotation":90}""");
+        var times = Get<double[]>(renderer, "_entryTimes");
+        var camera = Get<CameraTimeline>(renderer, "_cameraTimeline");
+
+        renderer.SetManualPlay(true);
+        Assert.That(camera.Triggers.Active, Is.Empty);
+        Hit(renderer, new HitRecord(1, HitMargin.EarlyPerfect, 0, .5, Accepted: true));
+        Assert.That(camera.Evaluate(.74, 150).Rotation, Is.EqualTo(15));
+        Assert.That(camera.Evaluate(.75, 150).Rotation, Is.EqualTo(45));
+        Assert.That(camera.Evaluate(.75, 150).Zoom, Is.Null);
+        Hit(renderer, new HitRecord(1, HitMargin.Miss, 0, 1, Failed: true));
+        Assert.That(camera.Evaluate(1, 150).Rotation, Is.EqualTo(60));
+
+        renderer.Pause();
+        renderer.SelectFloor(2);
+        Assert.That(camera.Triggers.Active, Has.Count.EqualTo(1));
+        Assert.That(camera.Evaluate(times[2], 150).Rotation, Is.EqualTo(90));
+    }
+
     [TestCase(-30f)]
     [TestCase(30f)]
     public void RotatedCameraScreenConversionsMatchTheRenderMatrix(float rotation)
@@ -235,8 +305,25 @@ public class TestCameraMotion
         Set(renderer, "_floors", floors);
         Set(renderer, "_settings", settings);
         Set(renderer, "_manualTrack", new ManualTrack(floors, timeline, events));
+        var camera = CameraTimeline.Build(events, floors, timeline, settings, Floor.length * 2f);
+        if (ImageDecorationTimeline.Build(events, floors, timeline.EntryTimes, timeline.FloorBpms,
+                null, [], CancellationToken.None) is { } triggers)
+        {
+            var backdrop = BackdropTimeline.Build(settings, events, floors, timeline.EntryTimes, timeline.FloorBpms, null, []);
+            var scene = SceneEffectTimeline.Build(events, floors, timeline.EntryTimes, timeline.FloorBpms);
+            var states = FloorTrackStateResolver.Resolve(level, floors, events, false, timeline.FloorBpms);
+            var track = new RuntimeTrackTimeline(events, floors, states, timeline.EntryTimes, timeline.Pitch, timeline.FloorBpms);
+            camera = LevelRenderer.BuildCameraTimeline(events, floors, timeline, settings, Floor.length * 2f, states);
+            triggers.BindTimedEffects(floors, timeline.FloorBpms, null, null, camera, backdrop, scene, track);
+            Set(renderer, "_imageDecorations", triggers);
+            Set(renderer, "_backdrop", backdrop);
+            if (scene is not null)
+                Set(renderer, "_sceneEffects", scene);
+            Set(renderer, "_trackRuntime", track);
+            Set(renderer, "_trackStates", states);
+        }
         typeof(LevelRenderer).GetField("_cameraTimeline", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(renderer, CameraTimeline.Build(events, floors, timeline, settings, Floor.length * 2f));
+            .SetValue(renderer, camera);
         typeof(LevelRenderer).GetMethod("ApplyTimelineData", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(renderer, [timeline]);
         return renderer;

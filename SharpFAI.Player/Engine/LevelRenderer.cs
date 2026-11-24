@@ -148,8 +148,13 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     private int _componentPrewarmIndex;
     private bool _schedulesPrewarmed;
     private bool _scenePrewarmed;
+    private readonly Queue<BackdropTimeline.ImageState> _backgroundPrewarm = [];
     private int _staticTextureIndex;
+    private (string Image, double Start)[] _textureWarmupOrder = [];
     private long _prewarmedTextureBytes;
+    private long _reservedLargeTextureBytes;
+    private long _texturePrewarmBudget;
+    private readonly HashSet<string> _reservedLargeTextures = new(StringComparer.Ordinal);
     private int _filterCamerasToPrewarm;
     private bool _prewarmBloom;
     private bool _prewarmMotionBlur;
@@ -323,6 +328,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public required List<Floor> Floors { get; init; }
         public Vector2[]? FloorPositionRemainders { get; init; }
         public FloorGeometry? Geometry { get; init; }
+        public IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? FloorTextures { get; init; }
         public VisibleFloorIndex? Visibility { get; init; }
         public Mesh? Guides { get; init; }
 
@@ -339,6 +345,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public Filters.FilterTimeline? BackgroundFilterTimeline { get; init; }
         public SceneEffectTimeline? SceneEffects { get; init; }
         public ImageDecorationTimeline? Decorations { get; init; }
+        public required int DecorationTexturePercent { get; init; }
         public required ManualTrack ManualTrack { get; init; }
         public string? MusicPath { get; init; }
         public DecodedAudio? Music { get; init; }

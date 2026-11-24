@@ -1,4 +1,3 @@
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SharpFAI.Player.Engine;
 using SharpFAI.Player.Engine.Events;
@@ -16,8 +15,9 @@ internal sealed class EditorDocument
     private readonly List<Edit> _edits = [];
     private int _revision;
     private int _savedRevision;
+    private const string TimeSignatureKey = "sharpFaiTimeSignatures";
     private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null,
-        object? Group = null, bool SettingsOnly = false);
+        object? Group = null, bool SettingsOnly = false, bool EditorOnly = false);
     private int _lastChartChange;
     private readonly Dictionary<JObject, int> _effectChanges = new(ReferenceEqualityComparer.Instance);
     private int _lastFullPlaybackChange;
@@ -32,6 +32,7 @@ internal sealed class EditorDocument
         if (_level.root["settings"] is not JObject)
             _level.root["settings"] = new JObject();
         Settings = (JObject)_level.root["settings"]!;
+        TimeSignatures = EditorTimeSignatures.Read(_level.root[TimeSignatureKey]);
         foreach (JObject action in _actions.OfType<JObject>())
         {
             if (Type(action) == "SetFilterAdvanced" && action["filterProperties"] is JValue { Type: JTokenType.String } encoded &&
@@ -46,7 +47,9 @@ internal sealed class EditorDocument
     public bool CanUndo => _revision > 0;
     public bool CanRedo => _revision < _edits.Count;
     public int ChangeVersion { get; private set; }
+    public int PlaybackVersion { get; private set; }
     public JObject Settings { get; }
+    public EditorTimeSignatures TimeSignatures { get; private set; }
     public JArray Decorations => _decorations;
     public int LastFloor => _angles.Count;
     public double IncomingAngle(int floor)
@@ -70,6 +73,26 @@ internal sealed class EditorDocument
 
     public static int Floor(JObject value) => value.Value<int?>("floor") ?? 0;
     public static string Type(JObject value) => value.Value<string>("eventType") ?? "";
+
+    public void SetTimeSignature(double beat, TimeSignature? signature)
+    {
+        var before = TimeSignatures;
+        var after = before.WithChange(beat, signature);
+        if (before.Changes.SequenceEqual(after.Changes))
+            return;
+        JToken? previous = _level.root[TimeSignatureKey]?.DeepClone();
+        JToken? next = after.Write();
+        Apply(new(() => Write(after, next), () => Write(before, previous), Events: false, EditorOnly: true));
+
+        void Write(EditorTimeSignatures value, JToken? data)
+        {
+            TimeSignatures = value;
+            if (data is null)
+                _level.root.Remove(TimeSignatureKey);
+            else
+                _level.root[TimeSignatureKey] = data.DeepClone();
+        }
+    }
 
     public void Set(JObject target, string name, JToken? value, object? group = null)
     {
@@ -206,17 +229,57 @@ internal sealed class EditorDocument
             }, true));
     }
 
-    public void TransformTiles(int first, int last, Func<double, double> transform)
+    public void TransformTiles(int first, int last, Func<double, double> transform, TrackTransform? eventTransform = null)
     {
         int start = Math.Max(0, first - 1);
         var changes = _angles.Skip(start).Take(last - start).OfType<JValue>()
             .Select(item => (Item: item, Angle: item.Value<double>())).Where(entry => entry.Angle != 999)
             .Select(entry => (entry.Item, Original: entry.Angle, Updated: (transform(entry.Angle) % 360 + 360) % 360))
             .Where(entry => entry.Original != entry.Updated).ToArray();
-        if (changes.Length != 0)
-            Apply(new(
-                () => { foreach (var (item, _, angle) in changes) item.Value = angle; },
-                () => { foreach (var (item, angle, _) in changes) item.Value = angle; }, false));
+        var eventChanges = eventTransform is { } operation
+            ? TrackEventTransforms(first, last, operation).ToArray() : [];
+        if (changes.Length != 0 || eventChanges.Length != 0)
+            Apply(new(() => Write(true), () => Write(false), false));
+
+        void Write(bool redo)
+        {
+            foreach (var (item, original, updated) in changes)
+                item.Value = redo ? updated : original;
+            foreach (var (item, key, original, updated) in eventChanges)
+                item[key] = redo ? updated : original;
+        }
+    }
+
+    private IEnumerable<(JObject Item, string Key, JArray Original, JArray Updated)> TrackEventTransforms(
+        int first, int last, TrackTransform transform)
+    {
+        for (int floor = first; floor <= last; floor++)
+        foreach (JObject item in Events(floor))
+        {
+            string? key = Type(item) switch
+            {
+                "MoveTrack" or "PositionTrack" => "positionOffset",
+                "MoveCamera" => "position",
+                _ => null,
+            };
+            if (key is null || item[key] is not JArray { Count: 2 } vector ||
+                !TryReadAxis(vector[0], out double? x) || !TryReadAxis(vector[1], out double? y))
+                continue;
+            var next = transform.Position(x, y);
+            if (next != (x, y))
+                yield return (item, key, vector, new JArray(new JValue(next.X), new JValue(next.Y)));
+        }
+
+        static bool TryReadAxis(JToken? token, out double? value)
+        {
+            value = null;
+            if (token?.Type == JTokenType.Null)
+                return true;
+            if (token?.Type is not (JTokenType.Float or JTokenType.Integer))
+                return false;
+            value = token.Value<double>();
+            return double.IsFinite(value.Value);
+        }
     }
 
     public bool CanAddEvent(int floor, string type) =>
@@ -334,22 +397,12 @@ internal sealed class EditorDocument
     public void Save(string path)
     {
         string destination = System.IO.Path.GetFullPath(path);
-        string temp = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (StreamWriter writer = new(temp))
-            using (JsonTextWriter json = new(writer) { Formatting = Formatting.Indented })
-                _level.root.WriteTo(json);
-            File.Move(temp, destination, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temp))
-                File.Delete(temp);
-        }
+        EditorFileStorage.WriteChart(destination, _level.root, overwrite: true);
         Path = destination;
         _savedRevision = _revision;
     }
+
+    public JObject CaptureBackup() => (JObject)_level.root.DeepClone();
 
     public string PlaybackPath => Path ?? System.IO.Path.Combine(Environment.CurrentDirectory, "untitled.adofai");
     public Level SnapshotForPlayback() => _level.CreateSnapshot(PlaybackPath);
@@ -371,7 +424,7 @@ internal sealed class EditorDocument
 
     public void ForgetEffectChangesThrough(int version)
     {
-        if (version == ChangeVersion)
+        if (version == PlaybackVersion)
             _effectChanges.Clear();
         else
             foreach (var item in _effectChanges.Where(change => change.Value <= version).Select(change => change.Key).ToArray())
@@ -452,6 +505,8 @@ internal sealed class EditorDocument
     private void Refresh(Edit edit)
     {
         ChangeVersion++;
+        if (edit.EditorOnly) return;
+        PlaybackVersion = ChangeVersion;
         if (!edit.SettingsOnly) _lastChartChange = ChangeVersion;
         if (edit.Effect is { } effect)
             _effectChanges[effect] = ChangeVersion;

@@ -37,6 +37,7 @@ internal static class L
         "启动中" => T("PhaseLoading"), "解析关卡" => T("PhaseParse"), "生成砖块" => T("PhaseFloors"),
         "计算时间轴" => T("PhaseTimeline"), "解码音频" => T("PhaseAudio"), "构建装饰与背景" => T("PhaseDecorations"),
         "构建可见砖块索引" => T("PhaseVisibility"), "烘焙网格" => T("PhaseBaking"), "上传 GPU" => T("PhaseUpload"),
+        "解码轨道纹理" => T("PhaseTrackTextures"),
         _ => phase
     };
 }

@@ -66,6 +66,35 @@ public class TestLevelPlaybackSettings
     }
 
     [Test]
+    public void NewLevelsHaveBlackBehindBlueTilesAndDefaultShapes()
+    {
+        var settings = LevelPlaybackSettings.Read(Level.CreateNewLevel());
+        Assert.That(settings.Background, Is.EqualTo(new Vector4(0, 0, 0, 1)));
+        Assert.That(settings.PatternColor, Is.EqualTo(new Vector4(16, 17, 33, 255) / 255f));
+        Assert.That(settings.ShowPatternTiles, Is.True);
+        Assert.That(settings.PatternShape, Is.EqualTo(BackgroundShape.Default));
+    }
+
+    [TestCase(true, true, "Disabled", "", true, true)]
+    [TestCase(true, false, "SingleColor", "", false, true)]
+    [TestCase(true, false, "Disabled", "", false, false)]
+    [TestCase(false, true, "Default", "", false, false)]
+    [TestCase(true, true, "Default", "missing.png", true, false)]
+    public void DefaultBackgroundLayersCanBeConfiguredIndependently(bool showDefault, bool showTiles, string shape,
+        string image, bool drawsTiles, bool drawsPattern)
+    {
+        var settings = LevelPlaybackSettings.Read(new JObject
+        {
+            ["showDefaultBGIfNoImage"] = showDefault, ["showDefaultBGTile"] = showTiles,
+            ["defaultBGShapeType"] = shape, ["defaultBGShapeColor"] = "112233", ["bgImage"] = image,
+        });
+        Assert.That(settings.ShowPatternTiles, Is.EqualTo(drawsTiles));
+        Assert.That(settings.PatternShape.ToString(), Is.EqualTo(showDefault ? shape : "Disabled"));
+        Assert.That(settings.PatternAccent, Is.EqualTo(new Vector4(0x11, 0x22, 0x33, 255) / 255f));
+        Assert.That(new BackdropTimeline.ImageState(settings, null).ShowsDefaultPattern, Is.EqualTo(drawsPattern));
+    }
+
+    [Test]
     public void ExportMixUsesTheSamePlaybackRateAsVideoFrames()
     {
         byte[] pcm = new byte[12];

@@ -18,6 +18,7 @@ internal sealed class DecorationFrameState
     private int[] _drawSlots = [];
     private ImageDecorationTimeline? _timeline;
     private bool _collectEditorQuads;
+    private DecorationKinds _visibleKinds;
     private double _time = double.NegativeInfinity;
 
     public (bool X, bool Y) Repeat(string image)
@@ -26,12 +27,15 @@ internal sealed class DecorationFrameState
         return (counts.X > 0, counts.Y > 0);
     }
 
-    public IReadOnlyList<Drawable> Update(ImageDecorationTimeline timeline, double time, bool collectEditorQuads)
+    public List<Drawable> Update(ImageDecorationTimeline timeline, double time, bool collectEditorQuads,
+        DecorationKinds visibleKinds = DecorationKinds.All)
     {
-        if (!ReferenceEquals(timeline, _timeline) || time < _time || collectEditorQuads != _collectEditorQuads)
+        if (!ReferenceEquals(timeline, _timeline) || time < _time || collectEditorQuads != _collectEditorQuads ||
+            visibleKinds != _visibleKinds)
         {
             _timeline = timeline;
             _collectEditorQuads = collectEditorQuads;
+            _visibleKinds = visibleKinds;
             _drawables.Clear();
             _pending.Clear();
             _tweens.Clear();
@@ -47,7 +51,7 @@ internal sealed class DecorationFrameState
                 _drawSlots = new int[timeline.Items.Count];
             Array.Fill(_drawSlots, -1, 0, timeline.Items.Count);
             foreach (var item in timeline.Items)
-                if (Sample(item, timeline, time))
+                if ((item.Kind & visibleKinds) != 0 && Sample(item, timeline, time))
                     _tweens.Add(new Pending(item, item.TimingVersion));
         }
         else if (time != _time || timeline.ChangedItems.Count != 0)
@@ -68,7 +72,7 @@ internal sealed class DecorationFrameState
                     _tweens.Add(pending);
             }
             foreach (var item in timeline.ChangedItems)
-                if (Sample(item, timeline, time))
+                if ((item.Kind & visibleKinds) != 0 && Sample(item, timeline, time))
                     _tweens.Add(new Pending(item, item.TimingVersion));
 
             if (_pending.Count > timeline.Items.Count + 4096)
@@ -91,10 +95,11 @@ internal sealed class DecorationFrameState
         }
         bool mask = pose.Masking == DecorationMasking.Mask;
         if (pose.Visible && (!(pose.Opacity <= 0) || pose.UsesDepthMask(timeline.LegacyMasks)) &&
-            (mask || _collectEditorQuads || pose.Tint.W != 0f) &&
+            (mask || _collectEditorQuads || pose.Tint.W != 0f ||
+             pose.ObjectFloor is { ColorMode: not TrackColorMode.Single } or { GlowEnabled: true }) &&
             timeline.Images.TryGetValue(pose.Image, out var image))
         {
-            var drawable = new Drawable(item, pose, new Vector2(image.Width, image.Height));
+            var drawable = new Drawable(item, pose, new Vector2(image.LayoutWidth, image.LayoutHeight));
             int slot = _drawSlots[item.Index];
             if (slot < 0)
             {

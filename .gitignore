@@ -1,18 +1,42 @@
+# .NET build, publish, and test output
 bin/
 obj/
 publish/
-*.user
+/artifacts/
+TestResults/
+*.binlog
+*.trx
+*.coverage
+*.coveragexml
+*.nupkg
+*.snupkg
+
+# IDE and user settings
+.vs/
 .vscode/
 .idea/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
 
-/docs/
+# Local game data and tools
+/docs/*
+!/docs/build.md
 /GameFiles/*
 !/GameFiles/README.md
 /testlevels/
 /tools/
 /tmp-compare/
-**/TestResults/
-.vs/
-debug.log
 /snapshot.ps1
 /AGENTS.md
+
+# Tool logs
+debug.log
+AssetRipperPatcher.Headless.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

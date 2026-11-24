@@ -13,10 +13,12 @@ public sealed class TestGeneratedFilters
 {
     [TestCase("Distortion_Half_Sphere", "Distortion_float_Sphere")]
     [TestCase("Drawing_Halftone", "Drawing_floattone")]
-    public void UnresolvedOriginalShaderNamesAreNotAliased(string component, string serialized)
+    public void PreparedShadersUseTheNamesExpectedByTheirComponents(string component, string serialized)
     {
-        if (GeneratedFilterRegistry.Coverage.Length == 0)
-            Assert.Ignore("Build with AdofaiGameDir to exercise generated filters.");
+        byte[]? polarScreen = EmbeddedAssets.Read("Resources.Shaders.Filters/ADOFAI/PolarScreen.glsl");
+        if (polarScreen is null || !System.Text.Encoding.UTF8.GetString(polarScreen)
+                .StartsWith(FilterShaderCompatibility.HlslccDxbcHeader, StringComparison.Ordinal))
+            Assert.Ignore("Build with prepared DXBC shader resources to verify their names.");
         string name = "CameraFilterPack_" + component;
         string shader = "CameraFilterPack/" + component;
         var resources = typeof(PlayerWindow).Assembly.GetManifestResourceNames();
@@ -24,8 +26,34 @@ public sealed class TestGeneratedFilters
         {
             Assert.That(GeneratedFilterRegistry.Factories.ContainsKey(name), Is.True);
             Assert.That(GeneratedFilterRegistry.ShaderNames[name], Is.EqualTo(shader));
-            Assert.That(resources, Does.Not.Contain("Resources.Shaders.Filters/" + shader + ".glsl"));
-            Assert.That(resources, Does.Contain("Resources.Shaders.Filters/CameraFilterPack/" + serialized + ".glsl"));
+            Assert.That(resources, Does.Contain("Resources.Shaders.Filters/" + shader + ".glsl"));
+            Assert.That(resources, Does.Not.Contain("Resources.Shaders.Filters/CameraFilterPack/" + serialized + ".glsl"));
+            Assert.That(GeneratedFilterAssetDefaults.Shaders.ContainsKey(shader), Is.True);
+        });
+    }
+
+    [Test]
+    public void HsvBindsItsShaderAndPassesTheColorControlsToIt()
+    {
+        if (GeneratedFilterRegistry.Coverage.Length == 0)
+            Assert.Ignore("Build with ADOFAI assemblies to exercise generated filters.");
+        const string component = "CameraFilterPack_Colors_HSV";
+        const string shader = "CameraFilterPack/Colors_HSV";
+        var backend = new RecordingBackend();
+        using var filter = GeneratedFilterRegistry.Factories[component](backend);
+        filter.SetParameter("_HueShift", new(35, 0, 0, 0));
+        filter.SetParameter("_Saturation", new(.8f, 0, 0, 0));
+        filter.SetParameter("_ValueBrightness", new(1.2f, 0, 0, 0));
+        filter.Enable();
+        filter.Render(new Target(128, 96), new Target(128, 96));
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratedFilterRegistry.ShaderNames[component], Is.EqualTo(shader));
+            Assert.That(backend.Resources, Is.EqualTo(new[] { shader }));
+            Assert.That(backend.Draws.Single().Material, Is.True);
+            Assert.That(backend.Floats["_HueShift"], Is.EqualTo(35f));
+            Assert.That(backend.Floats["_Sat"], Is.EqualTo(.8f));
+            Assert.That(backend.Floats["_Val"], Is.EqualTo(1.2f));
         });
     }
 
@@ -380,7 +408,7 @@ public sealed class TestGeneratedFilters
         using var front = FilterTimeline.Build(events, floors, times, bpm, false);
         using var filters = FilterTimeline.Build(events, floors, times, bpm, false, background: true)!;
         var triggers = ImageDecorationTimeline.Build(events, floors, times, bpm, null, [], CancellationToken.None)!;
-        triggers.BindCameraFilters(floors, bpm, front, filters);
+        triggers.BindTimedEffects(floors, bpm, front, filters);
         var backend = new RecordingBackend();
         Assert.That(front, Is.Null);
         Assert.That(filters.HasDueEvent(1), Is.False);

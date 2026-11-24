@@ -1,6 +1,4 @@
 using System.Numerics;
-using System.Text;
-using System.Text.RegularExpressions;
 using OpenTK.Graphics.OpenGL4;
 using SharpFAI.Player.Engine.ShaderGen;
 using Thrust.Graphics;
@@ -26,8 +24,18 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         public readonly Dictionary<string, int> Ints = new(StringComparer.Ordinal);
         public readonly Dictionary<string, Vector4> Vectors = new(StringComparer.Ordinal);
         public readonly Dictionary<string, IFilterTexture?> Textures = new(StringComparer.Ordinal);
-        public void SetFloat(string name, float value) => Floats[name] = value;
-        public void SetInt(string name, int value) => Ints[name] = value;
+        public void SetFloat(string name, float value)
+        {
+            Ints.Remove(name);
+            Floats[name] = value;
+        }
+
+        public void SetInt(string name, int value)
+        {
+            Floats.Remove(name);
+            Ints[name] = value;
+        }
+
         public void SetVector(string name, Vector4 value) => Vectors[name] = value;
         public void SetTexture(string name, IFilterTexture? value) => Textures[name] = value;
     }
@@ -37,6 +45,7 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         public int Handle { get; } = handle;
         public int VertexArray { get; } = vertexArray;
         public int ColorAttribute { get; } = colorAttribute;
+        private readonly Dictionary<string, ActiveUniformType> _uniformTypes = ReadUniformTypes(handle);
         private readonly Dictionary<string, int> _locations = new(StringComparer.Ordinal);
         private readonly Dictionary<int, float> _floats = [];
         private readonly Dictionary<int, int> _ints = [];
@@ -45,7 +54,20 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         public void SetFloat(string name, float value)
         {
             int location = Location(name);
-            if (location < 0 || _floats.TryGetValue(location, out float previous) && previous.Equals(value))
+            if (location < 0)
+                return;
+            switch (_uniformTypes[name])
+            {
+                case ActiveUniformType.Float: SetFloat(location, value); break;
+                case ActiveUniformType.Int: SetInt(location, (int)value); break;
+                case ActiveUniformType.Bool: SetInt(location, value != 0f ? 1 : 0); break;
+                case ActiveUniformType.UnsignedInt: SetUnsignedInt(location, (uint)value); break;
+            }
+        }
+
+        private void SetFloat(int location, float value)
+        {
+            if (_floats.TryGetValue(location, out float previous) && previous.Equals(value))
                 return;
             GL.Uniform1(location, value);
             _floats[location] = value;
@@ -54,26 +76,85 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         public void SetInt(string name, int value)
         {
             int location = Location(name);
-            if (location < 0 || _ints.TryGetValue(location, out int previous) && previous == value)
+            if (location < 0)
+                return;
+            switch (_uniformTypes[name])
+            {
+                case ActiveUniformType.Float: SetFloat(location, value); break;
+                case ActiveUniformType.Int:
+                case ActiveUniformType.Bool:
+                case ActiveUniformType.Sampler2D:
+                case ActiveUniformType.Sampler3D:
+                    SetInt(location, value);
+                    break;
+                case ActiveUniformType.UnsignedInt: SetUnsignedInt(location, (uint)value); break;
+            }
+        }
+
+        private void SetInt(int location, int value)
+        {
+            if (_ints.TryGetValue(location, out int previous) && previous == value)
                 return;
             GL.Uniform1(location, value);
             _ints[location] = value;
         }
 
+        private void SetUnsignedInt(int location, uint value)
+        {
+            int bits = unchecked((int)value);
+            if (_ints.TryGetValue(location, out int previous) && previous == bits)
+                return;
+            GL.Uniform1(location, value);
+            _ints[location] = bits;
+        }
+
         public void SetVector(string name, Vector4 value)
         {
             int location = Location(name);
-            if (location < 0 || _vectors.TryGetValue(location, out Vector4 previous) && previous.Equals(value))
+            if (location < 0)
                 return;
-            GL.Uniform4(location, value.X, value.Y, value.Z, value.W);
+            ActiveUniformType type = _uniformTypes[name];
+            if (type == ActiveUniformType.Float)
+            {
+                SetFloat(location, value.X);
+                return;
+            }
+            if (_vectors.TryGetValue(location, out Vector4 previous) && previous.Equals(value))
+                return;
+            switch (type)
+            {
+                case ActiveUniformType.FloatVec2: GL.Uniform2(location, value.X, value.Y); break;
+                case ActiveUniformType.FloatVec3: GL.Uniform3(location, value.X, value.Y, value.Z); break;
+                case ActiveUniformType.FloatVec4: GL.Uniform4(location, value.X, value.Y, value.Z, value.W); break;
+                default: return;
+            }
             _vectors[location] = value;
         }
 
         public int Location(string name)
         {
             if (!_locations.TryGetValue(name, out int location))
-                _locations.Add(name, location = GL.GetUniformLocation(Handle, name));
+                _locations.Add(name, location = _uniformTypes.ContainsKey(name) ? GL.GetUniformLocation(Handle, name) : -1);
             return location;
+        }
+
+        private static Dictionary<string, ActiveUniformType> ReadUniformTypes(int handle)
+        {
+            var result = new Dictionary<string, ActiveUniformType>(StringComparer.Ordinal);
+            GL.GetProgram(handle, GetProgramParameterName.ActiveUniforms, out int count);
+            for (int index = 0; index < count; index++)
+            {
+                string name = GL.GetActiveUniform(handle, index, out int elements, out ActiveUniformType type);
+                result[name] = type;
+                int element = name.IndexOf("[0]", StringComparison.Ordinal);
+                if (element < 0)
+                    continue;
+                if (element + 3 == name.Length)
+                    result[name[..element]] = type;
+                for (int i = 1; i < elements; i++)
+                    result[name[..element] + $"[{i}]" + name[(element + 3)..]] = type;
+            }
+            return result;
         }
     }
 
@@ -129,15 +210,18 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             string path = Path.Combine(AppContext.BaseDirectory, "Resources", "Filters", filename);
             try
             {
-                byte[]? bytes = File.Exists(path) ? File.ReadAllBytes(path) : EmbeddedAssets.Read("Resources.Filters." + filename);
+                bool loose = File.Exists(path);
+                string resourceName = "Resources.Filters." + filename;
+                byte[]? bytes = loose ? File.ReadAllBytes(path) :
+                    EmbeddedAssets.Read(GeneratedFilterAssetDefaults.TextureAliases.GetValueOrDefault(resourceName, resourceName));
                 if (bytes is not null)
                 {
                     var image = ImageDecoder.Decode(bytes);
                     ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
-                    string metadata = File.Exists(path)
-                        ? File.Exists(path + ".meta") ? File.ReadAllText(path + ".meta") : ""
-                        : Encoding.UTF8.GetString(EmbeddedAssets.Read("Resources.Filters." + filename + ".meta") ?? []);
-                    texture = new Texture(UploadTexture(image, metadata, point: name == "MotionBlurJitter"), image.Width, image.Height);
+                    var sampling = loose && File.Exists(path + ".meta")
+                        ? FilterTextureSampling.Parse(File.ReadAllText(path + ".meta"))
+                        : GeneratedFilterAssetDefaults.Textures.GetValueOrDefault(filename, FilterTextureSampling.Default);
+                    texture = new Texture(UploadTexture(image, sampling, point: name == "MotionBlurJitter"), image.Width, image.Height);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
@@ -152,16 +236,10 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             _textureErrors.GetValueOrDefault(name, "missing"));
     }
 
-    private static int UploadTexture(ImageDecoder.RgbaImage image, string metadata, bool point)
+    private static int UploadTexture(ImageDecoder.RgbaImage image, FilterTextureSampling sampling, bool point)
     {
-        int Read(string name, int fallback)
-        {
-            var value = Regex.Match(metadata, @"(?m)^\s*" + name + @":[ \t]*(-?\d+)");
-            return value.Success && int.TryParse(value.Groups[1].Value, out int number) ? number : fallback;
-        }
-
-        bool mipmaps = Read("enableMipMap", 1) != 0;
-        int mode = point ? 0 : Read("filterMode", 1);
+        bool mipmaps = sampling.Mipmaps;
+        int mode = point ? 0 : sampling.FilterMode;
         int texture = ImageDecoder.Upload(image, generateMipmaps: mipmaps);
         GL.BindTexture(TextureTarget.Texture2D, texture);
         var min = (mode, mipmaps) switch
@@ -175,8 +253,8 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)min);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
             (int)(mode == 0 ? TextureMagFilter.Nearest : TextureMagFilter.Linear));
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)Wrap(Read("wrapU", 0)));
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)Wrap(Read("wrapV", 0)));
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)Wrap(sampling.WrapU));
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)Wrap(sampling.WrapV));
         return texture;
     }
 
@@ -194,7 +272,7 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         if (!_shaderDefaults.TryGetValue(name, out ShaderLabDefaults? defaults))
         {
             string? source = ShaderLibrary.TryLoad("Filters/" + name + ".shaderlab");
-            defaults = source is null ? null : ShaderLabDefaults.Parse(source);
+            defaults = source is null ? GeneratedFilterAssetDefaults.Shaders.GetValueOrDefault(name) : ShaderLabDefaults.Parse(source);
             _shaderDefaults.Add(name, defaults);
         }
         defaults?.Apply(material, BuiltInTexture);
@@ -247,6 +325,12 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
 
     public IFilterTarget RentTarget(int width, int height, int depthBits)
         => RentTarget(width, height, depthBits, halfFloat: false);
+
+    public IFilterTarget RentTargetLike(IFilterTarget source)
+    {
+        var target = (Target)source;
+        return RentTarget(target.Width, target.Height, target.Depth, target.HalfFloat);
+    }
 
     internal IFilterTarget RentHalfTarget(int width, int height)
         => RentTarget(width, height, depthBits: 0, halfFloat: true);
@@ -566,7 +650,8 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
     private Program LinkUnityFullscreen(string shader, string original)
     {
         int handle = SpriteRenderer.LinkSources(UnityShaderAdapter.ImportExportedVertex(original),
-            FilterShaderCompatibility.AdaptFragment(shader, UnityShaderAdapter.ImportFullscreenFragment(original)));
+            FilterShaderCompatibility.AdaptFragment(shader, UnityShaderAdapter.ImportFullscreenFragment(original),
+                original.StartsWith(FilterShaderCompatibility.HlslccDxbcHeader, StringComparison.Ordinal)));
         int vertexArray = GL.GenVertexArray();
         if (_unityQuad == 0)
         {
@@ -671,8 +756,8 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             DeleteTarget(background);
     }
 
-    public void Draw(double time, double shaderTime, float delta, IReadOnlyList<FilterTimeline.Entry> entries,
-        Action drawScene, bool background = false)
+    public unsafe void Draw(double time, double shaderTime, float delta, IReadOnlyList<FilterTimeline.Entry> entries,
+        Action drawScene, bool background = false, Vector4? clearSource = null)
     {
         using var state = new SavedState();
         Target screen = new(state.Framebuffer, 0, state.Width, state.Height, X: state.X, Y: state.Y);
@@ -694,12 +779,20 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             Bind(first);
             GL.Disable(EnableCap.ScissorTest);
             GL.ColorMask(true, true, true, true);
-            // Both cameras render on top of the color left by the preceding camera.
-            int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
-            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, screen.Framebuffer);
-            GL.BlitFramebuffer(screen.X, screen.Y, screen.X + screen.Width, screen.Y + screen.Height,
-                0, 0, first.Width, first.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
-            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+            if (clearSource is { } color)
+            {
+                float* rgba = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
+                GL.ClearBuffer(ClearBuffer.Color, 0, rgba);
+            }
+            else
+            {
+                // Preserve preceding cameras and history already present in the viewport.
+                int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, screen.Framebuffer);
+                GL.BlitFramebuffer(screen.X, screen.Y, screen.X + screen.Width, screen.Y + screen.Height,
+                    0, 0, first.Width, first.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+            }
             drawScene();
             Target input = first;
             bool succeeded = true;

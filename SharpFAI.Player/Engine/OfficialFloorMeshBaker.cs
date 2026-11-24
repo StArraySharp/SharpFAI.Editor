@@ -90,7 +90,7 @@ internal static unsafe class OfficialFloorMeshBaker
         public FloorMeshResult Build() => new FloorMesh(Entry, Exit, Width, Length, Curvature, Sprite).Generate();
     }
 
-    internal sealed class BakeCache
+    internal sealed class BakeCache(int shapeCacheLimit = ShapeCacheLimit)
     {
         private readonly ConcurrentDictionary<Shape, FloorMeshResult> _shapes = new();
         private readonly ConcurrentDictionary<TrackStyleInfo, (FloorTexture Edge, FloorTexture Perlin, FloorTexture Tile)>
@@ -125,7 +125,7 @@ internal static unsafe class OfficialFloorMeshBaker
             {
                 return result;
             }
-            return _shapes.Count < ShapeCacheLimit
+            return _shapes.Count < shapeCacheLimit
                 ? _shapes.GetOrAdd(shape, static key => key.Build()) : shape.Build();
         }
     }
@@ -141,7 +141,8 @@ internal static unsafe class OfficialFloorMeshBaker
         int[]? floorIndices = null,
         BakeCache? cache = null,
         bool computeBounds = true,
-        FloorShapeLibrary? shapes = null)
+        FloorShapeLibrary? shapes = null,
+        (FloorTexture Icon, FloorTexture Outline)? iconTextures = null)
     {
         FloorTextureBatchBuilder batches = new(textureSlots);
         int count = floorIndices?.Length ?? floors.Count;
@@ -231,9 +232,10 @@ internal static unsafe class OfficialFloorMeshBaker
                     textures[1] = perlin;
                     string? custom = style.Sprite ? null : ResolveTexture(material.TextureName, levelDirectory, cache.TexturePaths);
                     textures[2] = custom is not null ? new FloorTexture(custom, Wrap: FloorTextureWrap.Repeat, External: true) : tile;
-                    textures[3] = FloorIconTextures.Resolve(floor, material);
+                    textures[3] = iconTextures?.Icon ?? FloorIconTextures.Resolve(floor, material);
                     FloorIcon? icon = material.HideIcon ? null : material.Icon ?? floor.icon;
-                    textures[4] = FloorIconTextures.ResolveOutline(textures[3], icon, levelDirectory, cache.OutlineTextures);
+                    textures[4] = iconTextures?.Outline ??
+                        FloorIconTextures.ResolveOutline(textures[3], icon, levelDirectory, cache.OutlineTextures);
                     batches.AddFloor(textures, slots, stream?.IndexCount ?? mesh.IndexCount);
                     baked[variant] = new FloorVariant(material, result.Collider, batches.Batches.Count, template.Radius);
 

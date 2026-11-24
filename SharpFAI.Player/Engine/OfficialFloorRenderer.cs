@@ -10,6 +10,8 @@ namespace SharpFAI.Player.Engine;
 public readonly record struct FloorRenderTransform(Vector2 Offset, Vector2 Scale, float Rotation);
 
 internal readonly record struct FloorAppearance(Vector4 Color, float Opacity, float Glow = 0);
+internal readonly record struct FloorDecorationDraw(Vector4 Color, float Opacity, float IconAngle, bool IconFlipped,
+    int Mask, int MaskMode);
 
 internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int textureSlots,
     OfficialFloorRenderer? sharedPipeline = null) : IDisposable
@@ -50,6 +52,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     private int _textureRatio;
     private int _forceIconOutline;
     private int _streamFloors;
+    private int _decorationColor;
+    private int _decorationParams;
+    private int _decorationMaskMode;
     private FloorTrackState[]? _materialStates;
     private int _materialRevision;
     private readonly List<(int Start, int End)> _visibleIndexRanges = [];
@@ -59,6 +64,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
     public int BatchCount => _batches.Length;
     public int FloorCount => _geometry?.Centers.Length ?? 0;
+    public int TextureSlots => textureSlots;
     public bool HasGeometry => _geometry is not null;
     public bool UsesStream => _geometry?.Stream is not null;
     public int DrawCalls { get; private set; }
@@ -128,7 +134,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     }
 
     /// <summary>Uploads a complete scene; takes ownership only after successful submission.</summary>
-    public void SetGeometry(FloorGeometry geometry, bool preserveTransforms = false, bool releaseCpuMesh = false)
+    public void SetGeometry(FloorGeometry geometry, bool preserveTransforms = false, bool releaseCpuMesh = false,
+        IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? preparedTextures = null)
     {
         OfficialFloorRenderer pipeline = sharedPipeline ?? this;
         if (pipeline._program == 0)
@@ -147,7 +154,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             {
                 FloorTextureBatch source = geometry.Batches[i];
                 batches[i] = new Batch(source.IndexStart, source.IndexCount,
-                    Array.ConvertAll(source.Textures, pipeline.LoadTexture));
+                    Array.ConvertAll(source.Textures, texture => pipeline.LoadTexture(texture, preparedTextures)));
             }
 
             GlMeshHandle? handle = null;
@@ -380,6 +387,13 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
     public void Draw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight,
         bool forceIconOutline, int fromIndex = 0, int endIndex = int.MaxValue)
+        => DrawCore(viewProjection, cameraOrigin, viewportWidth, viewportHeight, forceIconOutline, fromIndex, endIndex, null);
+
+    public void DrawDecoration(in Matrix4 clip, int width, int height, bool iconOutline, FloorDecorationDraw appearance)
+        => DrawCore(clip, Vector2.Zero, width, height, iconOutline, 0, int.MaxValue, appearance);
+
+    private void DrawCore(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight,
+        bool forceIconOutline, int fromIndex, int endIndex, FloorDecorationDraw? decoration)
     {
         DrawCalls = 0;
         DrawnTriangles = 0;
@@ -395,11 +409,27 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         GL.Uniform4(pipeline._viewProjection, viewProjection.Row0);
         GL.Uniform4(pipeline._viewProjection + 1, viewProjection.Row1);
         GL.Uniform4(pipeline._viewProjection + 2, viewProjection.Row2);
-        GL.Uniform4(pipeline._viewProjection + 3, 0f, 0f, viewProjection.Row3.Z, viewProjection.Row3.W);
+        GL.Uniform4(pipeline._viewProjection + 3, decoration.HasValue ? viewProjection.Row3 :
+            new Vector4(0f, 0f, viewProjection.Row3.Z, viewProjection.Row3.W));
         GL.Uniform2(pipeline._cameraOrigin, cameraOrigin);
         GL.Uniform4(pipeline._screenParams, (float)viewportWidth, (float)viewportHeight, 1f, 1f);
         GL.Uniform1(pipeline._forceIconOutline, forceIconOutline ? 1 : 0);
         GL.Uniform1(pipeline._streamFloors, streamed ? 1 : 0);
+        GL.Uniform1(pipeline._decorationMaskMode, decoration?.MaskMode ?? 0);
+        if (decoration is { } visual)
+        {
+            GL.Uniform4(pipeline._decorationColor, visual.Color);
+            GL.Uniform4(pipeline._decorationParams, visual.Opacity, visual.IconAngle, visual.IconFlipped ? 1f : 0f, 1f);
+            if (visual.Mask != 0)
+            {
+                GL.ActiveTexture(TextureUnit.Texture0 + textureSlots - 1);
+                GL.BindTexture(TextureTarget.Texture2D, visual.Mask);
+            }
+        }
+        else
+        {
+            GL.Uniform4(pipeline._decorationParams, Vector4.Zero);
+        }
         GL.ActiveTexture(TextureUnit.Texture0 + textureSlots);
         GL.BindTexture(TextureTarget.Texture2D, _dataTexture);
         UploadDirtyRows();
@@ -461,6 +491,11 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
         GL.ActiveTexture(TextureUnit.Texture0 + textureSlots);
         GL.BindTexture(TextureTarget.Texture2D, 0);
+        if (decoration is { Mask: not 0 })
+        {
+            GL.ActiveTexture(TextureUnit.Texture0 + textureSlots - 1);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+        }
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.UseProgram(0);
     }
@@ -554,14 +589,46 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         _lastDirty = -1;
     }
 
-    private TextureBinding LoadTexture(FloorTexture texture)
+    internal static IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? PrepareBuiltInTextures(
+        FloorGeometry? geometry, CancellationToken token)
+    {
+        if (geometry is null)
+            return null;
+
+        const long byteLimit = 64L * 1024 * 1024;
+        long bytes = 0;
+        var prepared = new Dictionary<FloorTexture, ImageDecoder.RgbaImage>();
+        foreach (var texture in geometry.Batches.SelectMany(batch => batch.Textures).Distinct())
+        {
+            token.ThrowIfCancellationRequested();
+            if (texture.External)
+                continue;
+            var image = DecodeBuiltInTexture(texture);
+            if (texture.FlipVertically)
+                ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
+            prepared.Add(texture, image);
+            bytes += image.Pixels.LongLength;
+            if (bytes >= byteLimit)
+                break;
+        }
+        return prepared;
+    }
+
+    private static ImageDecoder.RgbaImage DecodeBuiltInTexture(FloorTexture texture) =>
+        ImageDecoder.Decode(EmbeddedAssets.Read(texture.Resource)
+            ?? throw new FileNotFoundException("Floor texture is missing.", texture.Resource));
+
+    private TextureBinding LoadTexture(FloorTexture texture,
+        IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? preparedTextures = null)
     {
         if (_textureCache.TryGetValue(texture, out TextureBinding binding))
         {
             return binding;
         }
 
-        ImageDecoder.RgbaImage image;
+        if (preparedTextures?.TryGetValue(texture, out var image) == true)
+            return UploadTexture(texture, image);
+
         if (texture.External)
         {
             try
@@ -582,9 +649,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         }
         else
         {
-            byte[] bytes = EmbeddedAssets.Read(texture.Resource)
-                ?? throw new FileNotFoundException("Floor texture is missing.", texture.Resource);
-            image = ImageDecoder.Decode(bytes);
+            image = DecodeBuiltInTexture(texture);
         }
 
         if (texture.FlipVertically)
@@ -592,6 +657,11 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
         }
 
+        return UploadTexture(texture, image);
+    }
+
+    private TextureBinding UploadTexture(FloorTexture texture, ImageDecoder.RgbaImage image)
+    {
         bool mipmaps = texture.Filter is FloorTextureFilter.Trilinear or FloorTextureFilter.BilinearMipmapped;
         int handle = ImageDecoder.Upload(image, generateMipmaps: mipmaps, repeat: texture.Wrap == FloorTextureWrap.Repeat);
         GL.BindTexture(TextureTarget.Texture2D, handle);
@@ -610,7 +680,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
         }
         GL.BindTexture(TextureTarget.Texture2D, 0);
-        binding = new TextureBinding(handle, (float)image.Width / image.Height);
+        var binding = new TextureBinding(handle, (float)image.Width / image.Height);
         _textureCache.Add(texture, binding);
         return binding;
     }
@@ -660,6 +730,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         _textureRatio = GL.GetUniformLocation(program, "uTextureRatio[0]");
         _forceIconOutline = GL.GetUniformLocation(program, "uForceIconOutline");
         _streamFloors = GL.GetUniformLocation(program, "uStreamFloors");
+        _decorationColor = GL.GetUniformLocation(program, "uDecorationColor");
+        _decorationParams = GL.GetUniformLocation(program, "uDecorationParams");
+        _decorationMaskMode = GL.GetUniformLocation(program, "uDecorationMaskMode");
         GL.UseProgram(0);
         if (_program != 0)
         {

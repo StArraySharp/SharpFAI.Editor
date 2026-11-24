@@ -24,6 +24,9 @@ public sealed unsafe partial class LevelRenderer
             return new Vector2(position.X, position.Y) + motion.PlanetMotionAt(index, time).Offset;
         }
         var follow = new CameraFollowTimeline(floors, timeline, settings, spacing, AnchorAt);
-        return CameraTimeline.Build(events, floors, timeline, settings, spacing, follow.Follow, follow.PlayerAt);
+        var camera = CameraTimeline.Build(events, floors, timeline, settings, spacing, follow.Follow, follow.PlayerAt);
+        if (motion is not null)
+            camera?.BindFollowTrack(motion.Triggers, follow);
+        return camera;
     }
 }

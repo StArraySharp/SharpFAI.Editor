@@ -19,8 +19,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ImGui4NET" Version="1.93.0.5" />
-    <PackageReference Include="ImGui4NET.Backend.OpenGL3" Version="1.93.0.5" />
+    <PackageReference Include="ImGui4NET" Version="1.93.0.6" />
+    <PackageReference Include="ImGui4NET.Backend.OpenGL3" Version="1.93.0.6" />
     <PackageReference Include="MethodTimer.Fody" Version="3.2.3" PrivateAssets="All" />
     <PackageReference Include="NativeFileDialog" Version="1.0.0" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
@@ -30,19 +30,6 @@
       UGLSLAdapter parses GLSL with ANTLR4, so its runtime package is required.
     -->
     <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
-  </ItemGroup>
-
-  <!--
-    imgui.dll 与 imgui_backend_opengl3.dll 是 MinGW 构建的，导入表里有 libwinpthread-1.dll。
-    NuGet 包只带了 imgui.dll 本身，所以目标机器上缺少这个运行库时，加载 imgui 会直接报“无效的 DLL”。
-    这里随程序一起发布，单文件构建会把它内嵌并在运行时解压。
-    imgui.dll and imgui_backend_opengl3.dll are MinGW builds whose import table requires
-    libwinpthread-1.dll. The NuGet package only ships imgui.dll itself, so a machine without the
-    MinGW runtime fails to load it with "invalid DLL". Ship it alongside; a single-file build embeds
-    and extracts it at startup.
-  -->
-  <ItemGroup>
-    <None Include="native\libwinpthread-1.dll" Link="libwinpthread-1.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -104,7 +91,11 @@
     <PropertyGroup>
       <_AdofaiGameFiles>$(MSBuildProjectDirectory)\..\GameFiles</_AdofaiGameFiles>
       <_AdofaiManaged Condition="Exists('$(_AdofaiGameFiles)\Assembly-CSharp.dll') Or Exists('$(_AdofaiGameFiles)\Assembly-CSharp-firstpass.dll')">$(_AdofaiGameFiles)</_AdofaiManaged>
+      <_AdofaiPreparedVersion Condition="'$(AdofaiPreparedAssetsDir)' == '' And Exists('$(_AdofaiGameFiles)/Prepared.current')">$([System.IO.File]::ReadAllText('$(_AdofaiGameFiles)/Prepared.current').Trim())</_AdofaiPreparedVersion>
+      <AdofaiPreparedAssetsDir Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(_AdofaiPreparedVersion)', '^[a-f0-9]{64}$'))">$(_AdofaiGameFiles)/Prepared/$(_AdofaiPreparedVersion)</AdofaiPreparedAssetsDir>
+      <_AdofaiManaged Condition="'$(AdofaiPreparedAssetsDir)' != ''">$(AdofaiPreparedAssetsDir)/Managed</_AdofaiManaged>
     </PropertyGroup>
+    <Error Condition="'$(_AdofaiPreparedVersion)' != '' And '$(AdofaiPreparedAssetsDir)' == ''" Text="Invalid GameFiles/Prepared.current. Run the build/PrepareGameAssets project again." />
     <ItemGroup Condition="'$(_AdofaiManaged)' != ''">
       <_AdofaiAssembly Include="$(_AdofaiManaged)\Assembly-CSharp-firstpass.dll;$(_AdofaiManaged)\Assembly-CSharp.dll" />
     </ItemGroup>
@@ -112,19 +103,36 @@
     <GetFileHash Files="@(_AdofaiAssembly)" Condition="'@(_AdofaiAssembly)' != ''">
       <Output TaskParameter="Items" ItemName="_AdofaiHashedAssembly" />
     </GetFileHash>
-    <CollectAdofaiFilterResources ShaderAssets="$(AdofaiFilterAssetsDir)" UnityAssets="$(AdofaiUnityAssetsDir)" TextureDirectory="$(AdofaiFilterTexturesDir)" Condition="'@(_AdofaiAssembly)' != '' And ('$(AdofaiFilterAssetsDir)' != '' Or '$(AdofaiUnityAssetsDir)' != '' Or '$(AdofaiFilterTexturesDir)' != '')">
+    <CollectAdofaiFilterResources ShaderAssets="$(AdofaiFilterAssetsDir)" UnityAssets="$(AdofaiUnityAssetsDir)" TextureDirectory="$(AdofaiFilterTexturesDir)" PreparedAssets="$(AdofaiPreparedAssetsDir)" Condition="'@(_AdofaiAssembly)' != '' And ('$(AdofaiPreparedAssetsDir)' != '' Or '$(AdofaiFilterAssetsDir)' != '' Or '$(AdofaiUnityAssetsDir)' != '' Or '$(AdofaiFilterTexturesDir)' != '')">
       <Output TaskParameter="Resources" ItemName="_AdofaiFilterResource" />
     </CollectAdofaiFilterResources>
     <ItemGroup>
-      <EmbeddedResource Include="@(_AdofaiFilterResource)" />
+      <EmbeddedResource Include="@(_AdofaiFilterResource)" Condition="'%(_AdofaiFilterResource.BuildOnly)' != 'true'" />
+      <_AdofaiTextureAlias Include="@(_AdofaiFilterResource)" Condition="'%(_AdofaiFilterResource.TextureAliasOf)' != ''" />
+      <Content Include="@(_AdofaiFilterResource)" Condition="'%(_AdofaiFilterResource.CopyRelativePath)' != ''"
+               TargetPath="%(_AdofaiFilterResource.CopyRelativePath)" CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="Never" Visible="false" />
     </ItemGroup>
     <GetFileHash Files="@(_AdofaiFilterResource)" Condition="'@(_AdofaiFilterResource)' != ''">
       <Output TaskParameter="Items" ItemName="_AdofaiHashedResource" />
     </GetFileHash>
     <MakeDir Directories="$(IntermediateOutputPath)" />
-    <WriteLinesToFile File="$(IntermediateOutputPath)AdofaiFilters.inputs" Lines="@(_AdofaiHashedAssembly->'A|%(FullPath)|%(FileHash)');@(_AdofaiHashedResource->'R|%(LogicalName)|%(FullPath)|%(FileHash)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)AdofaiFilters.inputs"
+      Lines="@(_AdofaiHashedAssembly->'A|%(FullPath)|%(FileHash)');@(_AdofaiHashedResource->'R|%(LogicalName)|%(FullPath)|%(FileHash)');@(_AdofaiTextureAlias->'T|%(LogicalName)|%(TextureAliasOf)')"
+      Overwrite="true" WriteOnlyWhenDifferent="true" />
     <ItemGroup>
       <AdditionalFiles Include="$(IntermediateOutputPath)AdofaiFilters.inputs" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ExcludeZeroSuffixResources" BeforeTargets="AssignTargetPaths" DependsOnTargets="PrepareAdofaiFilterInputs">
+    <ItemGroup>
+      <EmbeddedResource Remove="@(EmbeddedResource)"
+        Condition="$([System.String]::Copy('%(EmbeddedResource.Filename)').EndsWith('_0'))" />
+      <None Update="@(None)" Condition="$([System.String]::Copy('%(None.Filename)').EndsWith('_0'))"
+        CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+      <Content Update="@(Content)" Condition="$([System.String]::Copy('%(Content.Filename)').EndsWith('_0'))"
+        CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     </ItemGroup>
   </Target>
 

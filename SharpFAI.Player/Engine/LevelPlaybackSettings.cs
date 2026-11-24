@@ -5,6 +5,7 @@ using SharpFAI.Serialization;
 namespace SharpFAI.Player.Engine;
 
 internal enum BackgroundDisplay { FitToScreen, Unscaled, Tiled }
+internal enum BackgroundShape { Default, SingleColor, Disabled }
 
 internal sealed record LevelPlaybackSettings
 {
@@ -15,7 +16,9 @@ internal sealed record LevelPlaybackSettings
     public Vector4 ImageTint { get; init; } = Vector4.One;
     public Vector4 PatternColor { get; init; }
     public Vector4 PatternAccent { get; init; }
-    public bool DefaultPattern { get; init; }
+    public bool ShowPatternTiles { get; init; }
+    public BackgroundShape PatternShape { get; init; } = BackgroundShape.Disabled;
+    public bool DefaultPattern => ShowPatternTiles || PatternShape != BackgroundShape.Disabled;
     public BackgroundDisplay Display { get; init; }
     public Vector2 Parallax { get; init; } = Vector2.One;
     public bool ImageSmoothing { get; init; } = true;
@@ -53,15 +56,16 @@ internal sealed record LevelPlaybackSettings
                 : fallback;
         Vector4 Color(string key, Vector4 fallback) => FloorTrackStateResolver.ParseColor(Text(key)) ?? fallback;
         float zoom = Number("zoom", float.NaN);
+        bool showDefault = Flag("showDefaultBGIfNoImage");
         return new LevelPlaybackSettings
         {
             Background = Color("backgroundColor", DefaultBackground),
             BackgroundImage = Text("bgImage"),
             ImageTint = Color("bgImageColor", Vector4.One),
-            DefaultPattern = Flag("showDefaultBGIfNoImage") && Flag("showDefaultBGTile", true),
-            PatternColor = Color("defaultBGTileColor", new Vector4(.06f, .07f, .13f, 1f)),
-            PatternAccent = Text("defaultBGShapeType") == "Disabled" ? Vector4.Zero
-                : Color("defaultBGShapeColor", Vector4.One),
+            ShowPatternTiles = showDefault && Flag("showDefaultBGTile", true),
+            PatternShape = showDefault ? Parse(Text("defaultBGShapeType"), BackgroundShape.Default) : BackgroundShape.Disabled,
+            PatternColor = Color("defaultBGTileColor", new Vector4(16, 17, 33, 255) / 255f),
+            PatternAccent = Color("defaultBGShapeColor", Vector4.One),
             Display = Parse(Text("bgDisplayMode"), BackgroundDisplay.FitToScreen),
             Parallax = Pair("parallax", new Vector2(100f)) / 100f,
             ImageSmoothing = Flag("imageSmoothing", true),

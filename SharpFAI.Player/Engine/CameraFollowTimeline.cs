@@ -16,6 +16,7 @@ internal sealed class CameraFollowTimeline
     private readonly Vector2[] _landingCenters;
     private readonly Vector2[] _outgoingHoldOffsets;
     private readonly Dictionary<CameraTimeline.FollowStart, Vector2> _restartTargets = [];
+    private int _prepared;
 
     // anchorAt must be safe to call out of playback order and returns the planet anchor in world units.
     public CameraFollowTimeline(IReadOnlyList<Floor> floors, LevelRenderer.PlaybackTimeline timeline,
@@ -29,9 +30,24 @@ internal sealed class CameraFollowTimeline
         _targets = new Vector2[floors.Count];
         _landingCenters = new Vector2[floors.Count];
         _outgoingHoldOffsets = new Vector2[floors.Count];
-        for (int floor = 0; floor < floors.Count; floor++)
+        PrepareThrough(floors.Count - 1);
+    }
+
+    internal void InvalidateFrom(double time)
+    {
+        double[] entries = _timeline.EntryTimes;
+        int first = LevelRenderer.FloorAtTime(entries, time);
+        while (first > 0 && entries[first - 1] >= time)
+            first--;
+        _prepared = Math.Min(_prepared, first);
+        _restartTargets.Clear();
+    }
+
+    private void PrepareThrough(int end)
+    {
+        for (int floor = _prepared; floor <= end; floor++)
         {
-            double landing = timeline.EntryTimes[floor];
+            double landing = _timeline.EntryTimes[floor];
             _targets[floor] = _anchorAt(floor, landing);
             if (floor == 0)
             {
@@ -43,8 +59,9 @@ internal sealed class CameraFollowTimeline
             int previous = floor - 1;
             _outgoingHoldOffsets[previous] = HoldOffsetAt(previous, landing);
             _landingCenters[floor] = CameraMotion.Follow(_landingCenters[previous], _targets[previous],
-                _outgoingHoldOffsets[previous], landing - timeline.EntryTimes[previous], timeline.FloorBpms[previous]);
+                _outgoingHoldOffsets[previous], landing - _timeline.EntryTimes[previous], _timeline.FloorBpms[previous]);
         }
+        _prepared = Math.Max(_prepared, end + 1);
     }
 
     public Vector2 Follow(double time, CameraTimeline.FollowStart? start)
@@ -56,6 +73,7 @@ internal sealed class CameraFollowTimeline
 
         double[] entries = _timeline.EntryTimes;
         int floor = LevelRenderer.FloorAtTime(entries, time);
+        PrepareThrough(floor);
         Vector2 from = _landingCenters[floor];
         Vector2 target = _targets[floor];
         double segmentStart = entries[floor];

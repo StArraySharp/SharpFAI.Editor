@@ -2,6 +2,7 @@ using OpenTK.Mathematics;
 using SharpFAI.Framework;
 using SharpFAI.Serialization;
 using Thrust.Geometry;
+using Thrust.Graphics;
 
 namespace SharpFAI.Player.Engine;
 
@@ -138,12 +139,13 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    private void CommitFloorGeometry(FloorGeometry geometry, bool preserveTransforms = false)
+    private void CommitFloorGeometry(FloorGeometry geometry, bool preserveTransforms = false,
+        IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? preparedTextures = null)
     {
         try
         {
             _officialRenderer ??= new OfficialFloorRenderer(_uploader, _floorTextureCapacity);
-            _officialRenderer.SetGeometry(geometry, preserveTransforms);
+            _officialRenderer.SetGeometry(geometry, preserveTransforms, preparedTextures: preparedTextures);
         }
         catch
         {
@@ -159,7 +161,8 @@ public sealed unsafe partial class LevelRenderer
         _floorVisualTime = double.NaN;
     }
 
-    private void CommitLoadedFloorGeometry(FloorGeometry geometry)
+    private void CommitLoadedFloorGeometry(FloorGeometry geometry,
+        IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? preparedTextures = null)
     {
         if (geometry.IsLevelStream && geometry.Stream is { } stream)
         {
@@ -170,7 +173,7 @@ public sealed unsafe partial class LevelRenderer
                 return;
             }
         }
-        CommitFloorGeometry(geometry);
+        CommitFloorGeometry(geometry, preparedTextures: preparedTextures);
     }
 
     private FloorRegion ResidentCoverage()

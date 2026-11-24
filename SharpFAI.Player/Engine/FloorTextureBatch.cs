@@ -138,6 +138,33 @@ internal static class FloorIconTextures
         return icon is null ? default : new FloorTexture(icon);
     }
 
+    public static (FloorTexture Icon, FloorTexture Outline)? ResolveSpeedIcon(FloorIcon icon, bool gray,
+        float bpm, double time, bool editor)
+    {
+        string? prefix = icon switch
+        {
+            FloorIcon.Rabbit => "tile_rabbit_light_",
+            FloorIcon.DoubleRabbit => "tile_rabbit_double_light_",
+            FloorIcon.Snail => "tile_snail_light_",
+            FloorIcon.DoubleSnail => "tile_snail_double_light_",
+            _ => null,
+        };
+        if (prefix is null || (editor && !gray))
+            return null;
+        prefix = ResourcePrefix + prefix;
+        if (gray)
+            return (new FloorTexture(prefix + "gray.png"), default);
+        bool alternate = bpm > 0 && Math.Floor(Math.Max(0d, time) * bpm / 60d) % 2 == 0;
+        if (!alternate)
+            return (new FloorTexture(prefix + "new0.png"), new FloorTexture(prefix + "new0_outline.png"));
+        string outline = icon == FloorIcon.Snail ? "new1_outlines.png" : "new1_outline.png";
+        return (new FloorTexture(prefix + "new1.png"), new FloorTexture(prefix + outline));
+    }
+
+    public static (FloorTexture Icon, FloorTexture Outline) HoldRelease(bool longHold) =>
+        (new FloorTexture(ResourcePrefix + (longHold ? "tile_hold_release_long.png" : "tile_hold_release_short.png")),
+            new FloorTexture(ResourcePrefix + "outline_hold_release.png"));
+
     public static FloorTexture ResolveOutline(FloorTexture icon, FloorIcon? kind, string? levelDirectory,
         ConcurrentDictionary<string, FloorTexture> cache)
     {

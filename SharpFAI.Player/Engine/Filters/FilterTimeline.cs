@@ -317,6 +317,8 @@ internal sealed class FilterTimeline(ScheduledEvent<CameraFilterEvent>[] schedul
 
     internal void SetAutomaticSchedule(ScheduledEvent<CameraFilterEvent>[]? automatic)
     {
+        if (_automaticSchedule is null && automatic is null && _runtimeSchedule is null)
+            return;
         _automaticSchedule = automatic;
         _runtimeSchedule = null;
         ResetFilterState();

@@ -189,7 +189,11 @@ public sealed unsafe partial class LevelRenderer
     }
 
     /// <summary>Submit the draw calls.</summary>
-    public void Render()
+    public void Render() => Render(null);
+
+    internal void RenderAfterClear(Vector4 background) => Render(background);
+
+    private void Render(Vector4? clearedBackground)
     {
         UpdateFilterClock();
         if (_preparingLevelEffects)
@@ -202,7 +206,7 @@ public sealed unsafe partial class LevelRenderer
 
         float neutralZoom = _camera.Zoom;
         Vector2 neutralPosition = _camera.Position;
-        bool shake = !_cameraFree && _cameraShake != Vector2.Zero;
+        bool shake = _visualSettings.CameraShake && !_cameraFree && _cameraShake != Vector2.Zero;
         if (shake)
         {
             _camera.Position += _cameraShake;
@@ -218,12 +222,15 @@ public sealed unsafe partial class LevelRenderer
         try
         {
             SceneColorHistory? history = null;
-            if (_backdrop?.UsesHistory == true)
+            if (_visualSettings.ScreenEffects && _backdrop?.UsesHistory == true)
                 history = _colorHistory ??= new SceneColorHistory();
             else
                 _colorHistory?.Reset();
             if (_backdrop?.HistoryAt(_playTime) == true)
+            {
                 history?.Restore(_playTime);
+                clearedBackground = null;
+            }
 
             DrawCalls = 0;
             DrawnTriangles = 0;
@@ -231,9 +238,9 @@ public sealed unsafe partial class LevelRenderer
             // Observe OFF frames too, so a seek or resize cannot revive stale filter output.
             _filterBackend?.ObserveCameraFrame(_playTime);
             bool mainCamera = !_cameraRenderDisabled || _cameraFree;
-            bool filtersDue = mainCamera && _filterTimeline?.HasDueEvent(_playTime) == true;
-            bool backgroundDue = _backgroundFilterTimeline?.HasDueEvent(_playTime) == true;
-            bool screenActive = mainCamera && _sceneEffects?.HasScreenEffect(_playTime) == true;
+            bool filtersDue = _visualSettings.CameraFilters && mainCamera && _filterTimeline?.HasDueEvent(_playTime) == true;
+            bool backgroundDue = _visualSettings.CameraFilters && _backgroundFilterTimeline?.HasDueEvent(_playTime) == true;
+            bool screenActive = _visualSettings.ScreenEffects && mainCamera && _sceneEffects?.HasScreenEffect(_playTime) == true;
             _scenePasses.Clear();
             _backgroundPasses = [];
             _fallingPetals = null;
@@ -258,18 +265,36 @@ public sealed unsafe partial class LevelRenderer
                 }
             }
 
-            // Only the background image and flash belong to the background camera.
-            if (_backgroundPasses.Count > 0)
-                _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _backgroundPasses, DrawBackgroundPlane, background: true);
-            else
-                DrawBackgroundPlane();
+            System.Numerics.Vector4? clearSource = null;
+            if (clearedBackground == new Vector4(0f, 0f, 0f, 1f) &&
+                (_backgroundPasses.Count > 0 || _scenePasses.Count > 0) &&
+                !GL.IsEnabled(EnableCap.ScissorTest) && !GL.IsEnabled(EnableCap.FramebufferSrgb))
+                clearSource = new System.Numerics.Vector4(0f, 0f, 0f, 1f);
 
-            if (mainCamera)
+            if (_backgroundPasses.Count == 0 && _scenePasses.Count > 0 && clearSource is not null &&
+                BackgroundPlaneIsEmpty())
             {
-                if (_scenePasses.Count > 0)
-                    _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _scenePasses, RenderMainCamera);
+                // Render directly into the filter source when the viewport has
+                // only its clear color. A window-to-FBO import can stall the driver.
+                _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _scenePasses,
+                    RenderMainCamera, clearSource: clearSource);
+            }
+            else
+            {
+                // Only the background image and flash belong to the background camera.
+                if (_backgroundPasses.Count > 0)
+                    _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _backgroundPasses,
+                        DrawBackgroundPlane, background: true, clearSource: clearSource);
                 else
-                    RenderMainCamera();
+                    DrawBackgroundPlane();
+
+                if (mainCamera)
+                {
+                    if (_scenePasses.Count > 0)
+                        _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _scenePasses, RenderMainCamera);
+                    else
+                        RenderMainCamera();
+                }
             }
             history?.Capture(_playTime);
         }
@@ -416,6 +441,15 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
+    private bool BackgroundPlaneIsEmpty()
+    {
+        if (_background is null || _backdrop is not { } backdrop)
+            return true;
+        var state = backdrop.BackgroundAt(_playTime);
+        return state.Pixels is null && !state.ShowsDefaultPattern &&
+            (!_visualSettings.ScreenFlash || backdrop.FlashAt(_playTime, foreground: false).W <= 0f);
+    }
+
     private void DrawBackgroundPlane()
     {
         if (_background is { } background && _backdrop is { } backdrop)
@@ -424,11 +458,10 @@ public sealed unsafe partial class LevelRenderer
             var settings = state.Settings;
             if (_uploadedBackdrop != state)
             {
-                background.SetImage(state.Pixels, settings.ImageSmoothing,
-                    settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled);
+                background.SetImage(state.Pixels, settings.ImageSmoothing, IsBackgroundRepeated(settings));
                 _uploadedBackdrop = state;
             }
-            if (state.Pixels is not null || settings.DefaultPattern)
+            if (state.Pixels is not null || state.ShowsDefaultPattern)
             {
                 background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
                 DrawCalls++;
@@ -436,6 +469,9 @@ public sealed unsafe partial class LevelRenderer
         }
         DrawFlash(foreground: false);
     }
+
+    private static bool IsBackgroundRepeated(LevelPlaybackSettings settings) =>
+        settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled;
 
     private ImageDecorationRenderer? PrepareAndDrawBackDecorations()
     {
@@ -448,7 +484,8 @@ public sealed unsafe partial class LevelRenderer
                 _decorationParentStates.Clear();
                 sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
                     AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
-                    CollectDecorationQuads, DecorationFloorOpacity);
+                    CollectDecorationQuads, DecorationFloorOpacity, _visualSettings.VisibleDecorations,
+                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive);
                 DrawDecorations(background: true);
                 return sprites.SyncedCount > 0 ? sprites : null;
             }
@@ -467,7 +504,7 @@ public sealed unsafe partial class LevelRenderer
             return null;
         try
         {
-            return _decorationRenderer ??= new ImageDecorationRenderer();
+            return _decorationRenderer ??= new ImageDecorationRenderer(_officialRenderer);
         }
         catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
         {
@@ -479,7 +516,7 @@ public sealed unsafe partial class LevelRenderer
 
     private void DrawFlash(bool foreground)
     {
-        if (_backdrop?.FlashAt(_playTime, foreground) is { W: > 0f } tint &&
+        if (_visualSettings.ScreenFlash && _backdrop?.FlashAt(_playTime, foreground) is { W: > 0f } tint &&
             _background is { } background && DecorationShader() is { } sprites)
         {
             background.Flash(sprites, tint);
@@ -579,11 +616,18 @@ public sealed unsafe partial class LevelRenderer
         _ => new Vector4(0f, 0f, 1f, 1f),
     };
 
+    private Vector4 PlanetBodyTint(int id) => id switch
+    {
+        1 => _firePlanetTint,
+        0 => _icePlanetTint,
+        _ => PlanetTint(id),
+    };
+
     private void DrawPlanets(in Matrix4 viewProjection)
     {
         PlanetTrackFloor track = _planetTrack[_currentIndex];
-        Vector4 primary = PlanetTint(track.Pivot);
-        Vector4 onOrbit = PlanetTint(track.Orbit);
+        Vector4 primary = PlanetBodyTint(track.Pivot);
+        Vector4 onOrbit = PlanetBodyTint(track.Orbit);
         float pivotScale = _sceneEffects?.PlanetScale(track.Pivot, _playTime) ?? 1f;
         float orbitScale = _sceneEffects?.PlanetScale(track.Orbit, _playTime) ?? 1f;
         float thirdScale = track.Count == 3 ? _sceneEffects?.PlanetScale(track.Third, _playTime) ?? 1f : 1f;
@@ -595,7 +639,7 @@ public sealed unsafe partial class LevelRenderer
             _circleRenderer.Draw(viewProjection, _planetCenter, fallbackRadius * pivotScale, primary);
             if (track.Count == 3)
             {
-                _circleRenderer.Draw(viewProjection, _thirdCenter, fallbackRadius * thirdScale, PlanetTint(track.Third));
+                _circleRenderer.Draw(viewProjection, _thirdCenter, fallbackRadius * thirdScale, PlanetBodyTint(track.Third));
             }
             DrawCalls += track.Count;
             return;
@@ -616,7 +660,7 @@ public sealed unsafe partial class LevelRenderer
         // Record only when time advances: re-rendering the same instant (paused, or the UI frame during
         // an interactive export) must not add points, or duplicates pile up and fake corners appear at
         // tile changes.
-        if (_playTime > _previousPlayTime)
+        if (_trail.ActiveLifetime > 0 && _playTime > _previousPlayTime)
         {
             if (!_offlineSubSample)
                 RecordTrailPose(_currentIndex, _planetCenter, _secondaryCenter, _thirdCenter, _playTime,
@@ -625,8 +669,8 @@ public sealed unsafe partial class LevelRenderer
             _previousPlayTime = _playTime;
         }
 
-        FloorRegion view = FloorRegion.FromView(_camera).Expand(Vector2.One);
-        ReadOnlySpan<PlanetTrail.Sample> samples = _trail.Build(_playTime, view);
+        ReadOnlySpan<PlanetTrail.Sample> samples = _trail.ActiveLifetime > 0
+            ? _trail.Build(_playTime, FloorRegion.FromView(_camera).Expand(Vector2.One)) : [];
 
         if (!samples.IsEmpty)
         {
@@ -680,7 +724,7 @@ public sealed unsafe partial class LevelRenderer
             planets[2] = planets[0];
             planets[2].Center = _thirdCenter;
             planets[2].HalfSize = halfSize * thirdScale;
-            planets[2].Tint = PlanetTint(track.Third);
+            planets[2].Tint = PlanetBodyTint(track.Third);
         }
 
         sprites.DrawPlanets(viewProjection, planets);
@@ -731,7 +775,7 @@ public sealed unsafe partial class LevelRenderer
         EndOfflineRender();
         _cameraSnap = true;
         _audioNeedsResync = true;
-        ApplyTimeline();
+        ApplyTimeline(automaticConditions: true);
     }
 
     /// <summary>Degrees to radians.</summary>

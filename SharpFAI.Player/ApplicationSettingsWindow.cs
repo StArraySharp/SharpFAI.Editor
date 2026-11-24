@@ -9,7 +9,9 @@ namespace SharpFAI.Player;
 public sealed unsafe class ApplicationSettingsWindow
 {
     private const string Popup = "###application-settings";
+    private static readonly ApplicationWindowMode[] WindowModes = Enum.GetValues<ApplicationWindowMode>();
     private static readonly int[] FrameLimits = [0, 30, 60, 120, 144, 240];
+    private static readonly int[] TextureScales = [100, 75, 50, 25];
     private static readonly string?[] Languages = [null, "en", "zh-Hans"];
     private static readonly ImVec4 Accent = Color(0.39f, 0.89f, 0.78f);
     private static readonly ImVec4 Muted = Color(0.64f, 0.68f, 0.70f);
@@ -176,36 +178,109 @@ public sealed unsafe class ApplicationSettingsWindow
             {
                 case Page.Display:
                     Heading(Tr("显示", "Display"));
-                    if (Toggle("vsync", Tr("垂直同步", "Vertical sync"), _draft.VSync, out bool sync))
+                    if (Choice("window-mode", Tr("窗口模式", "Window mode"), WindowModes, _draft.WindowMode,
+                            value => value == ApplicationWindowMode.Fullscreen ? Tr("全屏", "Fullscreen") : Tr("窗口化", "Windowed"),
+                            out ApplicationWindowMode mode))
+                        Change(_draft with { WindowMode = mode });
+                    if (Toggle("vsync", Tr("垂直同步", "VSync"), _draft.VSync, out bool sync))
                         Change(_draft with { VSync = sync });
                     if (Choice("frame-limit", Tr("帧率上限", "Frame rate limit"), FrameLimits, _draft.FrameLimit,
                             value => value == 0 ? Tr("不限", "Unlimited") : $"{value} FPS", out int limit))
                         Change(_draft with { FrameLimit = limit });
+                    if (PlanetColor("fire-color", Tr("火球颜色", "Fire planet color"), _draft.FirePlanetColor, out string fire))
+                        Change(_draft with { FirePlanetColor = fire });
+                    if (PlanetColor("ice-color", Tr("冰球颜色", "Ice planet color"), _draft.IcePlanetColor, out string ice))
+                        Change(_draft with { IcePlanetColor = ice });
+                    if (Choice("decoration-textures", Tr("装饰纹理尺寸（下次加载生效）", "Decoration texture size (on next load)"),
+                            TextureScales, _draft.DecorationTexturePercent,
+                            value => value == 100 ? Tr("100% 原图", "100% Original") : $"{value}%", out int textureScale))
+                        Change(_draft with { DecorationTexturePercent = textureScale });
+                    if (Percent("planet-trail", Tr("星球拖尾长度", "Planet trail length"),
+                            _draft.PlanetTrailPercent, 200, out int trail))
+                        Change(_draft with { PlanetTrailPercent = trail });
+                    ImGui.Separator();
+                    ImGui.TextUnformatted(Tr("特效过滤", "Effect filters"));
+                    if (Toggle("camera-filters", Tr("相机滤镜", "Camera filters"), _draft.CameraFilters, out bool filters))
+                        Change(_draft with { CameraFilters = filters });
+                    if (Toggle("screen-effects", Tr("辉光、屏幕滚动和平铺及残影", "Bloom, screen scroll, tiling and feedback"),
+                            _draft.ScreenEffects, out bool effects))
+                        Change(_draft with { ScreenEffects = effects });
+                    if (Toggle("screen-flash", Tr("屏幕闪光", "Screen flashes"), _draft.ScreenFlash, out bool flash))
+                        Change(_draft with { ScreenFlash = flash });
+                    if (Toggle("camera-shake", Tr("相机震动", "Camera shake"), _draft.CameraShake, out bool shake))
+                        Change(_draft with { CameraShake = shake });
+                    DecorationToggle(DecorationKinds.Image, Tr("图片装饰", "Image decorations"));
+                    DecorationToggle(DecorationKinds.Text, Tr("文字装饰", "Text decorations"));
+                    DecorationToggle(DecorationKinds.Floor, Tr("轨道装饰", "Floor decorations"));
+                    DecorationToggle(DecorationKinds.Planet, Tr("星球装饰", "Planet decorations"));
+                    DecorationToggle(DecorationKinds.Particle, Tr("粒子装饰", "Particle decorations"));
+                    DecorationToggle(DecorationKinds.PlayerBubble, Tr("玩家气泡装饰", "Player bubble decorations"));
                     break;
                 case Page.Audio:
                     Heading(Tr("音频", "Audio"));
                     if (Toggle("skip-audio", Tr("不加载音频（下次加载生效）", "Skip audio on next level load"),
                             _draft.SkipAudio, out bool skipAudio))
                         Change(_draft with { SkipAudio = skipAudio });
-                    if (Volume("master", Tr("总音量", "Master volume"), _draft.MasterVolume, out int master))
+                    if (Percent("master", Tr("主音量", "Main Volume"), _draft.MasterVolume, 100, out int master))
                         Change(_draft with { MasterVolume = master });
-                    if (Volume("music", Tr("音乐音量", "Music volume"), _draft.MusicVolume, out int music))
+                    if (Percent("music", Tr("音乐音量", "Music Volume"), _draft.MusicVolume, 100, out int music))
                         Change(_draft with { MusicVolume = music });
-                    if (Volume("hitsound", Tr("打击音音量", "Hitsound volume"), _draft.HitsoundVolume, out int hitsound))
+                    if (Percent("hitsound", Tr("节拍音量", "Hitsound Volume"), _draft.HitsoundVolume, 100, out int hitsound))
                         Change(_draft with { HitsoundVolume = hitsound });
                     break;
                 case Page.Interface:
                     Heading(Tr("界面", "Interface"));
                     if (Toggle("fps", Tr("显示菜单栏帧率", "Show FPS in menu bar"), _draft.ShowFrameRate, out bool fps))
                         Change(_draft with { ShowFrameRate = fps });
-                    if (editor && Choice("language", Tr("界面语言", "Interface language"), Languages, _draft.Language,
+                    if (editor && Choice("language", Tr("语言", "Language"), Languages, _draft.Language,
                             value => value switch { "en" => "English", "zh-Hans" => "简体中文", _ => Tr("跟随系统", "System default") },
                             out string? language))
                         Change(_draft with { Language = language });
+                    if (editor)
+                        DrawTrackEditingOptions();
                     break;
             }
         }
         ImGui.EndChild();
+    }
+
+    private void DrawTrackEditingOptions()
+    {
+        ImGui.Separator();
+        ImGui.TextUnformatted(Tr("轨道编辑", "Track editing"));
+        if (Toggle("selection-stats", Tr("显示选区统计", "Show selection statistics"), _draft.ShowSelectionStatistics, out bool show))
+            Change(_draft with { ShowSelectionStatistics = show });
+        ImGui.BeginDisabled((byte)(_draft.ShowSelectionStatistics ? 0 : 1));
+        StatisticToggle(SelectionStatisticsFields.Angle, Tr("总角度", "Total angle"));
+        StatisticToggle(SelectionStatisticsFields.Beats, Tr("拍数", "Beats"));
+        StatisticToggle(SelectionStatisticsFields.Count, Tr("砖块数", "Tile count"));
+        StatisticToggle(SelectionStatisticsFields.Duration, Tr("时长", "Duration"));
+        if (Toggle("selection-tulttak", Tr("计时排除选区最后一块（Tulttak）", "Exclude the last selected tile from timing (Tulttak)"),
+                _draft.ExcludeLastSelectedTileFromTiming, out bool exclude))
+            Change(_draft with { ExcludeLastSelectedTileFromTiming = exclude });
+        ImGui.EndDisabled();
+
+        if (Toggle("fine-rotation", Tr("自定义步长旋转（Ctrl+Alt+, / .）", "Custom rotation step (Ctrl+Alt+, / .)"),
+                _draft.FineTrackRotation, out bool fineRotation))
+            Change(_draft with { FineTrackRotation = fineRotation });
+        ImGui.BeginDisabled((byte)(_draft.FineTrackRotation ? 0 : 1));
+        Row(Tr("旋转步长", "Rotation step"), fullWidth: true);
+        float step = _draft.TrackRotationStep;
+        if (ImGui.DragFloat("##rotation-step", ref step, .1f, .001f, 360f, "%.3f°",
+                (int)ImGuiSliderFlags.ImGuiSliderFlags_AlwaysClamp) != 0 && float.IsFinite(step))
+            Change(_draft with { TrackRotationStep = step });
+        ImGui.Spacing();
+        ImGui.EndDisabled();
+
+        if (Toggle("sync-track-events", Tr("翻转或旋转时同步事件坐标", "Transform event coordinates with the track"),
+                _draft.SyncTrackEventPositions, out bool sync))
+            Change(_draft with { SyncTrackEventPositions = sync });
+
+        void StatisticToggle(SelectionStatisticsFields field, string label)
+        {
+            if (Toggle($"stat-{field}", label, (_draft.SelectionStatistics & field) != 0, out bool enabled))
+                Change(_draft with { SelectionStatistics = enabled ? _draft.SelectionStatistics | field : _draft.SelectionStatistics & ~field });
+        }
     }
 
     private static void Heading(string title)
@@ -242,11 +317,36 @@ public sealed unsafe class ApplicationSettingsWindow
         return changed;
     }
 
-    private static bool Volume(string id, string label, int value, out int result)
+    private void DecorationToggle(DecorationKinds kind, string label)
+    {
+        if (Toggle($"decoration-{kind}", label, (_draft.VisibleDecorations & kind) != 0, out bool visible))
+            Change(_draft with
+            {
+                VisibleDecorations = visible ? _draft.VisibleDecorations | kind : _draft.VisibleDecorations & ~kind,
+            });
+    }
+
+    private bool PlanetColor(string id, string label, string value, out string result)
+    {
+        Row(label, fullWidth: true);
+        ApplicationSettings.TryParsePlanetColor(value, out int rgb);
+        float* color = stackalloc float[3] { (rgb >> 16) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f };
+        bool changed = ImGui.ColorEdit3($"##{id}", color, (int)ImGuiColorEditFlags.ImGuiColorEditFlags_DisplayHex) != 0;
+        _choiceOpen |= ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId) != 0;
+        result = changed ? ApplicationSettings.FormatPlanetColor(
+            (ToByte(color[0]) << 16) | (ToByte(color[1]) << 8) | ToByte(color[2])) : value;
+        ImGui.Spacing();
+        return changed;
+
+        static int ToByte(float channel) => (int)MathF.Round(Math.Clamp(channel, 0f, 1f) * 255f);
+    }
+
+    private static bool Percent(string id, string label, int value, int maximum, out int result)
     {
         Row(label, fullWidth: true);
         result = value;
-        bool changed = ImGui.SliderInt($"##{id}", ref result, 0, 100, "%d%%") != 0;
+        bool changed = ImGui.SliderInt($"##{id}", ref result, 0, maximum, "%d%%") != 0;
+        result = Math.Clamp(result, 0, maximum);
         ImGui.Spacing();
         return changed;
     }

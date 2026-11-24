@@ -12,6 +12,7 @@ public sealed unsafe partial class LevelRenderer
 // Playback control: play/pause/seek, manual play, tile visibility.
 
     private bool _playbackZoomNeedsReset = true;
+    private bool _progressScrubbing;
 
     private float PlaybackBaseZoom => _settings.CameraZoom is float zoom
         ? AuthoredZoom(_camera.ViewportHeight, zoom) : _homeZoom;
@@ -68,7 +69,7 @@ public sealed unsafe partial class LevelRenderer
         _cameraFree = false;
         _lastCameraTime = _playTime;
         ResetTrail();
-        ApplyTimeline();
+        ApplyTimeline(automaticConditions: true);
     }
 
     /// <summary>Pause playback.</summary>
@@ -125,6 +126,11 @@ public sealed unsafe partial class LevelRenderer
         PlayInput.Enabled = enabled;
         if (enabled)
             Play();
+        else if (_imageDecorations?.HasConditions == true)
+        {
+            ResetDecorationTriggers();
+            ApplyTimeline(automaticConditions: true);
+        }
     }
 
     public void ResetManualPlay()
@@ -172,6 +178,21 @@ public sealed unsafe partial class LevelRenderer
         ApplyTimeline();
     }
 
+    internal void SetProgressScrubbing(bool scrubbing)
+    {
+        if (_progressScrubbing == scrubbing)
+            return;
+        _progressScrubbing = scrubbing;
+        _audioNeedsResync = true;
+        if (scrubbing)
+        {
+            SetRuntimeTrackMode(true);
+            _music.Pause();
+            _hitsound.Pause();
+            PlayInput.Clear();
+        }
+    }
+
     /// <summary>Seek to a specific time.</summary>
     public void Seek(double seconds)
     {
@@ -183,30 +204,35 @@ public sealed unsafe partial class LevelRenderer
         _colorHistory?.Reset();
         _lastFilterTime = double.NaN;
         double target = Math.Clamp(seconds, 0.0, _duration);
-        if (target == 0.0)
+        if (target == 0.0 && !_progressScrubbing)
         {
             Restart();
             return;
         }
 
-        ResetDecorationTriggers();
+        bool rewindsJudgments = target < _playTime && _lastDecorationConditionFloor > FloorAtTime(_entryTimes, target);
+        if (rewindsJudgments || PlayInput.Enabled || _imageDecorations?.HasTriggeredCollision == true)
+            ResetDecorationTriggers();
+        else
+            ResetDecorationContacts();
         _playTime = target;
         if (PlayInput.Enabled && _manualTrack is { LastFloor: >= 1 } track)
         {
             ClearManualAttempt();
-            PlaySession.Start(track, FloorAtTime(_entryTimes, target), target);
+            int start = FloorAtTime(_entryTimes, target);
+            PlaySession.Start(track, start, target);
+            if (start > 0)
+                _imageDecorations?.TriggerCondition(start, HitMargin.Perfect, _playTime, checkpoint: true);
         }
 
         // Scrub: snap the camera onto the target tile instead of sliding across the whole level
         _cameraSnap = true;
         _cameraFree = false;
         ResetTrail();
-        ApplyTimeline(previewCameraEvents: true);
+        ApplyTimeline(previewCameraEvents: true, automaticConditions: true);
 
-        // Realign audio after a scrub
+        // Sync both clips once at the final position on the next tick.
         _audioNeedsResync = true;
-        _music.Seek(Math.Max(0.0, _playTime + AudioClockShift) / _pitch);
-        _hitsound.Seek(Math.Max(0.0, _playTime + HitsoundClockShift) / _pitch);
     }
 
     /// <summary>
@@ -216,14 +242,13 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void UpdatePlayback(double delta)
     {
-        if (_floors.Count == 0)
+        if (_floors.Count == 0 || _progressScrubbing)
         {
             return;
         }
 
         bool playing = _isPlaying;
         bool manual = ManualAttemptActive;
-        int previousFloor = _currentIndex;
         if (playing && manual)
         {
             PlaySession.Advance(AdvancePlaybackClock(delta), _lastFrameTime - delta, _lastFrameTime,
@@ -244,9 +269,9 @@ public sealed unsafe partial class LevelRenderer
             PlayInput.Clear();
         }
 
-        ApplyTimeline();
+        ApplyTimeline(automaticConditions: playing);
         if (playing)
-            UpdateDecorationTriggers(manual, autoFrom: previousFloor);
+            UpdateDecorationTriggers(manual);
     }
 
     /// <summary>
@@ -326,16 +351,13 @@ public sealed unsafe partial class LevelRenderer
     /// Evaluate the current floor, planet angle and camera position from _playTime.
     /// _playTime is the **music file position** clock, which the music and hitsound also follow.
     /// </summary>
-    private void ApplyTimeline(bool previewCameraEvents = false)
+    private void ApplyTimeline(bool previewCameraEvents = false, bool automaticConditions = false)
     {
-        bool useCameraEffects = _runtimeTrackActive || previewCameraEvents;
-        CameraTimeline? cameraEvents = useCameraEffects ? _cameraTimeline : null;
-        _cameraShake = useCameraEffects && _sceneEffects is { } effects
-            ? effects.ShakeAt(_playTime) : Vector2.Zero;
         if (_floors.Count == 0)
         {
             _currentIndex = 0;
             _rotationAngle = 0f;
+            _cameraShake = Vector2.Zero;
             return;
         }
 
@@ -343,6 +365,12 @@ public sealed unsafe partial class LevelRenderer
         // sweep is already in progress when playback reaches zero.
         bool manual = ManualAttemptActive;
         int index = manual && _floors.Count > 1 ? PlaySession.CurrentFloor : FloorAtTime(_entryTimes, _playTime);
+        if (automaticConditions && !manual)
+            UpdateAutomaticConditions(index);
+        bool useCameraEffects = _runtimeTrackActive || previewCameraEvents;
+        CameraTimeline? cameraEvents = useCameraEffects ? _cameraTimeline : null;
+        _cameraShake = useCameraEffects && _sceneEffects is { } effects
+            ? effects.ShakeAt(_playTime) : Vector2.Zero;
 
         // A tile change alone does not create a seam: at normal speed the secondary lands where the
         // primary used to be, so the path is continuous. Seams come from the jump check below.
@@ -647,8 +675,9 @@ public sealed unsafe partial class LevelRenderer
         _playTime = Math.Clamp(seconds, 0.0, Math.Max(_duration, seconds));
         _isPlaying = false;
 
+        UpdateAutomaticConditions(FloorAtTime(_entryTimes, _playTime));
         UpdateOfflineTrail(_playTime);
         ApplyTimeline();
-        UpdateDecorationTriggers(manual: false, autoFrom: offlineStart ? _currentIndex : null);
+        UpdateDecorationTriggers(manual: false);
     }
 }

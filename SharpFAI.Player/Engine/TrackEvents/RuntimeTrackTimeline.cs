@@ -2,6 +2,7 @@ using SharpFAI.Player.Engine.Events;
 using OpenTK.Mathematics;
 using SharpFAI.Framework;
 using SharpFAI.Serialization;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 using Scheduled = SharpFAI.Player.Engine.ScheduledEvent<SharpFAI.Player.Engine.Events.TrackRangeEvent>;
@@ -22,6 +23,9 @@ internal sealed class RuntimeTrackTimeline
 
     private readonly record struct ColorTransition(Vector4 From, float Glow, TrackTiming Timing);
 
+    private sealed record SeekCheckpoint(KeyValuePair<int, Motion>[] Motion,
+        KeyValuePair<int, ColorTransition>[] Colors, FloorTrackState[]? States);
+
     internal readonly record struct MotionBounds(Vector2 MinOffset, Vector2 MaxOffset,
         Vector2 MinScale, Vector2 MaxScale, bool Overshoots)
     {
@@ -37,8 +41,11 @@ internal sealed class RuntimeTrackTimeline
     private readonly double[]? _floorBpms;
     private readonly double _pitch;
     private readonly Scheduled[] _events;
+    internal TriggeredEventSchedule<TrackRangeEvent> Triggers { get; }
     private readonly Dictionary<int, Motion> _motion = [];
     private readonly Dictionary<int, ColorTransition> _colors = [];
+    private SeekCheckpoint[] _seekCheckpoints = [];
+    private int _checkpointStride;
     private int _nextEvent;
     private double _time = double.NegativeInfinity;
 
@@ -57,6 +64,12 @@ internal sealed class RuntimeTrackTimeline
         }
 
         _events = TimedEventSchedule.Build<TrackRangeEvent>(events, floors, entries, floorBpms);
+        Triggers = new(_events);
+        Triggers.Changed += (first, _) =>
+        {
+            if (first < _nextEvent)
+                Reset();
+        };
         States = Array.Exists(_events, item => item.Event is RecolorTrack)
             ? (FloorTrackState[])baseline.Clone() : baseline;
     }
@@ -161,16 +174,81 @@ internal sealed class RuntimeTrackTimeline
         _time = double.NegativeInfinity;
     }
 
-    public void Advance(double time)
+    internal void PrepareSeekCheckpoints(CancellationToken token)
     {
-        if (time < _time)
+        if (_events.Length < 1024 || Triggers.HasBindings)
+            return;
+
+        const int budget = 48 * 1024 * 1024;
+        bool hasRecolors = !ReferenceEquals(States, _baseline);
+        int bytesPerFloor = Unsafe.SizeOf<KeyValuePair<int, Motion>>() + (hasRecolors
+            ? Unsafe.SizeOf<KeyValuePair<int, ColorTransition>>() + Unsafe.SizeOf<FloorTrackState>() : 0);
+        int count = (int)Math.Min(48, budget / ((long)bytesPerFloor * _baseline.Length));
+        if (count == 0)
+            return;
+        _checkpointStride = Math.Max(128, _events.Length / (count + 1) + 1);
+        var checkpoints = new SeekCheckpoint[_events.Length / _checkpointStride];
+        int previousRevision = MaterialRevision;
+        try
+        {
+            for (int i = 0; i < checkpoints.Length; i++)
+            {
+                int end = (i + 1) * _checkpointStride;
+                while (_nextEvent < end)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Trigger(_events[_nextEvent++]);
+                }
+                checkpoints[i] = new SeekCheckpoint(_motion.ToArray(), _colors.ToArray(),
+                    _colors.Count == 0 ? null : (FloorTrackState[])States.Clone());
+            }
+            _seekCheckpoints = checkpoints;
+        }
+        finally
         {
             Reset();
+            MaterialRevision = previousRevision;
         }
+    }
 
-        while (_nextEvent < _events.Length && _events[_nextEvent].Timing.Start <= time)
+    public void Advance(double time)
+    {
+        var active = Triggers.Active;
+        bool rewind = time < _time && _nextEvent > 0 && active[_nextEvent - 1].Timing.Start > time;
+        if (!Triggers.HasBindings && _seekCheckpoints.Length > 0 &&
+            (rewind || (_nextEvent + _checkpointStride < active.Count &&
+                active[_nextEvent + _checkpointStride].Timing.Start <= time)))
         {
-            Scheduled item = _events[_nextEvent++];
+            int due = 0, end = active.Count;
+            while (due < end)
+            {
+                int middle = (due + end) >> 1;
+                if (active[middle].Timing.Start <= time)
+                    due = middle + 1;
+                else
+                    end = middle;
+            }
+            int checkpoints = Math.Min(due / _checkpointStride, _seekCheckpoints.Length);
+            if (checkpoints > 0 && (rewind || checkpoints * _checkpointStride >= _nextEvent + 128))
+            {
+                Reset();
+                var checkpoint = _seekCheckpoints[checkpoints - 1];
+                foreach (var item in checkpoint.Motion)
+                    _motion.Add(item.Key, item.Value);
+                foreach (var item in checkpoint.Colors)
+                    _colors.Add(item.Key, item.Value);
+                checkpoint.States?.CopyTo(States, 0);
+                _nextEvent = checkpoints * _checkpointStride;
+                MaterialRevision++;
+                rewind = false;
+            }
+        }
+        if (rewind)
+            Reset();
+
+        while (_nextEvent < active.Count && active[_nextEvent].Timing.Start <= time)
+        {
+            Scheduled item = active[_nextEvent++];
             Trigger(item);
         }
 

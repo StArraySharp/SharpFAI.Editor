@@ -10,6 +10,69 @@ public sealed class EventStackingRegressionTests
     private static JObject Event(string type, int floor = 1, int value = 0) =>
         new() { ["eventType"] = type, ["floor"] = floor, ["testValue"] = value };
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public void GameplayPaletteOffersPlanetEventsAndKeepsExistingAudioInspectable(bool externalSchema)
+    {
+        EditorCatalog catalog = externalSchema ? EditorCatalog.FromSchema(JObject.Parse("""
+            {
+                "levelEvents": [
+                    {"name":"Hold","properties":[
+                        {"name":"duration","type":"Int","default":0,"min":0,"unit":"loops"},
+                        {"name":"distanceMultiplier","type":"Int","default":100,"unit":"%"},
+                        {"name":"landingAnimation","type":"Bool","default":false}]},
+                    {"name":"SetHitsound","properties":[{"name":"hitsound","type":"Enum:HitSound","default":"Kick"}]},
+                    {"name":"PlaySound","properties":[{"name":"hitsound","type":"String","default":"Kick"}]},
+                    {"name":"AddDecoration","isDecoration":true,"properties":[
+                        {"name":"tile","type":"Vector2","min":[1,1],"max":[50,50]}]}
+                ],
+                "categories": [
+                    {"name":"Gameplay","events":["SetHitsound","PlaySound"]},
+                    {"name":"Jank","events":["MultiPlanet","Hold","ScaleRadius","PlaySound"]}
+                ],
+                "settings": []
+            }
+            """)) : new EditorCatalog(null);
+
+        string[] planetEvents = ["MultiPlanet", "Hold", "ScaleRadius"];
+        var gameplay = catalog.Categories.Single(category => category.Key == "Gameplay");
+        string[] palette = catalog.Categories.SelectMany(category => category.Events).ToArray();
+        var planets = catalog.Find("MultiPlanet")!.Fields.Single(field => field.Key == "planets");
+        var hold = catalog.Find("Hold")!.Fields;
+        var radius = catalog.Find("ScaleRadius")!.Fields.Single(field => field.Key == "scale");
+
+        Assert.Multiple(() =>
+        {
+            foreach (string type in planetEvents)
+            {
+                Assert.That(gameplay.Events, Does.Contain(type));
+                Assert.That(palette.Count(name => name == type), Is.EqualTo(1));
+            }
+            foreach (string type in new[] { "SetHitsound", "PlaySound" })
+            {
+                Assert.That(palette, Does.Not.Contain(type));
+                Assert.That(catalog.Find(type)!.Fields.Select(field => field.Key), Does.Contain("hitsound"));
+            }
+            Assert.That(EditorCatalog.Options(planets), Is.EqualTo(new[] { "TwoPlanets", "ThreePlanets" }));
+            Assert.That(catalog.Create("MultiPlanet", 1).Value<string>("planets"), Is.EqualTo("TwoPlanets"));
+            Assert.That(hold.Single(field => field.Key == "duration").Unit, Is.EqualTo("loops"));
+            Assert.That(hold.Single(field => field.Key == "duration").Minimum, Is.Zero);
+            Assert.That(hold.Single(field => field.Key == "distanceMultiplier").Unit, Is.EqualTo("%"));
+            Assert.That(catalog.Create("Hold", 1).Value<int>("distanceMultiplier"), Is.EqualTo(100));
+            Assert.That(catalog.Create("Hold", 1).Value<bool>("landingAnimation"), Is.False);
+            Assert.That(radius.Minimum, Is.EqualTo(-10000d));
+            Assert.That(radius.Maximum, Is.EqualTo(10000d));
+            Assert.That(radius.Unit, Is.EqualTo("%"));
+            Assert.That(catalog.Create("ScaleRadius", 1).Value<double>("scale"), Is.EqualTo(100d));
+            if (externalSchema)
+            {
+                var bounds = catalog.Find("AddDecoration")!.Fields.Single();
+                Assert.That(bounds.Minimum, Is.EqualTo(1d));
+                Assert.That(bounds.Maximum, Is.EqualTo(50d));
+            }
+        });
+    }
+
     [Test]
     public void AddRejectsSoloDuplicatesOnlyOnTheSameFloor()
     {

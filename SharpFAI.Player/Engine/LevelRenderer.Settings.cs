@@ -6,6 +6,38 @@ namespace SharpFAI.Player.Engine;
 
 public sealed unsafe partial class LevelRenderer
 {
+    private ApplicationSettings _visualSettings = ApplicationSettings.PlayerDefaults;
+    private int _loadedDecorationTexturePercent = 100;
+    private Vector4 _firePlanetTint = new(1f, 0f, 0f, 1f);
+    private Vector4 _icePlanetTint = new(0f, 0f, 1f, 1f);
+
+    internal void ApplyVisualSettings(ApplicationSettings settings)
+    {
+        var previous = _visualSettings;
+        _visualSettings = settings;
+        _firePlanetTint = FloorTrackStateResolver.ParseColor(settings.FirePlanetColor) ?? PlanetTint(1);
+        _icePlanetTint = FloorTrackStateResolver.ParseColor(settings.IcePlanetColor) ?? PlanetTint(0);
+        _trail.FireColorOverride = _firePlanetTint == PlanetTint(1) ? null : _firePlanetTint.Xyz;
+        _trail.IceColorOverride = _icePlanetTint == PlanetTint(0) ? null : _icePlanetTint.Xyz;
+
+        if (settings.PlanetTrailPercent != previous.PlanetTrailPercent)
+        {
+            _trail.ActiveLifetime = PlanetTrail.Lifetime * settings.PlanetTrailPercent / 100.0;
+            ResetTrail();
+        }
+
+        bool filterPassesChanged = settings.CameraFilters != previous.CameraFilters ||
+            settings.ScreenEffects != previous.ScreenEffects;
+        if (filterPassesChanged || settings.VisibleDecorations != previous.VisibleDecorations ||
+            settings.FirePlanetColor != previous.FirePlanetColor || settings.IcePlanetColor != previous.IcePlanetColor)
+        {
+            _filterBackend?.ResetCameraHistory();
+            _colorHistory?.Reset();
+        }
+        if (filterPassesChanged && _level is not null)
+            BeginShaderPrewarm();
+    }
+
     private Vector2 LevelCameraTarget(Vector2 floor)
     {
         Vector2 offset = _settings.CameraOffset * TileSpacing;

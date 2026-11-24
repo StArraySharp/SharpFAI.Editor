@@ -53,6 +53,36 @@ public sealed class TestEditorEffectUpdates
     }
 
     [Test]
+    public void EditingFloorObjectPropertiesPreservesScheduledObjectChanges()
+    {
+        var level = Chart();
+        var decorations = (JArray)level.root["decorations"]!;
+        decorations.Add(JObject.Parse("""
+            {"floor":0,"eventType":"AddObject","objectType":"Floor","tag":"object","trackStyle":"Neon","trackAngle":120}
+            """));
+        level.actions.Add(JObject.Parse("""
+            {"floor":1,"eventType":"SetObject","tag":"object","trackAngle":180,"duration":2,"ease":"Linear"}
+            """));
+        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var timeline = Build(events);
+        var obj = events.OfType<AddObjectDecoration>().Single();
+        var raw = (JObject)decorations[obj.DecorationIndex]!;
+        var old = (JObject)raw.DeepClone();
+        raw["trackStyle"] = "Minimal";
+        raw["trackAngle"] = 60;
+        raw["trackColor"] = "ff00ff";
+        var edited = (AddObjectDecoration)PlaybackEventBinder.Rebind(raw, obj, level.root["settings"] as JObject);
+
+        Assert.That(LevelRenderer.CanEditDecorationParameters(old, raw), Is.True);
+        timeline.EditInitial(edited, decoration: true);
+        var floor = timeline.Items.Single(item => item.IsObject);
+        Assert.That(floor.At(0).Tint, Is.EqualTo(new Vector4(1, 0, 1, 1)));
+        Assert.That(floor.At(1).ObjectFloor!.Angle, Is.EqualTo(120f));
+        Assert.That(floor.At(1).ObjectFloor!.Style, Is.EqualTo(TrackStyleInfo.Minimal));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+    }
+
+    [Test]
     public void SetObjectFadesRevealedFloorsAndCanBePatchedInPlace()
     {
         var level = Chart();

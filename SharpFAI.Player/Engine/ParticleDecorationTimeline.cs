@@ -15,7 +15,7 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         float Duration, bool Loop, int Capacity, float Radius, float Arc, bool Rectangle, bool World,
         ParticleGradient Color, ParticleGradient ColorOverLife);
 
-    private readonly record struct Command(double Time, ParticleControlEvent Event);
+    private readonly record struct Command(double Time, ParticleControlEvent Event, bool Triggered);
     private readonly record struct Run(double Start, double End, Settings Settings, int Burst, int Sequence,
         double Clock);
     private readonly List<Command> _commands = [];
@@ -24,10 +24,16 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         ? (int)Read(source.ParticleFields.GetValueOrDefault("randomSeed"), 0) : index + 1);
     private bool _dirty = true;
 
-    internal void Add(ParticleControlEvent control, double time)
+    internal void Add(ParticleControlEvent control, double time, bool triggered = false)
     {
-        _commands.Add(new(time, control));
+        _commands.Add(new(time, control, triggered));
         _dirty = true;
+    }
+
+    internal void ResetTriggers()
+    {
+        if (_commands.RemoveAll(command => command.Triggered) > 0)
+            _dirty = true;
     }
 
     internal void Collect(double time, List<Sample> output)
@@ -116,7 +122,7 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         bool running = Flag(source.ParticleFields.GetValueOrDefault("autoPlay"), true);
         double cursor = 0, clock = 0;
         int sequence = 0;
-        foreach (var (time, control) in _commands.OrderBy(c => c.Time))
+        foreach (var (time, control, _) in _commands.OrderBy(c => c.Time))
         {
             double at = Math.Max(0, time);
             if (running)

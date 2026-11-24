@@ -176,8 +176,10 @@ public sealed class TestFilterShaderCompatibility
     [Apartment(ApartmentState.STA)]
     public void VhsFixedSourceAndTimeMatchesD3dCoordinateReference()
     {
-        string original = UnityShaderAdapter.ImportFullscreenFragment(ShaderLibrary.Load("Filters/CameraFilterPack/TV_VHS.glsl"));
-        string adapted = FilterShaderCompatibility.AdaptFragment(Vhs, original);
+        string export = ShaderLibrary.Load("Filters/CameraFilterPack/TV_VHS.glsl");
+        string original = UnityShaderAdapter.ImportFullscreenFragment(export);
+        string adapted = FilterShaderCompatibility.AdaptFragment(Vhs, original,
+            export.StartsWith(FilterShaderCompatibility.HlslccDxbcHeader, StringComparison.Ordinal));
         const string reference = """
             #version 150
             uniform sampler2D _MainTex;

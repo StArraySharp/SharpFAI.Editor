@@ -51,6 +51,9 @@ internal sealed unsafe partial class EditorWindow
     private int _playbackHeight;
     private int _smokePlaybackStage;
     private int _smokeFloor;
+    private int _smokeExitFloor;
+    private int _smokeTimelineFloor = -1;
+    private ImVec2 _smokeTimelineMarker;
     private int _smokeDecorationIndex = -1;
     private double _smokeDeadline;
     private ImVec2 _smokeViewportCenter;
@@ -65,7 +68,7 @@ internal sealed unsafe partial class EditorWindow
     private double _smokeOffset;
     private SharpFAI.Serialization.Level? _smokeLiveChart;
 
-    private PlaybackRevision CurrentPlaybackRevision => new(_document, _document.ChangeVersion,
+    private PlaybackRevision CurrentPlaybackRevision => new(_document, _document.PlaybackVersion,
         _document.PlaybackPath, _appliedPlaybackSpeed);
     private bool HasCurrentPlayback => _playback is { IsLoading: false, LoadError: null, Level: not null }
                                       && _displayedRevision == CurrentPlaybackRevision;
@@ -112,9 +115,10 @@ internal sealed unsafe partial class EditorWindow
                 _centerEditDecoration = null;
             }
             _playbackFloor = _floor;
-            _centerEditSelection = false;
+            _centerEditFloor = null;
             _playback?.Pause();
             _playback?.SetManualPlay(false);
+            _playback?.SetEditorTilesOnly(_tilesOnly);
             if (_savedEditCamera is { } camera && _playback is { Level: not null } renderer &&
                 _displayedRevision?.Document == _document)
             {
@@ -124,6 +128,7 @@ internal sealed unsafe partial class EditorWindow
             return;
         }
 
+        _playback?.SetEditorTilesOnly(false);
         _restoringEditViewport = false;
         if (previous == PlaybackView.Edit)
         {
@@ -166,7 +171,7 @@ internal sealed unsafe partial class EditorWindow
         if (_playback is null)
         {
             _playback = new LevelRenderer();
-            ApplyPreviewAudioSettings(_playback);
+            ApplyPreviewSettings(_playback);
         }
         LevelRenderer renderer = _playback;
         var previousLevel = renderer.Level;
@@ -406,7 +411,7 @@ internal sealed unsafe partial class EditorWindow
     {
         if (ImGui.Button(L.T("ReturnToEdit"), default) != 0)
         {
-            SwitchPlaybackView(PlaybackView.Edit);
+            ReturnToEdit();
             return;
         }
 
@@ -428,7 +433,7 @@ internal sealed unsafe partial class EditorWindow
                 if (Toggle(L.T("NoFail"), ref noFail))
                     renderer.PlaySession.NoFail = _shortcutNoFail = noFail;
             }
-            else
+            else if (!_showTimeline)
             {
                 ImGui.SetNextItemWidth(-1);
                 float progress = (float)renderer.Progress;
@@ -570,13 +575,15 @@ internal sealed unsafe partial class EditorWindow
             GL.Disable(EnableCap.ScissorTest);
             bool editing = _playbackView == PlaybackView.Edit;
             bool tilesOnly = editing && _tilesOnly;
+            renderer.SetEditorTilesOnly(tilesOnly);
             var background = tilesOnly ? new Vector4(.059f, .065f, .083f, 1) : renderer.BackgroundColor;
-            GL.ClearColor(background.X, background.Y, background.Z, 1);
+            background.W = 1;
+            GL.ClearColor(background.X, background.Y, background.Z, background.W);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             renderer.ShowDecorations = !editing || (!_hideAllDecorations && !tilesOnly);
             renderer.CollectDecorationQuads = editing && !tilesOnly;
             if (tilesOnly) renderer.RenderEditorTiles();
-            else renderer.Render();
+            else renderer.RenderAfterClear(background);
             _playbackFrameAvailable = true;
         }
         finally
@@ -589,22 +596,63 @@ internal sealed unsafe partial class EditorWindow
 
     private void FeedEditorKey(KeyboardKeyEventArgs args, bool pressed)
     {
+        if (_audioCalibration.IsOpen)
+        {
+            if (pressed && args.Key == Keys.Space && _audioCalibration.IsMeasuring)
+            {
+                if (!args.IsRepeat && _playback is { } renderer)
+                    _audioCalibration.Tap(renderer);
+            }
+            else
+                FeedKey(args, pressed);
+            return;
+        }
+        if (pressed && !_settingsWindow.IsOpen && ApplicationWindowModeController.IsToggleShortcut(args))
+        {
+            if (!args.IsRepeat)
+                _windowMode.RequestToggle();
+            return;
+        }
         if (pressed && args.Key == Keys.Escape)
         {
             if (args.IsRepeat)
                 return;
             if (_playbackView != PlaybackView.Edit && !_settingsWindow.IsOpen)
             {
-                int? floor = args.Shift && HasCurrentPlayback ? _playback!.CurrentIndex : null;
-                SwitchPlaybackView(PlaybackView.Edit);
-                if (floor is int index)
-                    SelectFloor(index, false);
+                ReturnToEdit(selectPlaybackFloor: args.Shift);
                 // Do not let this same Escape clear the restored selection in the edit view.
                 return;
             }
         }
         FeedKey(args, pressed);
         FeedPlaybackKey(args, pressed);
+    }
+
+    private void OpenAudioCalibration()
+    {
+        if (_playbackView is PlaybackView.Auto or PlaybackView.Manual)
+        {
+            ReleasePlaybackInput();
+            PauseToPreview();
+        }
+        _audioCalibration.Open();
+    }
+
+    private void ReturnToEdit(bool selectPlaybackFloor = false)
+    {
+        if (_playbackView == PlaybackView.Edit)
+            return;
+
+        int? floor = _displayedRevision?.Document == _document && _playback is { Level: not null } renderer
+            ? Math.Clamp(renderer.CurrentIndex, 0, _document.LastFloor) : null;
+        SwitchPlaybackView(PlaybackView.Edit);
+        if (floor is int index)
+        {
+            if (selectPlaybackFloor)
+                SelectFloor(index, true);
+            else
+                _centerEditFloor = index;
+        }
     }
 
     private void FeedPlaybackKey(KeyboardKeyEventArgs args, bool pressed)
@@ -752,6 +800,13 @@ internal sealed unsafe partial class EditorWindow
             case 40 when _playbackView != PlaybackView.Edit:
                 FeedWebKey("Escape", down: true, ctrl: false, shift: true);
                 FeedWebKey("Escape", down: false, ctrl: false, shift: false);
+                break;
+            case 50:
+                ImGuiIO.AddMousePosEvent(io, _smokeTimelineMarker.x, _smokeTimelineMarker.y);
+                ImGuiIO.AddMouseButtonEvent(io, 0, 1);
+                break;
+            case 51:
+                ImGuiIO.AddMouseButtonEvent(io, 0, 0);
                 break;
         }
     }
@@ -1023,7 +1078,7 @@ internal sealed unsafe partial class EditorWindow
                     throw new InvalidOperationException("An undone event insertion remained in the preview.");
                 SelectFloor(_smokeFloor - 1, false);
                 MoveFloorSelection(_smokeFloor, extend: true);
-                _centerEditSelection = false;
+                _centerEditFloor = null;
                 _smokePlaybackStage++;
                 break;
             case 35:
@@ -1050,13 +1105,15 @@ internal sealed unsafe partial class EditorWindow
                 if (_playbackView != PlaybackView.Edit || !_hasFloorSelection || _floor != _smokeFloor ||
                     _rangeAnchor != _smokeFloor - 1 || renderer.SelectedFloor != _smokeFloor)
                     throw new InvalidOperationException($"Escape did not restore the pre-playback tile range: {_playbackView}, selected={_hasFloorSelection}, anchor={_rangeAnchor}, floor={_floor}, renderer={renderer.SelectedFloor}, expected floor={_smokeFloor}.");
-                if ((renderer.Camera.Position, renderer.Camera.Zoom) != _smokeEditCamera)
-                    throw new InvalidOperationException($"Escape did not restore the edit camera: got {(renderer.Camera.Position, renderer.Camera.Zoom)}, expected {_smokeEditCamera}.");
+                if (!renderer.TryGetFloorCenter(0, out Vector2 previewCenter) || renderer.Camera.Position != previewCenter ||
+                    renderer.Camera.Zoom != _smokeEditCamera.Zoom)
+                    throw new InvalidOperationException("Escape did not focus the preview tile at the edit zoom.");
                 SwitchPlaybackView(PlaybackView.Preview);
                 _smokePlaybackStage++;
                 break;
             case 40:
-                if (_playbackView != PlaybackView.Edit || !_hasFloorSelection || _floor != 0 || _rangeAnchor is not null)
+                if (_playbackView != PlaybackView.Edit || !_hasFloorSelection || _floor != 0 || _rangeAnchor is not null ||
+                    !renderer.TryGetFloorCenter(0, out Vector2 selectedCenter) || renderer.Camera.Position != selectedCenter)
                     throw new InvalidOperationException("Web Shift+Escape did not select the current preview tile.");
                 OpenFindFloor();
                 _smokePlaybackStage++;
@@ -1090,10 +1147,100 @@ internal sealed unsafe partial class EditorWindow
                 Console.WriteLine("Verified decoration-only playback from tile zero and selection restoration.");
                 goto case 46;
             case 46:
+                _tilesOnly = true;
+                SelectFloor(_smokeFloor, true);
+                _document.Add(new JObject
+                {
+                    ["floor"] = _smokeFloor, ["eventType"] = "Hide", ["hideTrack"] = true, ["justThisTile"] = true,
+                }, decoration: false);
+                renderer.HidePassedFloors = true;
+                SwitchPlaybackView(PlaybackView.Auto);
+                _smokePlaybackStage++;
+                break;
+            case 47:
+                if (_startPlayback || !renderer.IsPlaying)
+                    return;
+                double[] entryTimes = renderer.EditorTiming!.EntryTimes;
+                double nextTileTime = entryTimes.Skip(_smokeFloor + 1).FirstOrDefault(time => time > 0 && time < renderer.Duration);
+                if (nextTileTime > 0)
+                    renderer.Seek(nextTileTime);
+                _smokeExitFloor = renderer.CurrentIndex;
+                PressPlaybackSmokeKey(Keys.Escape);
+                _smokePlaybackStage++;
+                break;
+            case 48:
+                if (_playbackView != PlaybackView.Edit || !_tilesOnly || renderer.ShowDecorations ||
+                    !renderer.TryGetFloorCenter(_smokeFloor, out Vector2 center))
+                    throw new InvalidOperationException("Escape did not restore tiles-only editing.");
+                if (!renderer.TryGetFloorCenter(_smokeExitFloor, out Vector2 exitCenter) || renderer.Camera.Position != exitCenter)
+                    throw new InvalidOperationException("Escape did not focus the planet's tile during autoplay.");
+                CenterEditCamera(renderer, center);
+                renderer.PickFloors(renderer.Camera.WorldToScreen(center), _canvasFloorHits);
+                if (!_canvasFloorHits.Contains(_smokeFloor))
+                    throw new InvalidOperationException("The hidden tile was not restored and selectable in tiles-only mode.");
+                Console.WriteLine("Verified Escape focuses the planet's tile and restores hidden tiles to the tiles-only edit view.");
+                _chartTimeline.ViewStart = 0;
+                _chartTimeline.ViewLength = Math.Max(.05, renderer.Duration);
+                _smokeTimelineFloor = Array.FindIndex(renderer.EditorTiming!.EntryTimes,
+                    time => time > 0 && Math.Abs(time - renderer.PlayTime) > .01);
+                if (_smokeTimelineFloor < 0)
+                    goto case 51;
+                _smokePlaybackStage++;
+                break;
+            case 49:
+                _smokePlaybackStage++;
+                break;
+            case 50:
+                double markerTime = renderer.EditorTiming!.EntryTimes[_smokeTimelineFloor];
+                if (_floor != _smokeTimelineFloor || renderer.SelectedFloor != _smokeTimelineFloor ||
+                    Math.Abs(renderer.PlayTime - markerTime) > 1e-6)
+                    throw new InvalidOperationException("The footer timeline marker did not select its tile at the authored time.");
+                Console.WriteLine("Verified clicking a footer timeline marker selects the tile at its exact time.");
+                _smokePlaybackStage++;
+                break;
+            case 51:
                 Console.WriteLine("Verified selection and camera restoration, preview navigation, Shift+Escape, and Ctrl+Space from tile zero and with a modal open.");
                 Console.WriteLine("Verified incremental timing, mixer, tile and event changes, undo and rate changes without reloading.");
                 Console.WriteLine($"Verified tile editing, tiles-only mode, coarse/fine Ctrl+wheel, plain wheel, Space, native and Web Ctrl+Space routing, half speed, chart pitch preservation and {L.Language.Name} resources." +
                     (_smokeDecorationIndex >= 0 ? " Verified the rendered image quad." : ""));
+                PressPlaybackSmokeKey(Keys.Enter, KeyModifiers.Alt);
+                _smokePlaybackStage++;
+                break;
+            case 52:
+                if (!IsFullscreen || _applicationSettings.WindowMode != Player.ApplicationWindowMode.Fullscreen)
+                    throw new InvalidOperationException("Alt+Enter did not enter fullscreen.");
+                PressPlaybackSmokeKey(Keys.KeyPadEnter, KeyModifiers.Alt);
+                _smokePlaybackStage++;
+                break;
+            case 53:
+                if (IsFullscreen || _applicationSettings.WindowMode != Player.ApplicationWindowMode.Windowed)
+                    throw new InvalidOperationException("Alt+Enter did not return to windowed mode.");
+                Console.WriteLine("Verified Alt+Enter switches between fullscreen and windowed mode.");
+                _savedAt = Stopwatch.GetTimestamp();
+                _audioCalibration.SetOutputVolume(0);
+                SwitchPlaybackView(PlaybackView.Preview);
+                OpenAudioCalibration();
+                _smokePlaybackStage++;
+                break;
+            case 54:
+                if (!_audioCalibration.IsOpen || _playbackView != PlaybackView.Preview || renderer.IsPlaying)
+                    throw new InvalidOperationException("The audio calibration dialog did not open over the paused preview.");
+                if (ImGui.GetForegroundDrawList(ImGui.GetMainViewport())->VtxBuffer.Size == 0)
+                    throw new InvalidOperationException("The save notice did not render.");
+                _savedAt = Stopwatch.GetTimestamp() - Stopwatch.Frequency * 3;
+                PressPlaybackSmokeKey(Keys.Space);
+                _smokePlaybackStage++;
+                break;
+            case 55:
+                if (!_audioCalibration.IsOpen || _playbackView != PlaybackView.Preview || renderer.IsPlaying || _savedAt is not null)
+                    throw new InvalidOperationException("A calibration key affected playback or the save notice did not expire.");
+                PressPlaybackSmokeKey(Keys.Escape);
+                _smokePlaybackStage++;
+                break;
+            case 56:
+                if (_audioCalibration.IsOpen || _playbackView != PlaybackView.Preview)
+                    throw new InvalidOperationException("Escape did not close only the calibration dialog.");
+                Console.WriteLine("Verified the temporary save notice and audio calibration's keyboard routing.");
                 _allowClose = true;
                 Close();
                 break;

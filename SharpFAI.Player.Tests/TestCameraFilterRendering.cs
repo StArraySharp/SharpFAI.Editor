@@ -18,6 +18,71 @@ namespace SharpFAI.Player.Tests;
 [Apartment(ApartmentState.STA)]
 public sealed class TestCameraFilterRendering
 {
+    [Test, Explicit("Requires desktop OpenGL.")]
+    public void FilterUniformsUseTheLinkedVectorWidthAndIntegerType()
+    {
+        var fixture = Directory.CreateTempSubdirectory("sharpfai-uniforms-");
+        string previousDirectory = ShaderLibrary.DiskDirectory;
+        bool checkMainThread = GLFWProvider.CheckForMainThread;
+        GLFWProvider.CheckForMainThread = false;
+        try
+        {
+            var filters = fixture.CreateSubdirectory("Filters");
+            File.WriteAllText(Path.Combine(filters.FullName, "UniformTypes.frag"), """
+                #version 410 core
+                out vec4 color;
+                uniform vec2 _MainTex_TexelSize;
+                uniform int _NumberOfWaves;
+                void main() { color = vec4(_MainTex_TexelSize, float(_NumberOfWaves) / 8.0, 1.0); }
+                """);
+            File.WriteAllText(Path.Combine(filters.FullName, "UniformTypes.shaderlab"), """
+                Shader "UniformTypes" {
+                    Properties {
+                        _NumberOfWaves ("Waves", Range(0, 8)) = 2
+                    }
+                }
+                """);
+            ShaderLibrary.DiskDirectory = fixture.FullName;
+            ShaderLibrary.InvalidateCache();
+
+            using var window = new NativeWindow(new NativeWindowSettings
+            {
+                ClientSize = new(8, 4), StartVisible = false, StartFocused = false,
+                APIVersion = new Version(4, 1), Profile = ContextProfile.Core,
+            });
+            window.MakeCurrent();
+            GL.Disable(EnableCap.Dither);
+            using var backend = new OpenGlFilterBackend();
+            var source = backend.RentTarget(8, 4, 0);
+            var destination = (OpenGlFilterBackend.Target)backend.RentTarget(8, 4, 0);
+            var shader = backend.FindShader("UniformTypes");
+            var defaults = backend.CreateMaterial(shader);
+            var overrideMaterial = backend.CreateMaterial(shader);
+            overrideMaterial.SetInt("_NumberOfWaves", 5);
+
+            DrawAndCheck(defaults, 64);
+            DrawAndCheck(overrideMaterial, 159);
+            DrawAndCheck(defaults, 64);
+
+            void DrawAndCheck(IFilterMaterial material, byte blue)
+            {
+                backend.Blit(source, destination, material);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, destination.Framebuffer);
+                byte[] pixel = new byte[4];
+                GL.ReadPixels(0, 0, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
+                Assert.That(GL.GetError(), Is.EqualTo(ErrorCode.NoError));
+                Assert.That(pixel, Is.EqualTo(new byte[] { 32, 64, blue, 255 }));
+            }
+        }
+        finally
+        {
+            GLFWProvider.CheckForMainThread = checkMainThread;
+            ShaderLibrary.DiskDirectory = previousDirectory;
+            ShaderLibrary.InvalidateCache();
+            fixture.Delete(recursive: true);
+        }
+    }
+
     [Test, Explicit("Requires desktop OpenGL and the locally imported game shaders and textures.")]
     public void CameraPlanesMotionBlurAndPetalsRenderThroughTheOpenGlBackend()
     {
@@ -73,13 +138,14 @@ public sealed class TestCameraFilterRendering
         }
     }
 
-    public enum CameraCase { Background, ZeroZoom, BothFilters, Feedback, TileAnchor }
+    public enum CameraCase { Background, ZeroZoom, BothFilters, Feedback, TileAnchor, EffectsDisabled }
 
     [TestCase(CameraCase.Background, TestName = "BackgroundFilterDoesNotAffectPositiveDepthDecorations", Explicit = true)]
     [TestCase(CameraCase.ZeroZoom, TestName = "ZeroZoomKeepsFilteredBackgroundButHidesDecorations", Explicit = true)]
     [TestCase(CameraCase.BothFilters, TestName = "ForegroundFilterUsesBackgroundOutputAndMainCameraDecorations", Explicit = true)]
     [TestCase(CameraCase.Feedback, TestName = "HallOfMirrorsPreservesTheFrameBeforeActivation", Explicit = true)]
     [TestCase(CameraCase.TileAnchor, TestName = "TileRelativeDecorationIgnoresEditorOnlyOffsetDuringPlayback", Explicit = true)]
+    [TestCase(CameraCase.EffectsDisabled, TestName = "DisabledCameraEffectsDoNotAlterOfflineFrames", Explicit = true)]
     public void RenderCameraPlanes(CameraCase mode)
     {
         bool disableMainCamera = mode == CameraCase.ZeroZoom;
@@ -151,6 +217,34 @@ public sealed class TestCameraFilterRendering
             }
             Assert.That(renderer.LoadError, Is.Null);
             Assert.That(renderer.IsLoading, Is.False);
+
+            if (mode == CameraCase.EffectsDisabled)
+            {
+                renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults with
+                {
+                    CameraFilters = false,
+                    ScreenEffects = false,
+                    ScreenFlash = false,
+                });
+                renderer.SeekForOfflineRender(.01);
+                GL.Viewport(0, 0, 128, 96);
+                Clear(0, 0, 0);
+                renderer.Render();
+                byte[] unfiltered = ReadPixels();
+                Assert.That(unfiltered[..3], Is.EqualTo(new byte[] { 0, 0, 0 }));
+                Assert.That(unfiltered.AsSpan((24 * 128 + 102) * 4, 3).ToArray(),
+                    Is.EqualTo(new byte[] { 255, 0, 0 }));
+                renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults with
+                {
+                    CameraFilters = false, ScreenEffects = false, ScreenFlash = false,
+                    VisibleDecorations = DecorationKinds.All & ~DecorationKinds.Image,
+                });
+                Clear(0, 0, 0);
+                renderer.Render();
+                Assert.That(ReadPixels().AsSpan((24 * 128 + 102) * 4, 3).ToArray(),
+                    Is.EqualTo(new byte[] { 0, 0, 0 }));
+                renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults);
+            }
 
             renderer.SeekForOfflineRender(.01);
             GL.Viewport(0, 0, 128, 96);

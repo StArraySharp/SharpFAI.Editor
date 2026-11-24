@@ -83,7 +83,24 @@ internal class MoveImageDecoration : TimedEvent
     [JsonProperty("maskingBackDepth")] public int? MaskingBackDepth { get; set; }
 }
 
-internal sealed class AddObjectDecoration : AddImageDecoration
+internal interface IFloorDecorationProperties
+{
+    float? TrackAngle { get; }
+    string? TrackStyle { get; }
+    string? TrackColorType { get; }
+    string? SecondaryTrackColor { get; }
+    float? TrackColorAnimDuration { get; }
+    string? TrackIcon { get; }
+    float? TrackIconAngle { get; }
+    bool? TrackIconFlipped { get; }
+    bool? TrackRedSwirl { get; }
+    bool? TrackGraySetSpeedIcon { get; }
+    bool? TrackGlowEnabled { get; }
+    string? TrackGlowColor { get; }
+    bool? TrackIconOutlines { get; }
+}
+
+internal sealed class AddObjectDecoration : AddImageDecoration, IFloorDecorationProperties
 {
     [JsonProperty("objectType")] public string? ObjectType { get; set; }
     [JsonProperty("trackType")] public string? TrackType { get; set; }
@@ -91,14 +108,39 @@ internal sealed class AddObjectDecoration : AddImageDecoration
     [JsonProperty("trackStyle")] public string? TrackStyle { get; set; }
     [JsonProperty("trackColor")] public string? TrackColor { get; set; }
     [JsonProperty("trackOpacity")] public float? TrackOpacity { get; set; }
+    [JsonProperty("trackColorType")] public string? TrackColorType { get; set; }
+    [JsonProperty("secondaryTrackColor")] public string? SecondaryTrackColor { get; set; }
+    [JsonProperty("trackColorAnimDuration")] public float? TrackColorAnimDuration { get; set; }
+    [JsonProperty("trackIcon")] public string? TrackIcon { get; set; }
+    [JsonProperty("trackIconAngle")] public float? TrackIconAngle { get; set; }
+    [JsonProperty("trackIconFlipped")] public bool? TrackIconFlipped { get; set; }
+    [JsonProperty("trackRedSwirl")] public bool? TrackRedSwirl { get; set; }
+    [JsonProperty("trackGraySetSpeedIcon")] public bool? TrackGraySetSpeedIcon { get; set; }
+    [JsonProperty("trackSetSpeedIconBpm")] public float? TrackSetSpeedIconBpm { get; set; }
+    [JsonProperty("trackGlowEnabled")] public bool? TrackGlowEnabled { get; set; }
+    [JsonProperty("trackGlowColor")] public string? TrackGlowColor { get; set; }
+    [JsonProperty("trackIconOutlines")] public bool? TrackIconOutlines { get; set; }
     [JsonProperty("planetColorType")] public string? PlanetColorType { get; set; }
     [JsonProperty("planetColor")] public string? PlanetColor { get; set; }
 }
 
-internal sealed class SetObjectDecoration : MoveImageDecoration
+internal sealed class SetObjectDecoration : MoveImageDecoration, IFloorDecorationProperties
 {
     [JsonProperty("trackColor")] public string? TrackColor { get; set; }
     [JsonProperty("trackOpacity")] public float? TrackOpacity { get; set; }
+    [JsonProperty("trackAngle")] public float? TrackAngle { get; set; }
+    [JsonProperty("trackStyle")] public string? TrackStyle { get; set; }
+    [JsonProperty("trackColorType")] public string? TrackColorType { get; set; }
+    [JsonProperty("secondaryTrackColor")] public string? SecondaryTrackColor { get; set; }
+    [JsonProperty("trackColorAnimDuration")] public float? TrackColorAnimDuration { get; set; }
+    [JsonProperty("trackIcon")] public string? TrackIcon { get; set; }
+    [JsonProperty("trackIconAngle")] public float? TrackIconAngle { get; set; }
+    [JsonProperty("trackIconFlipped")] public bool? TrackIconFlipped { get; set; }
+    [JsonProperty("trackRedSwirl")] public bool? TrackRedSwirl { get; set; }
+    [JsonProperty("trackGraySetSpeedIcon")] public bool? TrackGraySetSpeedIcon { get; set; }
+    [JsonProperty("trackGlowEnabled")] public bool? TrackGlowEnabled { get; set; }
+    [JsonProperty("trackGlowColor")] public string? TrackGlowColor { get; set; }
+    [JsonProperty("trackIconOutlines")] public bool? TrackIconOutlines { get; set; }
     [JsonProperty("planetColor")] public string? PlanetColor { get; set; }
 }
 

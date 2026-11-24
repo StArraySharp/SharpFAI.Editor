@@ -13,6 +13,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../SharpFAI.Player/Engine/Filters/ShaderLabDefaults.cs" Link="ShaderLabDefaults.cs" />
+    <Compile Include="../SharpFAI.Player/Engine/Filters/FilterTextureSampling.cs" Link="FilterTextureSampling.cs" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="AsmResolver.DotNet" Version="6.0.1" PrivateAssets="all" />
     <PackageReference Include="ICSharpCode.Decompiler" Version="11.0.0.9375" PrivateAssets="all" />

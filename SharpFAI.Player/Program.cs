@@ -29,7 +29,7 @@ public static class Program
         GameWindowSettings gameWindowSettings = GameWindowSettings.Default;
         NativeWindowSettings nativeWindowSettings = new()
         {
-            ClientSize = new Vector2i(1280, 800),
+            ClientSize = new Vector2i(1280, 720),
             Title = "SharpFAI Player",
             StartVisible = false,
             APIVersion = new Version(4, 1),
@@ -54,7 +54,6 @@ public static class Program
         bool exportHidePassed = false;
         bool exportPreferHardware = true;
         bool skipAudio = false;
-
         // Allow loading a level straight from the command line
         for (int i = 0; i < args.Length; i++)
         {
@@ -79,6 +78,21 @@ public static class Program
             if (args[i] == "--no-audio")
             {
                 skipAudio = true;
+                continue;
+            }
+            if (args[i] is "--fire-color" or "--ice-color")
+            {
+                if (i + 1 >= args.Length || !ApplicationSettings.TryParsePlanetColor(args[i + 1], out int rgb))
+                {
+                    Console.Error.WriteLine($"{args[i]} needs a six-digit RGB color, for example FFFFFF.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+                if (args[i] == "--fire-color")
+                    window.FireColorFromCommandLine = ApplicationSettings.FormatPlanetColor(rgb);
+                else
+                    window.IceColorFromCommandLine = ApplicationSettings.FormatPlanetColor(rgb);
+                i++;
                 continue;
             }
             if (i + 1 >= args.Length)

@@ -7,6 +7,26 @@ namespace SharpFAI.Player.Tests;
 public sealed class TestShaderLabDefaults
 {
     [Test]
+    public void PlayerDoesNotEmbedOriginalShaderLabOrTextureMetadata()
+    {
+        string[] resources = typeof(ShaderLabDefaults).Assembly.GetManifestResourceNames();
+        Assert.That(resources.Where(name => name.EndsWith(".shaderlab", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)), Is.Empty);
+    }
+
+    [Test]
+    public void PlayerDoesNotEmbedZeroSuffixResources()
+    {
+        var assembly = typeof(ShaderLabDefaults).Assembly;
+        var resources = assembly.GetManifestResourceNames().ToHashSet(StringComparer.Ordinal);
+        Assert.That(resources.Where(name => name.EndsWith("_0", StringComparison.Ordinal) ||
+            Path.GetFileNameWithoutExtension(name).EndsWith("_0", StringComparison.Ordinal)), Is.Empty);
+
+        foreach (var (variant, original) in GeneratedFilterAssetDefaults.TextureAliases)
+            Assert.That(resources.Contains(original), Is.True, variant);
+    }
+
+    [Test]
     public void AppliesNumericTypesAndRangeParentheses()
     {
         var material = Apply("""

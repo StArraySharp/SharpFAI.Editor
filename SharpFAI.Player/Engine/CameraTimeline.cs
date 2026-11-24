@@ -44,17 +44,40 @@ internal sealed class CameraTimeline
     }
 
     private readonly State _initial;
-    private readonly Keyframe[] _frames;
-    private readonly ScheduledEvent<MoveCameraEvent>[] _schedule;
+    private readonly List<Keyframe> _frames;
     private readonly FollowPath _follow;
+    private readonly IReadOnlyList<Floor> _floors;
+    private readonly LevelPlaybackSettings _settings;
+    private readonly float _spacing;
+    internal TriggeredEventSchedule<MoveCameraEvent> Triggers { get; }
+    internal TriggeredEventSchedule<TrackRangeEvent>? FollowTrackTriggers { get; private set; }
 
-    private CameraTimeline(State initial, Keyframe[] frames, ScheduledEvent<MoveCameraEvent>[] schedule,
-        FollowPath follow)
+    private CameraTimeline(State initial, List<Keyframe> frames, ScheduledEvent<MoveCameraEvent>[] schedule,
+        FollowPath follow, IReadOnlyList<Floor> floors, LevelPlaybackSettings settings, float spacing)
     {
         _initial = initial;
         _frames = frames;
-        _schedule = schedule;
+        Triggers = new(schedule);
+        Triggers.Changed += (first, _) =>
+        {
+            if (first < _frames.Count)
+                _frames.RemoveRange(first, _frames.Count - first);
+        };
         _follow = follow;
+        _floors = floors;
+        _settings = settings;
+        _spacing = spacing;
+    }
+
+    internal void BindFollowTrack(TriggeredEventSchedule<TrackRangeEvent> track, CameraFollowTimeline follow)
+    {
+        FollowTrackTriggers = track;
+        track.Changed += (_, time) =>
+        {
+            follow.InvalidateFrom(time);
+            while (_frames.Count > 0 && _frames[^1].Time >= time)
+                _frames.RemoveAt(_frames.Count - 1);
+        };
     }
 
     public static CameraTimeline? Build(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors,
@@ -75,30 +98,27 @@ internal sealed class CameraTimeline
         State initial = new(mode, follow, null, 0, anchor, Channel.Fixed(start.X), Channel.Fixed(start.Y),
             Channel.Fixed(settings.CameraRotation), settings.CameraZoom == 0f ? Channel.Fixed(0f) : null);
         FollowPath followPath = new(followAt, playerAt ?? (time => Position(floors[FloorAt(timeline.EntryTimes, time)])));
-        State state = initial;
-        List<Keyframe> frames = new(scheduled.Length);
-        foreach (ScheduledEvent<MoveCameraEvent> item in scheduled)
-        {
-            state = Apply(state, item, floors, settings, spacing, followPath);
-            frames.Add(new Keyframe(item.Timing.Start, state));
-        }
-        return new CameraTimeline(initial, frames.ToArray(), scheduled, followPath);
+        var camera = new CameraTimeline(initial, new(scheduled.Length), scheduled, followPath, floors, settings, spacing);
+        camera.CompileThrough(scheduled, scheduled.Length);
+        return camera;
     }
 
     internal CameraTimeline? Edit(IReadOnlyDictionary<int, MoveCameraEvent> replacements,
         IReadOnlyList<Floor> floors, LevelRenderer.PlaybackTimeline timeline, LevelPlaybackSettings settings, float spacing)
     {
-        if (_frames.Length != _schedule.Length || replacements.Values.Any(item =>
+        var authored = Triggers.Authored;
+        if (Triggers.HasBindings || FollowTrackTriggers?.HasBindings == true || _frames.Count != authored.Length ||
+            replacements.Values.Any(item =>
                 item.Enabled("minVfxOnly", item.MinVfxOnly) == true) ||
-            !TimedEventSchedule.TryEdit(_schedule, replacements, floors, timeline.FloorBpms, out var scheduled))
+            !TimedEventSchedule.TryEdit(authored, replacements, floors, timeline.FloorBpms, out var scheduled))
             return null;
         if (scheduled.Any(item => !double.IsFinite(item.Timing.Start) || !double.IsFinite(item.Timing.Duration)))
             return null;
-        int first = Array.FindIndex(_schedule, item => replacements.ContainsKey(item.Event.SourceIndex));
+        int first = Array.FindIndex(authored, item => replacements.ContainsKey(item.Event.SourceIndex));
         if (first < 0)
             return null;
-        int last = Array.FindLastIndex(_schedule, item => replacements.ContainsKey(item.Event.SourceIndex));
-        var frames = (Keyframe[])_frames.Clone();
+        int last = Array.FindLastIndex(authored, item => replacements.ContainsKey(item.Event.SourceIndex));
+        var frames = new List<Keyframe>(_frames);
         State state = first == 0 ? _initial : frames[first - 1].State;
         for (int index = first; index < scheduled.Length; index++)
         {
@@ -107,23 +127,37 @@ internal sealed class CameraTimeline
             if (index >= last && frames[index] == _frames[index])
                 break;
         }
-        return new CameraTimeline(_initial, frames, scheduled, _follow);
+        return new CameraTimeline(_initial, frames, scheduled, _follow, floors, settings, spacing);
+    }
+
+    private void CompileThrough(IReadOnlyList<ScheduledEvent<MoveCameraEvent>> active, int end)
+    {
+        State state = _frames.Count == 0 ? _initial : _frames[^1].State;
+        for (int index = _frames.Count; index < end; index++)
+        {
+            var item = active[index];
+            state = Apply(state, item, _floors, _settings, _spacing, _follow);
+            _frames.Add(new Keyframe(item.Timing.Start, state));
+        }
     }
 
     public Sample Evaluate(double time, float baseZoom) => Evaluate(time, null, baseZoom);
 
     public Sample Evaluate(double time, Vector2? player, float baseZoom)
     {
-        int lo = 0, hi = _frames.Length;
+        var active = Triggers.Active;
+        int lo = 0, hi = active.Count;
         while (lo < hi)
         {
             int mid = lo + ((hi - lo) >> 1);
-            if (_frames[mid].Time <= time)
+            if (active[mid].Timing.Start <= time)
                 lo = mid + 1;
             else
                 hi = mid;
         }
 
+        if (lo > _frames.Count)
+            CompileThrough(active, lo);
         State state = lo > 0 ? _frames[lo - 1].State : _initial;
         Vector2 position = new(state.X.At(time), state.Y.At(time));
         if (state.Follow)

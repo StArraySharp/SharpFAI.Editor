@@ -27,11 +27,14 @@ internal sealed class EditorCatalog
 
     public static readonly string[] DecorationTypes = ["AddDecoration", "AddText", "AddObject", "AddParticle"];
 
+    private static readonly string[] PlanetEvents = ["MultiPlanet", "Hold", "ScaleRadius"];
+    private static readonly string[] ExistingAudioEvents = ["SetHitsound", "PlaySound"];
+
     public (string Key, string[] Events)[] Categories { get; private set; } =
     [
-        ("Gameplay", ["SetSpeed", "Twirl", "Pause", "Hold", "MultiPlanet", "ScaleRadius", "SetHitsound", "PlaySound", "Bookmark"]),
+        ("Gameplay", ["SetSpeed", "Twirl", "Pause", .. PlanetEvents, "Bookmark"]),
         ("TrackFx", ["PositionTrack", "ColorTrack", "AnimateTrack", "MoveTrack", "RecolorTrack"]),
-        ("DecorationFx", ["MoveDecorations", "SetText", "SetParticle", "EmitParticle"]),
+        ("DecorationFx", ["MoveDecorations", "SetObject", "SetText", "SetParticle", "EmitParticle"]),
         ("VisualFx", ["CustomBackground", "MoveCamera", "Flash", "SetFilter", "SetFilterAdvanced", "Bloom", "HallOfMirrors"]),
         ("FxModifiers", ["RepeatEvents"]),
         ("Conveniences", ["EditorComment"])
@@ -45,6 +48,8 @@ internal sealed class EditorCatalog
         foreach (var category in Categories)
             foreach (string name in category.Events)
                 _events.TryAdd(name, new(name, false, name != "SetSpeed", []));
+        foreach (string name in ExistingAudioEvents)
+            _events.Add(name, new(name, false, true, []));
         foreach (string name in DecorationTypes)
             _events[name] = new(name, true, true, []);
 
@@ -71,11 +76,26 @@ internal sealed class EditorCatalog
         AddDefaults("HallOfMirrors", """{"enabled":true,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("RepeatEvents", """{"repeatType":"Beat","repetitions":1,"interval":1.0,"tag":""}""");
         AddDefaults("SetText", """{"decText":"","tag":"","angleOffset":0.0,"eventTag":""}""");
+        AddDefaults("SetObject", """{"duration":1.0,"tag":"","angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("SetParticle", """{"tag":"","targetMode":"Start","duration":0.0,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("EmitParticle", """{"tag":"","count":10,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("AddDecoration", """{"decorationImage":"","tag":"","relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"cropPivotOffset":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0],"maskingType":"None"}""");
         AddDefaults("AddText", """{"decText":"","tag":"","font":"Default","relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0]}""");
-        AddDefaults("AddObject", """{"objectType":"Floor","tag":"","relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"depth":-1}""");
+        AddDefaults("AddObject", """
+            {"objectType":"Floor","tag":"","trackType":"Normal","trackAngle":180.0,"trackColorType":"Single",
+             "trackColor":"debb7b","secondaryTrackColor":"ffffff","trackColorAnimDuration":2.0,"trackOpacity":100.0,
+             "trackStyle":"Standard","trackIcon":"None","trackIconAngle":0.0,"trackIconFlipped":false,
+             "trackRedSwirl":false,"trackGraySetSpeedIcon":false,"trackSetSpeedIconBpm":100.0,
+             "trackGlowEnabled":false,"trackGlowColor":"ffffff","trackIconOutlines":false,
+             "relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"rotation":0.0,"lockRotation":false,
+             "scale":[100,100],"lockScale":false,"depth":-1,"syncFloorDepth":false,"parallax":[0,0],"parallaxOffset":[0,0]}
+            """);
+        EditorEvent setObject = _events["SetObject"];
+        EditorField[] floorFields = _events["AddObject"].Fields
+            .Where(field => IsObjectFloorField(field.Key) && field.Key is not ("trackType" or "trackSetSpeedIconBpm"))
+            .Select(field => field with { ShowIf = null, DisableIf = null, Optional = true, StartEnabled = false })
+            .ToArray();
+        _events["SetObject"] = setObject with { Fields = [.. setObject.Fields[..2], .. floorFields, .. setObject.Fields[2..]] };
         AddDefaults("AddParticle", """
             {"tag":"","autoPlay":true,"relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"depth":-1,
              "maxParticles":1000,"simulationSpace":"Local","simulationSpeed":100.0,"playDuration":5.0,"loop":true,"randomSeed":0,
@@ -90,7 +110,8 @@ internal sealed class EditorCatalog
         AddSettings("LevelSettings", "artist", "song", "author", "levelDesc", "difficulty", "levelTags", "previewImage", "previewSongStart");
         AddSettings("TrackSettings", "tileShape", "trackColorType", "trackColor", "secondaryTrackColor", "trackStyle", "trackTexture",
             "trackTextureScale", "trackAnimation", "beatsAhead", "trackDisappearAnimation", "beatsBehind");
-        AddSettings("BackgroundSettings", "backgroundColor", "bgImage", "bgImageColor", "bgDisplayMode", "parallax", "loopBG",
+        AddSettings("BackgroundSettings", "backgroundColor", "showDefaultBGIfNoImage", "showDefaultBGTile", "defaultBGTileColor",
+            "defaultBGShapeType", "defaultBGShapeColor", "bgImage", "bgImageColor", "bgDisplayMode", "parallax", "loopBG",
             "bgVideo", "vidOffset", "loopVideo");
         AddSettings("CameraSettings", "relativeTo", "position", "rotation", "zoom", "pulseOnFloor");
         AddSettings("MiscSettings", "stickToFloors", "floorIconOutlines", "planetEase", "planetEaseParts", "separateCountdownTime");
@@ -155,6 +176,19 @@ internal sealed class EditorCatalog
                 EditorField metadata = Infer(field.Name, field.Value, type);
                 if (type == "AddParticle" && field.Name is "color" or "colorOverLifetime")
                     metadata = metadata with { Type = "MinMaxGradient" };
+                if (type == "AddObject" && IsObjectFloorField(field.Name))
+                    metadata = metadata with
+                    {
+                        ShowIf = ["objectType", "Floor"],
+                        DisableIf = field.Name == "trackAngle" ? ["trackType", "Midspin"] : null,
+                        Unit = field.Name switch
+                        {
+                            "trackAngle" or "trackIconAngle" => "°",
+                            "trackOpacity" => "%",
+                            "trackColorAnimDuration" => "seconds",
+                            _ => metadata.Unit,
+                        },
+                    };
                 if (type == "PlaySound")
                     metadata = field.Name switch
                     {
@@ -164,10 +198,20 @@ internal sealed class EditorCatalog
                         "angleOffset" => metadata with { Unit = "\u00b0" },
                         _ => metadata
                     };
+                metadata = (type, field.Name) switch
+                {
+                    ("Hold", "duration") => metadata with { Unit = "loops", Minimum = 0 },
+                    ("Hold", "distanceMultiplier") => metadata with { Unit = "%" },
+                    ("ScaleRadius", "scale") => metadata with { Unit = "%", Minimum = -10000, Maximum = 10000 },
+                    _ => metadata,
+                };
                 return metadata with { Optional = optional.Contains(field.Name), StartEnabled = false };
             }).ToArray()
         };
     }
+
+    private static bool IsObjectFloorField(string key) =>
+        key.StartsWith("track", StringComparison.Ordinal) || key == "secondaryTrackColor";
 
     private void LoadSchema(JObject schema)
     {
@@ -175,6 +219,7 @@ internal sealed class EditorCatalog
             schema["settings"] is not JArray settings)
             throw new InvalidDataException(L.T("MalformedSchema"));
 
+        var builtInEvents = PlanetEvents.Concat(ExistingAudioEvents).Select(name => _events[name]).ToArray();
         _events.Clear();
         foreach (JObject item in events.OfType<JObject>().Where(item => item.Value<bool?>("pro") != true))
         {
@@ -182,15 +227,25 @@ internal sealed class EditorCatalog
             _events[type] = new(type, item.Value<bool?>("isDecoration") == true,
                 item.Value<bool?>("allowFirstFloor") != false, ReadFields(item));
         }
-        Categories = categories.OfType<JObject>().Select(category =>
+        foreach (var definition in builtInEvents)
+            _events.TryAdd(definition.Type, definition);
+
+        var loadedCategories = categories.OfType<JObject>().Select(category =>
         {
             string key = category.Value<string>("name")!;
-            string[] names = category["events"]!.Values<string>()
-                .OfType<string>().Where(name => Find(name) is { Decoration: false } && name != "ChangeTrack").ToArray();
-            return (key, names);
-        }).Where(category => category.names.Length > 0).ToArray();
-        if (Categories.Length == 0)
+            var names = category["events"]!.Values<string>().OfType<string>()
+                .Where(name => Find(name) is { Decoration: false } && name != "ChangeTrack" &&
+                    !ExistingAudioEvents.Contains(name));
+            names = key == "Gameplay"
+                ? names.Concat(PlanetEvents).Distinct(StringComparer.Ordinal)
+                : names.Except(PlanetEvents, StringComparer.Ordinal);
+            return (Key: key, Events: names.ToArray());
+        }).ToList();
+        if (loadedCategories.Count == 0)
             throw new InvalidDataException(L.T("EmptySchema"));
+        if (!loadedCategories.Any(category => category.Key == "Gameplay"))
+            loadedCategories.Insert(0, ("Gameplay", PlanetEvents));
+        Categories = loadedCategories.Where(category => category.Events.Length > 0).ToArray();
 
         foreach (JObject item in settings.OfType<JObject>())
         {
@@ -218,7 +273,7 @@ internal sealed class EditorCatalog
                 var metadata = new EditorField(key, type, value, field["disableIf"] as JArray,
                     field.Value<string>("control") == "Hidden", field.Value<string>("unit"),
                     field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") == true,
-                    field.Value<double?>("min"), field.Value<double?>("max"), field.Value<bool?>("allowEmpty") == true,
+                    ReadBound(field["min"]), ReadBound(field["max"]), field.Value<bool?>("allowEmpty") == true,
                     ShowIf: field["showIf"] as JArray, HideIf: field["hideIf"] as JArray,
                     EnableIf: field["enableIf"] as JArray, FileType: field.Value<string>("fileType"),
                     StringDropdown: field.Value<bool?>("stringDropdown") == true, Browsable: field.Value<bool?>("browsable") == true);
@@ -230,6 +285,17 @@ internal sealed class EditorCatalog
                 return metadata with { Options = options };
             })
             .ToArray();
+    }
+
+    private static double? ReadBound(JToken? token)
+    {
+        if (token is JArray { Count: 2 } pair)
+        {
+            double? first = (pair[0] as JValue)?.Value<double?>();
+            double? second = (pair[1] as JValue)?.Value<double?>();
+            return first == second ? first : null;
+        }
+        return (token as JValue)?.Value<double?>();
     }
 
     private static readonly string[] EaseOptions = Enum.GetNames<EventEnums.Ease>()

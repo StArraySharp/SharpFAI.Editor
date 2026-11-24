@@ -116,6 +116,34 @@ public class TestTrackEvents
         Assert.That(timeline.TransformAt(0, 1.5, false).Transform, Is.EqualTo(moved));
     }
 
+    [Test]
+    public void TrackSeekCheckpointsMatchSequentialReplayAcrossJumps()
+    {
+        const int floorCount = 640;
+        string[] actions = Enumerable.Range(0, floorCount).SelectMany(floor => new[]
+        {
+            $$"""{"floor":{{floor}},"eventType":"MoveTrack","startTile":[0,"Start"],"endTile":[0,"ThisTile"],"positionOffset":[{{floor % 5}},0],"duration":4}""",
+            $$"""{"floor":{{floor}},"eventType":"RecolorTrack","trackColor":"{{(floor % 2 == 0 ? "ff0000" : "0000ff")}}","duration":2}""",
+        }).ToArray();
+        Level level = Chart(actions);
+        var expected = Runtime(level, floorCount);
+        var actual = Runtime(level, floorCount);
+        actual.PrepareSeekCheckpoints(CancellationToken.None);
+
+        foreach (double time in new[] { 280.25, 64.75, 310.0, 309.9, 219.75, 0.25, 318.0 })
+        {
+            expected.Reset();
+            expected.Advance(time);
+            actual.Advance(time);
+            Assert.That(actual.States, Is.EqualTo(expected.States), $"Track materials at {time}");
+            foreach (int floor in new[] { 0, 128, 400, 600 })
+            {
+                Assert.That(actual.TransformAt(floor, time, false), Is.EqualTo(expected.TransformAt(floor, time, false)));
+                Assert.That(actual.ColorAt(floor, time), Is.EqualTo(expected.ColorAt(floor, time)));
+            }
+        }
+    }
+
     [TestCase(true)]
     [TestCase(false)]
     public void MoveTrackUsesPlacedOriginAndOnlyAttachedPlanetsFollow(bool stick)

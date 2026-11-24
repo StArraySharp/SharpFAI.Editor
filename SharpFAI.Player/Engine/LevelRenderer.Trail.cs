@@ -6,12 +6,16 @@ public sealed unsafe partial class LevelRenderer
 {
     private void UpdateOfflineTrail(double time)
     {
+        double lifetime = _trail.ActiveLifetime;
+        if (lifetime <= 0)
+            return;
+
         double cursor = _offlineTrailTime;
-        if (double.IsNaN(cursor) || time < cursor || time - cursor > PlanetTrail.Lifetime)
+        if (double.IsNaN(cursor) || time < cursor || time - cursor > lifetime)
         {
             _trail.Clear();
             _offlineTrailFloor = -1;
-            cursor = Math.Max(0.0, time - PlanetTrail.Lifetime);
+            cursor = Math.Max(0.0, time - lifetime);
             RecordAt(FloorAtTime(_entryTimes, cursor), cursor);
         }
 

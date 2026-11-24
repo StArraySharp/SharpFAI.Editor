@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ImGui4NET;
 using ImGui4NET.Backend.OpenGL3;
 using NativeFileDialog;
@@ -17,7 +18,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private static string DecorationsWindow => L.T("Decorations") + "###decorations";
     private static string CanvasWindow => L.T("Chart") + "###canvas";
     private static string InspectorWindow => L.T("Inspector") + "###inspector";
-    private static string PaletteWindow => L.T("Palette") + "###palette";
+    private string PaletteWindow => L.T(_showTimeline ? _showPalette ? "TimelineAndEvents" : "Timeline" : "Palette") + "###palette";
     private static string ParticleWindow => L.T("ParticleEditor") + "###particle";
 
     private readonly EditorCatalog _catalog;
@@ -69,6 +70,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
+        if (_profileStartup)
+            Console.WriteLine($"Startup GPU: {GL.GetString(StringName.Renderer)}");
         _context = ImGui.CreateContext();
         ImGui.SetCurrentContext(_context);
         ImGuiIO* io = ImGui.GetIO();
@@ -89,6 +92,11 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ApplyTheme(style);
         LoadFont(io);
         LoadApplicationSettings();
+        if (!_smokeTest && !_effectBenchmark)
+        {
+            _lastChartPath = _recentChart.Read();
+            RememberOpenedChart();
+        }
         InitializePlayback();
         _inputMethod = SharpFAI.Player.WindowInputMethod.Create(WindowPtr);
         TextInput += e => ImGuiIO.AddInputCharacter(io, (uint)e.Unicode);
@@ -140,8 +148,12 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
+        ApplyPendingApplicationSettings();
+        if (!_smokeTest && !_effectBenchmark)
+            _autoBackup.Update(_document);
         if (ClientSize.X <= 0 || ClientSize.Y <= 0)
             return;
+        long start = _profileStartup && _startupClock.Elapsed.TotalSeconds < 8 ? Stopwatch.GetTimestamp() : 0;
         UpdateVideoRender();
         ImGuiIO* io = ImGui.GetIO();
         io->DisplaySize = WidgetDraw.V2(ClientSize.X, ClientSize.Y);
@@ -156,13 +168,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
-        if (_pendingApplicationSettings is { } settings)
-        {
-            _applicationSettings = settings;
-            _pendingApplicationSettings = null;
-            ApplyApplicationSettings();
-        }
-
+        long guiReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         if (_closeRequested)
         {
             _closeRequested = false;
@@ -174,6 +180,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         HandleShortcuts();
         _numericDrawn = false;
         UpdatePlayback();
+        long sceneReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         DrawSettings();
         DrawDecorations();
         DrawCanvas();
@@ -193,25 +200,31 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         DrawDialogs();
         _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
             TryApplyApplicationSettings);
+        if (_playback is { } renderer)
+            _audioCalibration.Draw(renderer, L.IsChinese);
+        DrawSaveNotice();
         if (_smokeTest) DrawNumericSmoke();
         if (!_numericDrawn)
             FinishNumericEdit();
         ApplyConfiguredPlaybackShortcut();
-        _inputMethod?.Update(IsFocused, _playbackView switch
+        _inputMethod?.Update(IsFocused, !_audioCalibration.IsOpen && (_playbackView switch
         {
             PlaybackView.Edit => _hasFloorSelection || _inspectDecoration,
             PlaybackView.Preview => _playback is { SelectedFloor: >= 0 },
             _ => true,
-        });
+        }));
         UpdateTitle();
 
         GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
         GL.ClearColor(0.059f, 0.065f, 0.083f, 1);
         GL.Clear(ClearBufferMask.ColorBufferBit);
         ImGui.Render();
+        long uiReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         ImGui_ImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
         WebMirror?.CaptureFrame(FramebufferSize.X, FramebufferSize.Y);
         SwapBuffers();
+        if (start != 0)
+            ProfileStartupFrame(start, guiReady, sceneReady, uiReady);
 
         if (_effectBenchmark)
         {
@@ -254,7 +267,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         colors[(int)ImGuiCol.ImGuiCol_CheckMark] = WidgetDraw.V4(0.37f, 0.87f, 0.81f, 1);
     }
 
-    private static void VerifyLayout()
+    private void VerifyLayout()
     {
         ImGuiWindow* left = ImGui.FindWindowByName(SettingsWindow);
         ImGuiWindow* manager = ImGui.FindWindowByName(DecorationsWindow);
@@ -293,7 +306,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     protected override void OnUnload()
     {
+        _autoBackup.CompleteWrite(wait: true);
+        _displayFrameLimit.Dispose();
         _inputMethod?.Dispose();
+        _audioCalibration.Dispose();
         DisposeVideoRender();
         DisposePlayback();
         if (_backendInitialized)
@@ -316,7 +332,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderSetNodePos(dock, viewport->WorkPos);
         ImGui.DockBuilderSetNodeSize(dock, viewport->WorkSize);
         uint canvas = dock;
-        uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, 0.16f, null, &canvas);
+        float footerHeight = TimelineRulerHeight + TimelineFloorHeight +
+            4 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
+        float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .42f);
+        uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, footerRatio, null, &canvas);
         uint left = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Left, 0.22f, null, &canvas);
         uint right = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Right, 0.30f, null, &canvas);
         ImGui.DockBuilderDockWindow(CanvasWindow, canvas);
@@ -335,6 +354,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         {
             if (ImGui.MenuItem(L.T("New"), "Ctrl+N") != 0) Confirm(() => SetDocument(new()));
             if (ImGui.MenuItem(L.T("Open"), "Ctrl+O") != 0) Confirm(Open);
+            DrawOpenLastChartMenuItem();
             if (ImGui.MenuItem(L.T("Save"), "Ctrl+S") != 0) Save();
             if (ImGui.MenuItem(L.T("SaveAs"), "Ctrl+Shift+S") != 0) Save(true);
             ImGui.Separator();
@@ -353,15 +373,21 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (ImGui.BeginMenu(L.T("MenuView")) != 0)
         {
+            if (ImGui.MenuItem(L.T("Fullscreen"), "Alt+Enter", (byte)(IsFullscreen ? 1 : 0)) != 0)
+                _windowMode.RequestToggle();
+            if (ImGui.MenuItem(L.T("AudioCalibration"), null, 0, (byte)(_videoExport?.Request is null ? 1 : 0)) != 0)
+                OpenAudioCalibration();
+            ImGui.Separator();
             ToggleMenu(L.T("Settings"), ref _showSettings);
             ToggleMenu(L.T("Decorations"), ref _showDecorations);
             ToggleMenu(L.T("Inspector"), ref _showInspector);
             ToggleMenu(L.T("Palette"), ref _showPalette);
+            ToggleMenu(L.T("Timeline"), ref _showTimeline);
             ToggleMenu(L.T("FloorNumbers"), ref _showBrickNumbers, "Ctrl+F");
             ImGui.Separator();
             if (ImGui.MenuItem(L.T("ResetLayout")) != 0)
             {
-                _showSettings = _showDecorations = _showInspector = _showPalette = _resetLayout = true;
+                _showSettings = _showDecorations = _showInspector = _showPalette = _showTimeline = _resetLayout = true;
                 _showParticle = false;
             }
             ImGui.EndMenu();
@@ -381,7 +407,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (ImGui.MenuItem(L.T("Autoplay"), "Alt+A", (byte)(_shortcutAuto ? 1 : 0)) != 0) ToggleShortcutAutoplay();
             if (ImGui.MenuItem(L.T("NoFail"), "Alt+N", (byte)(_shortcutNoFail ? 1 : 0)) != 0) ToggleShortcutNoFail();
             if (ImGui.MenuItem(L.T("FindCommentCommand"), "Alt+F") != 0) _openFindComment = true;
-            if (ImGui.MenuItem(L.T("ReturnToEdit"), "Esc") != 0) SwitchPlaybackView(PlaybackView.Edit);
+            if (ImGui.MenuItem(L.T("ReturnToEdit"), "Esc") != 0) ReturnToEdit();
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu(L.T("MenuRender")) != 0)
@@ -401,7 +427,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ImGui.EndMenu();
         }
         DrawApplicationSettingsMenuItem();
-        _menuBarFrameRate.Draw(showFrameRate: _applicationSettings.ShowFrameRate);
+        _menuBarFrameRate.Draw(ChartFileName, _applicationSettings.ShowFrameRate, UnsavedChartMarker);
         ImGui.EndMainMenuBar();
     }
 
@@ -455,6 +481,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         SwitchPlaybackView(PlaybackView.Edit);
         _playbackFrameAvailable = false;
         _document = document;
+        RememberOpenedChart();
         _decorationRowsKey = null;
         _decorationMarkersVersion = -1;
         _decoration = _particle = null;
@@ -498,7 +525,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     {
         try
         {
-            string? file = _document.Path;
+            string? previousPath = _document.Path;
+            string? file = previousPath;
             if (saveAs || file is null)
                 file = NativeFileDialog.NativeFileDialog.GetFileDialog()?.SaveFile(L.T("SaveLevel"),
                     Path.GetDirectoryName(file) ?? "", Path.GetFileName(file) ?? "level.adofai",
@@ -508,6 +536,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (!Path.HasExtension(file))
                 file += ".adofai";
             _document.Save(file);
+            _savedAt = Stopwatch.GetTimestamp();
+            if (_document.Path != previousPath)
+                RememberOpenedChart();
             return true;
         }
         catch (Exception error) { ShowError(error); return false; }
@@ -583,10 +614,12 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             action?.Invoke();
     }
 
+    private string ChartFileName => Path.GetFileName(_document.Path) ?? L.T("Untitled");
+    private string UnsavedChartMarker => _document.Modified ? " *" : "";
+
     private void UpdateTitle()
     {
-        string name = Path.GetFileName(_document.Path) ?? L.T("Untitled");
-        string title = $"SharpFAI Editor — {name}{(_document.Modified ? " *" : "")}";
+        string title = $"SharpFAI Editor — {ChartFileName}{UnsavedChartMarker}";
         if (Title != title)
             Title = title;
     }

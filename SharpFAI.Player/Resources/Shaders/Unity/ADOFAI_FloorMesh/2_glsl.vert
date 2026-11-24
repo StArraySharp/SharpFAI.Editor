@@ -10,6 +10,8 @@ uniform 	vec4 uViewProjection[4];
 uniform vec2 uCameraOrigin;
 uniform sampler2D uFloorData;
 uniform bool uStreamFloors;
+uniform vec4 uDecorationColor;
+uniform vec4 uDecorationParams;
 uniform samplerBuffer uFloorInstances;
 uniform samplerBuffer uFloorShapes;
 uniform 	float _FlashColor;
@@ -62,6 +64,12 @@ void main()
     }
     vec4 floorColor = texelFetch(uFloorData, address, 0);
     vec4 transform = texelFetch(uFloorData, address + ivec2(1, 0), 0);
+    if (uDecorationParams.w != 0.0)
+    {
+        floorColor = uDecorationColor;
+        scaleOpacity.z = uDecorationParams.x;
+        iconData.xz = uDecorationParams.yz;
+    }
     vec4 vertexColor = aVertexColor;
     vec4 uv = vec4(aTexCoord, aTileCoord);
     vec4 style = aStyleParams;

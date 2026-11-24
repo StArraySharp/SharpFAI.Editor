@@ -7,10 +7,12 @@ namespace SharpFAI.Player.Engine;
 internal static class ObjectDecorationArt
 {
     internal const string PlanetKey = "\0object-planet";
+    internal const string FloorKey = "\0object-floor";
+    internal const string FloorGlowKey = "\0object-floor-glow";
     private const int PlanetFrames = 11;
     private const int PlanetFps = 12;
     private static readonly Lazy<ImageDecoder.RgbaImage[]> Planet = new(LoadPlanet);
-    private static readonly Lazy<ImageDecoder.RgbaImage> StandardFloorTexture = new(() => Load(TrackStyleInfo.Standard.TileResolved!));
+    private static readonly Lazy<ImageDecoder.RgbaImage> FloorGlow = new(() => Load("Resources.PlayerIcons.light_white.png"));
     internal static readonly ImageDecoder.RgbaImage Particle = new(1, 1, [255, 255, 255, 255]);
 
     private static string PlanetFrameKey(int frame) => frame == 0 ? PlanetKey : $"{PlanetKey}-{frame}";
@@ -22,14 +24,11 @@ internal static class ObjectDecorationArt
         Dictionary<string, DecorationImage> images)
     {
         string kind = source.ObjectType ?? "Floor";
-        float turn = source.TrackAngle is { } angle && float.IsFinite(angle) ? angle % 360f : 180f;
-        bool midspin = string.Equals(source.TrackType, "Midspin", StringComparison.OrdinalIgnoreCase);
-        var style = TrackStyleInfo.Parse(source.TrackStyle);
         string key = kind switch
         {
             "Planet" => PlanetKey,
             "PlayerBubble" => "\0object-bubble",
-            _ => FormattableString.Invariant($"\0object-floor-{style.Index}-{(midspin ? 0 : turn)}-{midspin}"),
+            _ => FloorKey,
         };
         if (!images.ContainsKey(key))
         {
@@ -40,67 +39,24 @@ internal static class ObjectDecorationArt
                     images.Add(PlanetFrameKey(i), frames[i]);
             }
             else
-                images.Add(key, kind == "PlayerBubble" ? Bubble() : Floor(turn, midspin, style));
+                images.Add(key, kind == "PlayerBubble" ? Bubble() : Particle);
         }
+        if (key == FloorKey && !images.ContainsKey(FloorGlowKey))
+            images.Add(FloorGlowKey, FloorGlow.Value);
         Vector4 tint = kind switch
         {
             "Planet" => source.PlanetColorType switch
             {
                 "Custom" => FloorTrackStateResolver.ParseColor(source.PlanetColor) ?? Vector4.One,
-                "DefaultBlue" => new(.18f, .68f, 1f, 1f),
+                "DefaultBlue" => new(0f, 0f, 1f, 1f),
                 "Gold" => new(1f, .78f, .23f, 1f),
                 "Overseer" => new(.62f, .88f, 1f, 1f),
-                _ => new(1f, .24f, .24f, 1f),
+                _ => new(1f, 0f, 0f, 1f),
             },
             "PlayerBubble" => Vector4.One,
-            _ => FloorTrackStateResolver.ParseColor(source.TrackColor) ?? new Vector4(.82f, .68f, .54f, 1f),
+            _ => ObjectFloorState.ReadTint(source),
         };
-        return (key, tint, kind == "Floor" ? Math.Clamp((source.TrackOpacity ?? 100) * .01f, 0, 1) : 1f);
-    }
-
-    private static ImageDecoder.RgbaImage Floor(float turn, bool midspin, TrackStyleInfo style)
-    {
-        var mesh = new FloorMesh(-180, midspin ? -180 : 180 - turn, style.TileWidth, style.TileLength,
-            midspin ? 3 : 40, style.Sprite).Generate();
-        var outline = mesh.Collider;
-        if (outline.Length < 3)
-            return new(1, 1, [0, 0, 0, 0]);
-
-        // Keep the mesh pivot centered even when the polygon extends farther in one direction.
-        int size = (int)MathF.Ceiling(outline.Max(p => MathF.Max(MathF.Abs(p.X), MathF.Abs(p.Y))) + 1f) * 2;
-        var texture = style == TrackStyleInfo.Standard ? StandardFloorTexture.Value : default;
-        return Raster(size, (x, y) =>
-        {
-            var point = new System.Numerics.Vector2(x * size * .5f, y * size * .5f);
-            bool inside = false;
-            float distanceSquared = float.PositiveInfinity;
-            for (int i = 0, j = outline.Length - 1; i < outline.Length; j = i++)
-            {
-                var a = outline[j];
-                var b = outline[i];
-                if ((a.Y > point.Y) != (b.Y > point.Y) &&
-                    point.X < a.X + (b.X - a.X) * (point.Y - a.Y) / (b.Y - a.Y))
-                    inside = !inside;
-                var segment = b - a;
-                float fraction = Math.Clamp(System.Numerics.Vector2.Dot(point - a, segment) /
-                    Math.Max(segment.LengthSquared(), 1e-6f), 0f, 1f);
-                distanceSquared = Math.Min(distanceSquared, System.Numerics.Vector2.DistanceSquared(point, a + fraction * segment));
-            }
-            float distance = MathF.Sqrt(distanceSquared) * (inside ? 1f : -1f);
-            float alpha = Math.Clamp(distance + .5f, 0f, 1f);
-            float edge = .66f + .34f * Math.Clamp(distance / 2.5f, 0f, 1f);
-            float detail = texture.Width == 0 ? 1f : SampleFloorTexture(texture, point.X, point.Y, style.TileScale);
-            return (edge * detail, alpha);
-        });
-    }
-
-    private static float SampleFloorTexture(ImageDecoder.RgbaImage texture, float x, float y, float scale)
-    {
-        float u = .37f + x / (100f * scale);
-        float v = .58f + y / (100f * scale);
-        int tx = (int)((u - MathF.Floor(u)) * texture.Width);
-        int ty = (int)((v - MathF.Floor(v)) * texture.Height);
-        return texture.Pixels[(ty * texture.Width + tx) * 4] / 255f;
+        return (key, tint, key == FloorKey ? ObjectFloorState.ReadOpacity(source) : 1f);
     }
 
     private static ImageDecoder.RgbaImage Bubble() => Raster(100, (x, y) =>

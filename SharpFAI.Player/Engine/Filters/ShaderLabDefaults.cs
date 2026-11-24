@@ -1,22 +1,33 @@
 using System.Globalization;
-using System.Numerics;
+using System;
+using System.Collections.Generic;
 using System.Text;
 
 namespace SharpFAI.Player.Engine.Filters;
 
 /// <summary>Parsed ShaderLab defaults, reusable for each new material without retaining shader source.</summary>
-internal sealed class ShaderLabDefaults
+internal sealed partial class ShaderLabDefaults
 {
-    private readonly record struct Token(string Text, bool Quoted = false);
-    private sealed record Property(string Name, string Type, float Scalar = 0, int Integer = 0,
-        Vector4 Vector = default, string? Texture = null);
+    private readonly struct Token(string text, bool quoted = false)
+    {
+        public string Text { get; } = text;
+        public bool Quoted { get; } = quoted;
+    }
 
-    private readonly Property[] properties;
+    internal sealed class Property(string name, string type, float scalar = 0, int integer = 0,
+        (float X, float Y, float Z, float W) vector = default, string? texture = null)
+    {
+        public string Name { get; } = name;
+        public string Type { get; } = type;
+        public float Scalar { get; } = scalar;
+        public int Integer { get; } = integer;
+        public (float X, float Y, float Z, float W) Vector { get; } = vector;
+        public string? Texture { get; } = texture;
+    }
 
-    private ShaderLabDefaults(Property[] properties) => this.properties = properties;
+    internal IReadOnlyList<Property> Properties { get; }
 
-    internal static void Apply(string shaderLab, IFilterMaterial material,
-        Func<string, IFilterTexture?> builtInTexture) => Parse(shaderLab).Apply(material, builtInTexture);
+    internal ShaderLabDefaults(Property[] properties) => Properties = properties;
 
     internal static ShaderLabDefaults Parse(string shaderLab)
     {
@@ -56,26 +67,6 @@ internal sealed class ShaderLabDefaults
         return new ShaderLabDefaults(properties.ToArray());
     }
 
-    internal void Apply(IFilterMaterial material, Func<string, IFilterTexture?> builtInTexture)
-    {
-        foreach (var property in properties)
-        {
-            switch (property.Type)
-            {
-                case "Float":
-                case "Range": material.SetFloat(property.Name, property.Scalar); break;
-                case "Int":
-                case "Integer": material.SetInt(property.Name, property.Integer); break;
-                case "Vector":
-                case "Color": material.SetVector(property.Name, property.Vector); break;
-                case "2D":
-                    if (builtInTexture(property.Texture!) is { } texture)
-                        material.SetTexture(property.Name, texture);
-                    break;
-            }
-        }
-    }
-
     private static Property? ReadProperty(List<Token> tokens, ref int position)
     {
         int i = position;
@@ -95,15 +86,15 @@ internal sealed class ShaderLabDefaults
             case "Float":
             case "Range":
                 if (!Number(tokens, ref i, out float scalar)) return null;
-                result = new Property(name, type, Scalar: scalar);
+                result = new Property(name, type, scalar: scalar);
                 break;
             case "Int":
             case "Integer":
                 if (i >= tokens.Count || tokens[i].Quoted ||
                     !double.TryParse(tokens[i++].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var integer) ||
-                    !double.IsFinite(integer) || integer < int.MinValue || integer > int.MaxValue ||
+                    double.IsNaN(integer) || integer < int.MinValue || integer > int.MaxValue ||
                     integer != Math.Truncate(integer)) return null;
-                result = new Property(name, type, Integer: (int)integer);
+                result = new Property(name, type, integer: (int)integer);
                 break;
             case "Vector":
             case "Color":
@@ -112,11 +103,11 @@ internal sealed class ShaderLabDefaults
                     !Take(tokens, ref i, ",") || !Number(tokens, ref i, out float z) ||
                     !Take(tokens, ref i, ",") || !Number(tokens, ref i, out float w) ||
                     !Take(tokens, ref i, ")")) return null;
-                result = new Property(name, type, Vector: new Vector4(x, y, z, w));
+                result = new Property(name, type, vector: (x, y, z, w));
                 break;
             case "2D":
                 if (i >= tokens.Count || !tokens[i].Quoted) return null;
-                result = new Property(name, type, Texture: tokens[i++].Text);
+                result = new Property(name, type, texture: tokens[i++].Text);
                 break;
             default: return null;
         }
@@ -129,7 +120,7 @@ internal sealed class ShaderLabDefaults
         value = 0;
         return position < tokens.Count && !tokens[position].Quoted &&
             float.TryParse(tokens[position++].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
-            float.IsFinite(value);
+            !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
     private static bool Is(List<Token> tokens, int index, string text) =>
@@ -177,15 +168,15 @@ internal sealed class ShaderLabDefaults
                 tokens.Add(new Token(text.ToString(), true));
                 continue;
             }
-            if ("(){}[],=".Contains(source[i]))
+            if ("(){}[],=".IndexOf(source[i]) >= 0)
             {
                 tokens.Add(new Token(source[i++].ToString()));
                 continue;
             }
             int start = i++;
             while (i < source.Length && !char.IsWhiteSpace(source[i]) &&
-                   !"(){}[],=\"/".Contains(source[i])) i++;
-            tokens.Add(new Token(source[start..i]));
+                   "(){}[],=\"/".IndexOf(source[i]) < 0) i++;
+            tokens.Add(new Token(source.Substring(start, i - start)));
         }
         return tokens;
     }

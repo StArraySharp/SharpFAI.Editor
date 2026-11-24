@@ -21,6 +21,7 @@ uniform float _PerlinScale;
 uniform sampler2D uTextures[FLOOR_TEXTURE_SLOTS];
 uniform float uTextureRatio[FLOOR_TEXTURE_SLOTS];
 uniform bool uForceIconOutline;
+uniform int uDecorationMaskMode;
 
 in vec4 vs_COLOR0;
 in vec2 vs_TEXCOORD0;
@@ -154,6 +155,20 @@ void main()
     vec2 iconDy = dFdy(iconUv);
 
     float opacity = vs_COLOR0.a * vs_OPACITY;
+    if (uDecorationMaskMode >= 3)
+    {
+        if (edgeUv.y > 1.0)
+            discard;
+        outColor = vec4(opacity);
+        return;
+    }
+    if (uDecorationMaskMode != 0)
+    {
+        const int maskSlot = FLOOR_TEXTURE_SLOTS - 1;
+        vec2 dimensions = vec2(textureSize(uTextures[maskSlot], 0));
+        float mask = texture(uTextures[maskSlot], gl_FragCoord.xy / dimensions).a;
+        opacity *= uDecorationMaskMode == 1 ? mask : 1.0 - mask;
+    }
     if (edgeUv.y > 1.0)
     {
         float falloff = pow(2.0 - edgeUv.y, 1.3);

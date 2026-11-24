@@ -95,9 +95,31 @@ internal sealed class UnityFilterRewriter : CSharpSyntaxRewriter
         if (node.Type.ToString() == "Color" && node.ArgumentList is { Arguments.Count: 3 } color)
             node = node.WithArgumentList(color.AddArguments(SyntaxFactory.Argument(SyntaxFactory.ParseExpression("1f"))));
 
+        if (node.Type.ToString() == "Vector4" && node.ArgumentList is { Arguments.Count: 2 } vector)
+        {
+            var zero = SyntaxFactory.Argument(SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression,
+                SyntaxFactory.Literal(0f)));
+            node = node.WithArgumentList(vector.AddArguments(zero, zero));
+        }
+
         if (node.Type.ToString() is not ("Vector2" or "Vector4" or "Color"))
             throw new InvalidOperationException(Member + ": unsupported constructor " + node.Type);
         return base.VisitObjectCreationExpression(node)!;
+    }
+
+    public override SyntaxNode VisitInvocationExpression(InvocationExpressionSyntax node)
+    {
+        if (node.Expression.ToString() == "RenderTexture.GetTemporary" &&
+            node.ArgumentList.Arguments.Count == 1 &&
+            node.ArgumentList.Arguments[0].Expression is MemberAccessExpressionSyntax descriptor &&
+            descriptor.Name.Identifier.ValueText == "descriptor")
+        {
+            // The backend rents a target with the source attachment's dimensions and format.
+            var source = SyntaxFactory.Argument((ExpressionSyntax)Visit(descriptor.Expression)!);
+            return SyntaxFactory.InvocationExpression(SyntaxFactory.ParseExpression("backend.RentTargetLike"),
+                SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(source)));
+        }
+        return base.VisitInvocationExpression(node)!;
     }
 
     public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node)

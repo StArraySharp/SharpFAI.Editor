@@ -5,6 +5,7 @@
       <ShaderAssets ParameterType="System.String" />
       <UnityAssets ParameterType="System.String" />
       <TextureDirectory ParameterType="System.String" />
+      <PreparedAssets ParameterType="System.String" />
       <Resources ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
     </ParameterGroup>
     <Task>
@@ -12,6 +13,83 @@
       <Using Namespace="System.Linq" />
       <Using Namespace="System.Text.RegularExpressions" />
       <Code Type="Fragment" Language="cs"><![CDATA[
+        if (!string.IsNullOrWhiteSpace(PreparedAssets))
+        {
+            var prepared = new Dictionary<string, ITaskItem>(StringComparer.Ordinal);
+            var aliases = new List<string[]>();
+            string root = Path.GetFullPath(PreparedAssets).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string manifest = Path.Combine(root, "assets.list");
+            if (!File.Exists(manifest))
+            {
+                Log.LogError("Prepared game asset manifest is missing: {0}. Run the build/PrepareGameAssets project again.", manifest);
+                return false;
+            }
+
+            foreach (string line in File.ReadLines(manifest))
+            {
+                string[] fields = line.Split('|');
+                if (fields.Length != 3)
+                {
+                    Log.LogError("Invalid prepared game asset record in {0}: {1}", manifest, line);
+                    return false;
+                }
+                if (fields[0] == "T")
+                {
+                    aliases.Add(fields);
+                    continue;
+                }
+
+                string key = fields[1];
+                string relative = fields[2];
+                string path = Path.GetFullPath(Path.Combine(root, relative));
+                if (fields[0] != "R" || Path.IsPathRooted(relative) ||
+                    !path.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(path) ||
+                    prepared.ContainsKey(key))
+                {
+                    Log.LogError("Invalid or missing prepared game asset in {0}: {1}", manifest, line);
+                    return false;
+                }
+                var item = new Microsoft.Build.Utilities.TaskItem(path);
+                item.SetMetadata("LogicalName", key);
+                if (relative.StartsWith("Metadata/", StringComparison.Ordinal) &&
+                    (key.EndsWith(".shaderlab", StringComparison.Ordinal) || key.EndsWith(".meta", StringComparison.Ordinal)))
+                    item.SetMetadata("BuildOnly", "true");
+                else if (Path.GetFileNameWithoutExtension(path).EndsWith("_0", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                else if (relative.StartsWith("Shaders/", StringComparison.Ordinal) && key.EndsWith(".glsl", StringComparison.Ordinal))
+                    item.SetMetadata("CopyRelativePath", "Resources/Shaders/Filters/" + relative.Substring("Shaders/".Length));
+                else if (relative.StartsWith("Textures/", StringComparison.Ordinal) && key.EndsWith(".png", StringComparison.Ordinal))
+                    item.SetMetadata("CopyRelativePath", "Resources/Filters/" + relative.Substring("Textures/".Length));
+                else
+                {
+                    Log.LogError("Unsupported prepared game asset in {0}: {1}", manifest, line);
+                    return false;
+                }
+                prepared.Add(key, item);
+            }
+
+            foreach (string[] alias in aliases)
+            {
+                ITaskItem original;
+                if (!alias[1].StartsWith("Resources.Filters.", StringComparison.Ordinal) ||
+                    !alias[1].EndsWith("_0.png", StringComparison.OrdinalIgnoreCase) ||
+                    !prepared.TryGetValue(alias[2], out original) ||
+                    !original.GetMetadata("CopyRelativePath").StartsWith("Resources/Filters/", StringComparison.Ordinal) ||
+                    prepared.ContainsKey(alias[1]))
+                {
+                    Log.LogError("Invalid prepared game texture alias in {0}: {1}", manifest, alias[1]);
+                    return false;
+                }
+                var item = new Microsoft.Build.Utilities.TaskItem(original.ItemSpec);
+                item.SetMetadata("LogicalName", alias[1]);
+                item.SetMetadata("BuildOnly", "true");
+                item.SetMetadata("TextureAliasOf", alias[2]);
+                prepared.Add(alias[1], item);
+            }
+            Resources = prepared.Values.ToArray();
+            return true;
+        }
+
         var imports = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var shaderName = new Regex("^[ \t]*Shader\\s*\"(CameraFilterPack(?:Legacy)?/[^\"]+|ADOFAI/(?:Screen(?:Tile|Scroll)|PolarScreen)|Sprites/Tile|Hidden/(?:VideoBloom|CameraMotionBlur))\"", RegexOptions.Multiline);
         var exportNumber = new Regex(@"^([1-9]\d*)_glsl\.orig\.glsl$");
@@ -123,12 +201,69 @@
             }
         }
 
-        Resources = imports.Select(entry =>
+        const string duplicateTextureSuffix = "_0.png";
+        var textureAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        var resources = new List<ITaskItem>();
+        foreach (var entry in imports)
         {
             var item = new Microsoft.Build.Utilities.TaskItem(entry.Value);
             item.SetMetadata("LogicalName", entry.Key);
-            return (ITaskItem)item;
-        }).ToArray();
+            bool buildOnly = entry.Key.EndsWith(".shaderlab", StringComparison.Ordinal) ||
+                entry.Key.EndsWith(".meta", StringComparison.Ordinal);
+            if (buildOnly)
+                item.SetMetadata("BuildOnly", "true");
+            if (!buildOnly && (Path.GetFileNameWithoutExtension(entry.Key).EndsWith("_0", StringComparison.Ordinal) ||
+                Path.GetFileNameWithoutExtension(entry.Value).EndsWith("_0", StringComparison.Ordinal)))
+            {
+                if (!entry.Key.StartsWith("Resources.Filters.", StringComparison.Ordinal) ||
+                    !entry.Key.EndsWith(duplicateTextureSuffix, StringComparison.Ordinal))
+                    continue;
+                string original = entry.Key.Substring(0, entry.Key.Length - duplicateTextureSuffix.Length) + ".png";
+                string originalPath;
+                if (!imports.TryGetValue(original, out originalPath) || !FilesEqual(originalPath, entry.Value))
+                    continue;
+                string canonical;
+                if (!textureAliases.TryGetValue(original, out canonical))
+                {
+                    if (Path.GetFileNameWithoutExtension(original).EndsWith("_0", StringComparison.Ordinal))
+                        continue;
+                    canonical = original;
+                }
+                textureAliases.Add(entry.Key, canonical);
+                item.SetMetadata("TextureAliasOf", canonical);
+                item.SetMetadata("BuildOnly", "true");
+            }
+            resources.Add(item);
+        }
+        Resources = resources.ToArray();
+
+        bool FilesEqual(string original, string candidate)
+        {
+            using (var left = File.OpenRead(original))
+            using (var right = File.OpenRead(candidate))
+            {
+                if (left.Length != right.Length)
+                    return false;
+                var leftBytes = new byte[32768];
+                var rightBytes = new byte[leftBytes.Length];
+                int count;
+                while ((count = left.Read(leftBytes, 0, leftBytes.Length)) != 0)
+                {
+                    int offset = 0;
+                    while (offset < count)
+                    {
+                        int read = right.Read(rightBytes, offset, count - offset);
+                        if (read == 0)
+                            return false;
+                        offset += read;
+                    }
+                    for (int i = 0; i < count; i++)
+                        if (leftBytes[i] != rightBytes[i])
+                            return false;
+                }
+                return right.ReadByte() == -1;
+            }
+        }
       ]]></Code>
     </Task>
   </UsingTask>

@@ -114,6 +114,18 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
+    private bool _editorTilesOnly;
+
+    internal void SetEditorTilesOnly(bool enabled)
+    {
+        if (enabled)
+            SetRuntimeTrackMode(false);
+        if (_editorTilesOnly == enabled)
+            return;
+        _editorTilesOnly = enabled;
+        _floorVisualTime = double.NaN;
+    }
+
     private void UpdateTrackVisuals()
     {
         RuntimeTrackTimeline? runtime = _runtimeTrackActive ? _trackRuntime : null;
@@ -161,11 +173,19 @@ public sealed unsafe partial class LevelRenderer
                 transform = transforms[floor];
             if (_floorPositionRemainders is { } remainders)
                 transform = transform with { Offset = transform.Offset + remainders[floor] };
+            if (_editorTilesOnly)
+            {
+                opacity = 1f;
+                Vector2 scale = transform.Scale;
+                transform = transform with { Scale = new(scale.X == 0f ? 1f : scale.X, scale.Y == 0f ? 1f : scale.Y) };
+            }
 
             // The static chart shows unlit tiles. Track glow intensity controls the playback effect.
             var appearance = runtime is not null
                 ? runtime.AppearanceAt(floor, _playTime, opacity, trackVolume, color)
                 : new FloorAppearance(color ?? state.EvaluateColor(floor, (float)_playTime, trackVolume), opacity);
+            if (_editorTilesOnly)
+                appearance = appearance with { Color = appearance.Color with { W = 1f } };
             renderer.SetFloorVisual(i, transform, appearance);
         }
     }

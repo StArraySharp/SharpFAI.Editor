@@ -28,22 +28,26 @@
   <data name="Language" xml:space="preserve"><value>语言</value></data>
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="Settings" xml:space="preserve"><value>关卡设置</value></data>
-  <data name="Decorations" xml:space="preserve"><value>装饰物管理器</value></data>
+  <data name="Decorations" xml:space="preserve"><value>装饰</value></data>
   <data name="Inspector" xml:space="preserve"><value>事件属性</value></data>
   <data name="Palette" xml:space="preserve"><value>事件栏</value></data>
   <data name="ParticleEditor" xml:space="preserve"><value>粒子编辑器</value></data>
   <data name="ParticleGeneral" xml:space="preserve"><value>常规</value></data>
   <data name="ParticleShape" xml:space="preserve"><value>形状</value></data>
   <data name="ParticleTransform" xml:space="preserve"><value>变换</value></data>
-  <data name="Shortcuts" xml:space="preserve"><value>快捷键</value></data>
-  <data name="New" xml:space="preserve"><value>新建</value></data>
-  <data name="Open" xml:space="preserve"><value>打开…</value></data>
+  <data name="Shortcuts" xml:space="preserve"><value>键盘快捷键</value></data>
+  <data name="New" xml:space="preserve"><value>新关卡</value></data>
+  <data name="Open" xml:space="preserve"><value>打开……</value></data>
   <data name="OpenLevel" xml:space="preserve"><value>打开关卡</value></data>
+  <data name="OpenLastChart" xml:space="preserve"><value>打开上次的谱面</value></data>
+  <data name="LastChartMissing" xml:space="preserve"><value>找不到上次打开的谱面。路径为 {0}。</value></data>
   <data name="ChooseArchiveLevel" xml:space="preserve"><value>从 ZIP 中选择关卡</value></data>
   <data name="NoArchiveLevels" xml:space="preserve"><value>ZIP 中没有 backup.adofai 之外的 .adofai 关卡。</value></data>
   <data name="ArchiveNeedsSingleLevel" xml:space="preserve"><value>此模式需要一个关卡，请从 {0} 选择一个已解包的关卡文件。</value></data>
   <data name="Save" xml:space="preserve"><value>保存</value></data>
-  <data name="SaveLevel" xml:space="preserve"><value>保存关卡</value></data>
+  <data name="SaveLevel" xml:space="preserve"><value>保存关卡……</value></data>
+  <data name="ChartSaved" xml:space="preserve"><value>谱面已保存</value></data>
+  <data name="AudioCalibration" xml:space="preserve"><value>音画校准…</value></data>
   <data name="SaveAs" xml:space="preserve"><value>另存为…</value></data>
   <data name="Exit" xml:space="preserve"><value>退出</value></data>
   <data name="Undo" xml:space="preserve"><value>撤销</value></data>
@@ -51,46 +55,45 @@
   <data name="DeleteSelection" xml:space="preserve"><value>删除选中项</value></data>
   <data name="ResetLayout" xml:space="preserve"><value>恢复默认布局</value></data>
   <data name="FloorNumbers" xml:space="preserve"><value>显示砖块编号</value></data>
-  <data name="FindFloorCommand" xml:space="preserve"><value>查找砖块…</value></data>
-  <data name="FindFloor" xml:space="preserve"><value>查找砖块</value></data>
+  <data name="FindFloorCommand" xml:space="preserve"><value>查找</value></data>
+  <data name="FindFloor" xml:space="preserve"><value>查找</value></data>
   <data name="FindCommentCommand" xml:space="preserve"><value>查找注释…</value></data>
   <data name="FindComment" xml:space="preserve"><value>查找注释</value></data>
   <data name="SearchComment" xml:space="preserve"><value>搜索注释</value></data>
-  <data name="FloorNumber" xml:space="preserve"><value>砖块编号</value></data>
+  <data name="FloorNumber" xml:space="preserve"><value>方块数量：</value></data>
   <data name="Locate" xml:space="preserve"><value>定位</value></data>
-  <data name="GoToStart" xml:space="preserve"><value>跳到起点</value></data>
-  <data name="GoToEnd" xml:space="preserve"><value>跳到结尾</value></data>
+  <data name="GoToStart" xml:space="preserve"><value>选择第一个方块</value></data>
+  <data name="GoToEnd" xml:space="preserve"><value>选择最后一个方块</value></data>
   <data name="ChartPreview" xml:space="preserve"><value>画面预览</value></data>
   <data name="PlayFromTile" xml:space="preserve"><value>从当前砖块播放</value></data>
   <data name="ManualFromTile" xml:space="preserve"><value>从当前砖块游玩</value></data>
   <data name="ManualTooltip" xml:space="preserve"><value>从当前砖块手打</value></data>
   <data name="ConfiguredSpeed" xml:space="preserve"><value>按设定倍率播放</value></data>
   <data name="HalfSpeed" xml:space="preserve"><value>按设定倍率的一半播放</value></data>
-  <data name="Autoplay" xml:space="preserve"><value>自动播放</value></data>
-  <data name="NoFail" xml:space="preserve"><value>不死模式</value></data>
+  <data name="Autoplay" xml:space="preserve"><value>自动演奏</value></data>
+  <data name="NoFail" xml:space="preserve"><value>不会失败模式</value></data>
   <data name="ReturnToEdit" xml:space="preserve"><value>返回编辑</value></data>
   <data name="Preview" xml:space="preserve"><value>预览</value></data>
-  <data name="Play" xml:space="preserve"><value>播放</value></data>
+  <data name="Play" xml:space="preserve"><value>开始</value></data>
   <data name="Pause" xml:space="preserve"><value>暂停</value></data>
   <data name="Stop" xml:space="preserve"><value>停止</value></data>
   <data name="Reset" xml:space="preserve"><value>重置</value></data>
   <data name="Manual" xml:space="preserve"><value>游玩</value></data>
   <data name="Cancel" xml:space="preserve"><value>取消</value></data>
   <data name="Close" xml:space="preserve"><value>关闭</value></data>
-  <data name="Ok" xml:space="preserve"><value>确定</value></data>
+  <data name="Ok" xml:space="preserve"><value>确认</value></data>
   <data name="Unsaved" xml:space="preserve"><value>未保存的改动</value></data>
   <data name="SavePrompt" xml:space="preserve"><value>要保存当前关卡的改动吗？</value></data>
-  <data name="Discard" xml:space="preserve"><value>放弃改动</value></data>
+  <data name="Discard" xml:space="preserve"><value>放弃</value></data>
   <data name="Error" xml:space="preserve"><value>操作失败</value></data>
   <data name="Untitled" xml:space="preserve"><value>未命名关卡</value></data>
-  <data name="Grid" xml:space="preserve"><value>网格</value></data>
   <data name="DirectionGuide" xml:space="preserve"><value>方向键</value></data>
   <data name="Angle" xml:space="preserve"><value>角度</value></data>
   <data name="AddTile" xml:space="preserve"><value>添加砖块</value></data>
   <data name="CenterSelection" xml:space="preserve"><value>定位选中</value></data>
   <data name="LocateDecoration" xml:space="preserve"><value>定位装饰</value></data>
   <data name="EditParticle" xml:space="preserve"><value>编辑粒子…</value></data>
-  <data name="AddDecoration" xml:space="preserve"><value>添加装饰…</value></data>
+  <data name="AddDecoration" xml:space="preserve"><value>添加装饰</value></data>
   <data name="SearchDecorations" xml:space="preserve"><value>按砖块、类型或标签筛选</value></data>
   <data name="HideAll" xml:space="preserve"><value>隐藏全部</value></data>
   <data name="ShowAll" xml:space="preserve"><value>恢复显示</value></data>
@@ -101,8 +104,8 @@
   <data name="Lock" xml:space="preserve"><value>锁定</value></data>
   <data name="Unlock" xml:space="preserve"><value>解锁</value></data>
   <data name="AddEventHint" xml:space="preserve"><value>从底部事件栏添加事件</value></data>
-  <data name="EventEnabled" xml:space="preserve"><value>事件启用</value></data>
-  <data name="DeleteEvent" xml:space="preserve"><value>删除事件</value></data>
+  <data name="EventEnabled" xml:space="preserve"><value>启用事件</value></data>
+  <data name="DeleteEvent" xml:space="preserve"><value>删除</value></data>
   <data name="SearchEvents" xml:space="preserve"><value>搜索事件</value></data>
   <data name="OtherFields" xml:space="preserve"><value>其它字段</value></data>
   <data name="ChooseAsset" xml:space="preserve"><value>选择素材</value></data>
@@ -110,6 +113,10 @@
   <data name="SyncStage" xml:space="preserve"><value>同步谱面 · {0}</value></data>
   <data name="TileStatus" xml:space="preserve"><value>砖块 {0} / {1}</value></data>
   <data name="TileRangeStatus" xml:space="preserve"><value>砖块 {0}–{1} / {2}</value></data>
+  <data name="SelectionStatAngle" xml:space="preserve"><value>总角度 {0:0.####}°</value></data>
+  <data name="SelectionStatBeats" xml:space="preserve"><value>{0:0.####} 拍</value></data>
+  <data name="SelectionStatCount" xml:space="preserve"><value>选中 {0:N0} 块</value></data>
+  <data name="SelectionStatDuration" xml:space="preserve"><value>{0:0.######} 秒</value></data>
   <data name="ParticlePreviewStatus" xml:space="preserve"><value>粒子示意预览 · {0:F2} s</value></data>
   <data name="PlayTooltip" xml:space="preserve"><value>Space · 播放 / 暂停</value></data>
   <data name="NoChineseFont" xml:space="preserve"><value>未找到中文字体。</value></data>
@@ -127,7 +134,7 @@
   <data name="HelpPalette" xml:space="preserve"><value>1–0 添加事件 · Ctrl+数字切换分类</value></data>
   <data name="HelpCamera" xml:space="preserve"><value>滚轮或 - / = 缩放 · 左键拖动画布</value></data>
   <data name="HelpPlay" xml:space="preserve"><value>Ctrl+滚轮调速 · Ctrl+Space 按设定速度播放 · Ctrl+P 半速 · Alt+A 自动 · Alt+N 不死</value></data>
-  <data name="HelpReturn" xml:space="preserve"><value>Esc 返回原选中砖块 · Shift+Esc 定位到播放位置</value></data>
+  <data name="HelpReturn" xml:space="preserve"><value>Esc 将视角移到播放砖块 · Shift+Esc 同时选中该砖块</value></data>
   <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B 切换书签 · Alt+← / → 跳转书签</value></data>
   <data name="HelpLocate" xml:space="preserve"><value>Alt+; 查找砖块 · Alt+F 查找注释</value></data>
   <data name="HelpFile" xml:space="preserve"><value>Ctrl+O / S 打开 / 保存</value></data>
@@ -140,196 +147,198 @@
   <data name="PhaseDecorations" xml:space="preserve"><value>构建装饰与背景</value></data>
   <data name="PhaseVisibility" xml:space="preserve"><value>构建可见砖块索引</value></data>
   <data name="PhaseBaking" xml:space="preserve"><value>烘焙网格</value></data>
+  <data name="PhaseTrackTextures" xml:space="preserve"><value>解码轨道纹理</value></data>
   <data name="PhaseUpload" xml:space="preserve"><value>上传 GPU</value></data>
   <data name="Option_Bpm" xml:space="preserve"><value>BPM</value></data>
-  <data name="Option_Multiplier" xml:space="preserve"><value>倍率</value></data>
-  <data name="Option_Grayscale" xml:space="preserve"><value>灰度</value></data>
+  <data name="Option_Multiplier" xml:space="preserve"><value>倍频器</value></data>
+  <data name="Option_Grayscale" xml:space="preserve"><value>灰阶</value></data>
   <data name="Option_Invert" xml:space="preserve"><value>反色</value></data>
-  <data name="Option_Linear" xml:space="preserve"><value>线性</value></data>
+  <data name="Option_Linear" xml:space="preserve"><value>Linear</value></data>
   <data name="Option_Local" xml:space="preserve"><value>局部</value></data>
   <data name="Option_World" xml:space="preserve"><value>世界</value></data>
   <data name="Option_Circle" xml:space="preserve"><value>圆形</value></data>
   <data name="Option_Rectangle" xml:space="preserve"><value>矩形</value></data>
   <data name="Option_Random" xml:space="preserve"><value>随机</value></data>
   <data name="Option_Loop" xml:space="preserve"><value>循环</value></data>
-  <data name="Option_PingPong" xml:space="preserve"><value>往返</value></data>
+  <data name="Option_PingPong" xml:space="preserve"><value>Ping Pong</value></data>
   <data name="Option_Start" xml:space="preserve"><value>开始</value></data>
   <data name="Option_Stop" xml:space="preserve"><value>停止</value></data>
-  <data name="Option_Clear" xml:space="preserve"><value>清除</value></data>
-  <data name="Option_TwoPlanets" xml:space="preserve"><value>双星球</value></data>
-  <data name="Option_ThreePlanets" xml:space="preserve"><value>三星球</value></data>
-  <data name="Option_Backward" xml:space="preserve"><value>向后</value></data>
+  <data name="Option_Clear" xml:space="preserve"><value>停止并清空</value></data>
+  <data name="Option_TwoPlanets" xml:space="preserve"><value>双星</value></data>
+  <data name="Option_ThreePlanets" xml:space="preserve"><value>三星</value></data>
+  <data name="Option_Backward" xml:space="preserve"><value>后退</value></data>
   <data name="Option_None" xml:space="preserve"><value>无</value></data>
-  <data name="Option_Forward" xml:space="preserve"><value>向前</value></data>
+  <data name="Option_Forward" xml:space="preserve"><value>前进</value></data>
   <data name="Option_Kick" xml:space="preserve"><value>底鼓</value></data>
-  <data name="Option_ThisTile" xml:space="preserve"><value>当前砖块</value></data>
-  <data name="Option_End" xml:space="preserve"><value>结尾</value></data>
-  <data name="Name_SongSettings" xml:space="preserve"><value>歌曲</value></data>
-  <data name="Name_LevelSettings" xml:space="preserve"><value>关卡</value></data>
-  <data name="Name_TrackSettings" xml:space="preserve"><value>轨道</value></data>
-  <data name="Name_BackgroundSettings" xml:space="preserve"><value>背景</value></data>
-  <data name="Name_CameraSettings" xml:space="preserve"><value>相机</value></data>
-  <data name="Name_MiscSettings" xml:space="preserve"><value>其它</value></data>
+  <data name="Option_ThisTile" xml:space="preserve"><value>本方块</value></data>
+  <data name="Option_End" xml:space="preserve"><value>终点方块</value></data>
+  <data name="Name_SongSettings" xml:space="preserve"><value>歌曲设置</value></data>
+  <data name="Name_LevelSettings" xml:space="preserve"><value>关卡设置</value></data>
+  <data name="Name_TrackSettings" xml:space="preserve"><value>轨道设置</value></data>
+  <data name="Name_BackgroundSettings" xml:space="preserve"><value>背景设置</value></data>
+  <data name="Name_CameraSettings" xml:space="preserve"><value>摄像头设置</value></data>
+  <data name="Name_MiscSettings" xml:space="preserve"><value>杂项设置</value></data>
   <data name="Name_Gameplay" xml:space="preserve"><value>玩法</value></data>
   <data name="Name_TrackFx" xml:space="preserve"><value>轨道</value></data>
   <data name="Name_DecorationFx" xml:space="preserve"><value>装饰</value></data>
-  <data name="Name_VisualFx" xml:space="preserve"><value>画面</value></data>
-  <data name="Name_FxModifiers" xml:space="preserve"><value>事件控制</value></data>
-  <data name="Name_Conveniences" xml:space="preserve"><value>辅助</value></data>
-  <data name="Name_Jank" xml:space="preserve"><value>特殊</value></data>
+  <data name="Name_VisualFx" xml:space="preserve"><value>视效</value></data>
+  <data name="Name_FxModifiers" xml:space="preserve"><value>调整</value></data>
+  <data name="Name_Conveniences" xml:space="preserve"><value>易用性</value></data>
+  <data name="Name_Jank" xml:space="preserve"><value>DLC</value></data>
   <data name="Name_SetSpeed" xml:space="preserve"><value>设置速度</value></data>
   <data name="Name_Twirl" xml:space="preserve"><value>旋转</value></data>
-  <data name="Name_Pause" xml:space="preserve"><value>暂停</value></data>
+  <data name="Name_Pause" xml:space="preserve"><value>暂停节拍</value></data>
   <data name="Name_Hold" xml:space="preserve"><value>长按</value></data>
-  <data name="Name_MultiPlanet" xml:space="preserve"><value>多星球</value></data>
-  <data name="Name_ScaleRadius" xml:space="preserve"><value>星球半径</value></data>
-  <data name="Name_SetHitsound" xml:space="preserve"><value>设置打拍声</value></data>
+  <data name="Name_Hold_duration" xml:space="preserve"><value>额外长按循环</value></data>
+  <data name="Name_MultiPlanet" xml:space="preserve"><value>多行星</value></data>
+  <data name="Name_ScaleRadius" xml:space="preserve"><value>星球半径大小</value></data>
+  <data name="Name_SetHitsound" xml:space="preserve"><value>设置打拍音</value></data>
   <data name="Name_Bookmark" xml:space="preserve"><value>书签</value></data>
-  <data name="Name_PositionTrack" xml:space="preserve"><value>定位轨道</value></data>
-  <data name="Name_ColorTrack" xml:space="preserve"><value>轨道颜色</value></data>
-  <data name="Name_AnimateTrack" xml:space="preserve"><value>轨道动画</value></data>
+  <data name="Name_PositionTrack" xml:space="preserve"><value>位置轨道</value></data>
+  <data name="Name_ColorTrack" xml:space="preserve"><value>设置轨道颜色</value></data>
+  <data name="Name_AnimateTrack" xml:space="preserve"><value>设置轨道动画</value></data>
   <data name="Name_MoveTrack" xml:space="preserve"><value>移动轨道</value></data>
-  <data name="Name_RecolorTrack" xml:space="preserve"><value>重新着色</value></data>
+  <data name="Name_RecolorTrack" xml:space="preserve"><value>重新设置轨道颜色</value></data>
   <data name="Name_MoveDecorations" xml:space="preserve"><value>移动装饰</value></data>
-  <data name="Name_SetText" xml:space="preserve"><value>设置文字</value></data>
+  <data name="Name_SetText" xml:space="preserve"><value>设置文本</value></data>
   <data name="Name_SetParticle" xml:space="preserve"><value>设置粒子</value></data>
   <data name="Name_EmitParticle" xml:space="preserve"><value>发射粒子</value></data>
-  <data name="Name_CustomBackground" xml:space="preserve"><value>自定义背景</value></data>
-  <data name="Name_MoveCamera" xml:space="preserve"><value>移动相机</value></data>
+  <data name="Name_CustomBackground" xml:space="preserve"><value>设置背景</value></data>
+  <data name="Name_MoveCamera" xml:space="preserve"><value>移动摄像头</value></data>
   <data name="Name_Flash" xml:space="preserve"><value>闪光</value></data>
   <data name="Name_SetFilter" xml:space="preserve"><value>预设滤镜</value></data>
-  <data name="Name_SetFilterAdvanced" xml:space="preserve"><value>高级滤镜</value></data>
-  <data name="Name_Bloom" xml:space="preserve"><value>泛光</value></data>
+  <data name="Name_SetFilterAdvanced" xml:space="preserve"><value>预设高级滤镜</value></data>
+  <data name="Name_Bloom" xml:space="preserve"><value>绽放</value></data>
   <data name="Name_HallOfMirrors" xml:space="preserve"><value>镜厅</value></data>
   <data name="Name_RepeatEvents" xml:space="preserve"><value>重复事件</value></data>
-  <data name="Name_AddDecoration" xml:space="preserve"><value>图片</value></data>
-  <data name="Name_AddText" xml:space="preserve"><value>文字</value></data>
+  <data name="Name_AddDecoration" xml:space="preserve"><value>添加装饰</value></data>
+  <data name="Name_AddText" xml:space="preserve"><value>添加文本</value></data>
   <data name="Name_AddObject" xml:space="preserve"><value>对象</value></data>
-  <data name="Name_AddParticle" xml:space="preserve"><value>粒子</value></data>
-  <data name="Name_songFilename" xml:space="preserve"><value>音频文件</value></data>
-  <data name="Name_bpm" xml:space="preserve"><value>BPM</value></data>
-  <data name="Name_volume" xml:space="preserve"><value>音量</value></data>
-  <data name="Name_offset" xml:space="preserve"><value>偏移 (ms)</value></data>
-  <data name="Name_pitch" xml:space="preserve"><value>音高</value></data>
-  <data name="Name_hitsound" xml:space="preserve"><value>打拍声</value></data>
-  <data name="Name_hitsoundVolume" xml:space="preserve"><value>打拍声音量</value></data>
-  <data name="Name_countdownTicks" xml:space="preserve"><value>倒计时</value></data>
-  <data name="Name_song" xml:space="preserve"><value>歌曲名称</value></data>
-  <data name="Name_author" xml:space="preserve"><value>谱师</value></data>
-  <data name="Name_artist" xml:space="preserve"><value>艺术家</value></data>
+  <data name="Name_AddParticle" xml:space="preserve"><value>粒子发射器</value></data>
+  <data name="Name_songFilename" xml:space="preserve"><value>文件名：</value></data>
+  <data name="Name_bpm" xml:space="preserve"><value>BPM：</value></data>
+  <data name="Name_volume" xml:space="preserve"><value>音量：</value></data>
+  <data name="Name_offset" xml:space="preserve"><value>偏移：</value></data>
+  <data name="Name_pitch" xml:space="preserve"><value>音高：</value></data>
+  <data name="Name_hitsound" xml:space="preserve"><value>打拍声：</value></data>
+  <data name="Name_hitsoundVolume" xml:space="preserve"><value>打拍声音量：</value></data>
+  <data name="Name_countdownTicks" xml:space="preserve"><value>计数滴答：</value></data>
+  <data name="Name_song" xml:space="preserve"><value>歌曲</value></data>
+  <data name="Name_author" xml:space="preserve"><value>关卡作者</value></data>
+  <data name="Name_artist" xml:space="preserve"><value>音乐作者</value></data>
   <data name="Name_duration" xml:space="preserve"><value>时长</value></data>
   <data name="Name_angleOffset" xml:space="preserve"><value>角度偏移</value></data>
-  <data name="Name_ease" xml:space="preserve"><value>缓动</value></data>
+  <data name="Name_ease" xml:space="preserve"><value>缓速</value></data>
   <data name="Name_tag" xml:space="preserve"><value>标签</value></data>
   <data name="Name_eventTag" xml:space="preserve"><value>事件标签</value></data>
   <data name="Name_position" xml:space="preserve"><value>位置</value></data>
   <data name="Name_positionOffset" xml:space="preserve"><value>位置偏移</value></data>
-  <data name="Name_floor" xml:space="preserve"><value>砖块</value></data>
-  <data name="Name_scale" xml:space="preserve"><value>缩放</value></data>
+  <data name="Name_floor" xml:space="preserve"><value>方块数量：</value></data>
+  <data name="Name_scale" xml:space="preserve"><value>大小</value></data>
   <data name="Name_rotation" xml:space="preserve"><value>旋转</value></data>
   <data name="Name_color" xml:space="preserve"><value>颜色</value></data>
   <data name="Name_opacity" xml:space="preserve"><value>透明度</value></data>
   <data name="Name_depth" xml:space="preserve"><value>深度</value></data>
-  <data name="Name_decorationImage" xml:space="preserve"><value>纹理</value></data>
-  <data name="Name_decText" xml:space="preserve"><value>文字内容</value></data>
+  <data name="Name_decorationImage" xml:space="preserve"><value>图片</value></data>
+  <data name="Name_decText" xml:space="preserve"><value>文本</value></data>
   <data name="Name_filter" xml:space="preserve"><value>滤镜</value></data>
-  <data name="Name_enabled" xml:space="preserve"><value>启用</value></data>
+  <data name="Name_enabled" xml:space="preserve"><value>设置为</value></data>
   <data name="Name_intensity" xml:space="preserve"><value>强度</value></data>
   <data name="Name_disableOthers" xml:space="preserve"><value>禁止其它</value></data>
-  <data name="Name_beatsPerMinute" xml:space="preserve"><value>BPM</value></data>
-  <data name="Name_speedType" xml:space="preserve"><value>速度类型</value></data>
-  <data name="Name_bpmMultiplier" xml:space="preserve"><value>BPM 倍率</value></data>
+  <data name="Name_beatsPerMinute" xml:space="preserve"><value>BPM：</value></data>
+  <data name="Name_speedType" xml:space="preserve"><value>速度型</value></data>
+  <data name="Name_bpmMultiplier" xml:space="preserve"><value>BPM倍频器</value></data>
   <data name="Name_maxParticles" xml:space="preserve"><value>最大粒子数</value></data>
   <data name="Name_simulationSpace" xml:space="preserve"><value>模拟空间</value></data>
   <data name="Name_simulationSpeed" xml:space="preserve"><value>模拟速度</value></data>
-  <data name="Name_playDuration" xml:space="preserve"><value>播放时长</value></data>
+  <data name="Name_playDuration" xml:space="preserve"><value>时长</value></data>
   <data name="Name_loop" xml:space="preserve"><value>循环</value></data>
   <data name="Name_randomSeed" xml:space="preserve"><value>随机种子</value></data>
-  <data name="Name_shapeType" xml:space="preserve"><value>发射形状</value></data>
-  <data name="Name_shapeRadius" xml:space="preserve"><value>发射半径</value></data>
-  <data name="Name_emissionRate" xml:space="preserve"><value>发射速率</value></data>
-  <data name="Name_particleLifetime" xml:space="preserve"><value>粒子寿命</value></data>
+  <data name="Name_shapeType" xml:space="preserve"><value>发送形状</value></data>
+  <data name="Name_shapeRadius" xml:space="preserve"><value>发送半径</value></data>
+  <data name="Name_emissionRate" xml:space="preserve"><value>发送频率</value></data>
+  <data name="Name_particleLifetime" xml:space="preserve"><value>粒子持续时间</value></data>
   <data name="Name_particleSize" xml:space="preserve"><value>粒子大小</value></data>
   <data name="Name_startRotation" xml:space="preserve"><value>初始旋转</value></data>
-  <data name="Name_velocity" xml:space="preserve"><value>速度</value></data>
+  <data name="Name_velocity" xml:space="preserve"><value>随时间变速</value></data>
   <data name="Name_rotationOverTime" xml:space="preserve"><value>随时间旋转</value></data>
   <data name="Name_sizeOverLifetime" xml:space="preserve"><value>随时间缩放</value></data>
   <data name="Name_colorOverLifetime" xml:space="preserve"><value>随时间变色</value></data>
-  <data name="Name_arc" xml:space="preserve"><value>弧度</value></data>
-  <data name="Name_arcMode" xml:space="preserve"><value>发射模式</value></data>
-  <data name="Name_EditorComment" xml:space="preserve"><value>编辑器注释</value></data>
-  <data name="Name_comment" xml:space="preserve"><value>注释</value></data>
-  <data name="Name_AutoPlayTiles" xml:space="preserve"><value>自动播放砖块</value></data>
+  <data name="Name_arc" xml:space="preserve"><value>弧</value></data>
+  <data name="Name_arcMode" xml:space="preserve"><value>弧模式</value></data>
+  <data name="Name_EditorComment" xml:space="preserve"><value>编辑器附注</value></data>
+  <data name="Name_comment" xml:space="preserve"><value>评论</value></data>
+  <data name="Name_AutoPlayTiles" xml:space="preserve"><value>自动播放格子</value></data>
   <data name="Name_Checkpoint" xml:space="preserve"><value>检查点</value></data>
-  <data name="Name_SetPlanetRotation" xml:space="preserve"><value>设置星球旋转</value></data>
+  <data name="Name_SetPlanetRotation" xml:space="preserve"><value>设置星球轨道</value></data>
   <data name="Name_SetHoldSound" xml:space="preserve"><value>设置长按音效</value></data>
   <data name="Name_PlaySound" xml:space="preserve"><value>播放音效</value></data>
-  <data name="Name_ScalePlanets" xml:space="preserve"><value>缩放星球</value></data>
-  <data name="Name_TileDimensions" xml:space="preserve"><value>砖块尺寸</value></data>
-  <data name="Name_SetFloorIcon" xml:space="preserve"><value>设置砖块图标</value></data>
+  <data name="Name_ScalePlanets" xml:space="preserve"><value>缩放行星</value></data>
+  <data name="Name_TileDimensions" xml:space="preserve"><value>方块尺寸</value></data>
+  <data name="Name_SetFloorIcon" xml:space="preserve"><value>设置格子图标</value></data>
   <data name="Name_SetObject" xml:space="preserve"><value>设置对象</value></data>
-  <data name="Name_SetDefaultText" xml:space="preserve"><value>设置默认文字</value></data>
-  <data name="Name_ShakeScreen" xml:space="preserve"><value>震屏</value></data>
-  <data name="Name_ScreenTile" xml:space="preserve"><value>平铺画面</value></data>
-  <data name="Name_ScreenScroll" xml:space="preserve"><value>滚动画面</value></data>
+  <data name="Name_SetDefaultText" xml:space="preserve"><value>设置默认文本</value></data>
+  <data name="Name_ShakeScreen" xml:space="preserve"><value>振屏</value></data>
+  <data name="Name_ScreenTile" xml:space="preserve"><value>平铺</value></data>
+  <data name="Name_ScreenScroll" xml:space="preserve"><value>卷屏</value></data>
   <data name="Name_SetFrameRate" xml:space="preserve"><value>设置帧率</value></data>
   <data name="Name_SetConditionalEvents" xml:space="preserve"><value>设置条件事件</value></data>
   <data name="Name_SetInputEvent" xml:space="preserve"><value>设置输入事件</value></data>
-  <data name="Name_ScaleMargin" xml:space="preserve"><value>缩放判定范围</value></data>
-  <data name="Name_FreeRoam" xml:space="preserve"><value>自由移动</value></data>
-  <data name="Name_FreeRoamTwirl" xml:space="preserve"><value>自由移动旋转</value></data>
-  <data name="Name_FreeRoamRemove" xml:space="preserve"><value>移除自由移动</value></data>
+  <data name="Name_ScaleMargin" xml:space="preserve"><value>定时窗口大小</value></data>
+  <data name="Name_FreeRoam" xml:space="preserve"><value>自由移动段落</value></data>
+  <data name="Name_FreeRoamTwirl" xml:space="preserve"><value>自由旋转</value></data>
+  <data name="Name_FreeRoamRemove" xml:space="preserve"><value>自由移除</value></data>
   <data name="Name_FreeRoamWarning" xml:space="preserve"><value>自由移动提示</value></data>
-  <data name="Name_Hide" xml:space="preserve"><value>隐藏</value></data>
-  <data name="Name_CallMethod" xml:space="preserve"><value>调用方法</value></data>
+  <data name="Name_Hide" xml:space="preserve"><value>隐藏判定</value></data>
+  <data name="Name_CallMethod" xml:space="preserve"><value>呼叫方法</value></data>
   <data name="Name_AddComponent" xml:space="preserve"><value>添加组件</value></data>
   <data name="Name_relativeTo" xml:space="preserve"><value>相对于</value></data>
   <data name="Name_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
   <data name="Name_rotationOffset" xml:space="preserve"><value>旋转偏移</value></data>
-  <data name="Name_startTile" xml:space="preserve"><value>起始砖块</value></data>
-  <data name="Name_endTile" xml:space="preserve"><value>结束砖块</value></data>
-  <data name="Name_distanceMultiplier" xml:space="preserve"><value>距离倍率</value></data>
-  <data name="Name_landingAnimation" xml:space="preserve"><value>落地动画</value></data>
-  <data name="Name_angleCorrectionDir" xml:space="preserve"><value>角度修正方向</value></data>
-  <data name="Name_stickToFloors" xml:space="preserve"><value>跟随砖块</value></data>
-  <data name="Name_justThisTile" xml:space="preserve"><value>仅此砖块</value></data>
-  <data name="Name_editorOnly" xml:space="preserve"><value>仅编辑器</value></data>
-  <data name="Name_tileShape" xml:space="preserve"><value>砖块形状</value></data>
-  <data name="Name_trackStyle" xml:space="preserve"><value>轨道样式</value></data>
-  <data name="Name_trackColor" xml:space="preserve"><value>轨道颜色</value></data>
-  <data name="Name_secondaryTrackColor" xml:space="preserve"><value>次要轨道颜色</value></data>
+  <data name="Name_startTile" xml:space="preserve"><value>效果起始方块</value></data>
+  <data name="Name_endTile" xml:space="preserve"><value>效果结束方块</value></data>
+  <data name="Name_distanceMultiplier" xml:space="preserve"><value>旅行距离</value></data>
+  <data name="Name_landingAnimation" xml:space="preserve"><value>收尾动画</value></data>
+  <data name="Name_angleCorrectionDir" xml:space="preserve"><value>角度校准</value></data>
+  <data name="Name_stickToFloors" xml:space="preserve"><value>黏性方块</value></data>
+  <data name="Name_justThisTile" xml:space="preserve"><value>仅改变该方块</value></data>
+  <data name="Name_editorOnly" xml:space="preserve"><value>仅限编辑器</value></data>
+  <data name="Name_tileShape" xml:space="preserve"><value>方块形状</value></data>
+  <data name="Name_trackStyle" xml:space="preserve"><value>轨道风格</value></data>
+  <data name="Name_trackColor" xml:space="preserve"><value>轨道主色调</value></data>
+  <data name="Name_secondaryTrackColor" xml:space="preserve"><value>轨道副色调</value></data>
   <data name="Name_trackColorType" xml:space="preserve"><value>轨道颜色类型</value></data>
-  <data name="Name_trackTexture" xml:space="preserve"><value>轨道纹理</value></data>
-  <data name="Name_trackTextureScale" xml:space="preserve"><value>轨道纹理缩放</value></data>
-  <data name="Name_trackAnimation" xml:space="preserve"><value>出现动画</value></data>
-  <data name="Name_trackDisappearAnimation" xml:space="preserve"><value>消失动画</value></data>
-  <data name="Name_beatsAhead" xml:space="preserve"><value>提前拍数</value></data>
-  <data name="Name_beatsBehind" xml:space="preserve"><value>滞后拍数</value></data>
+  <data name="Name_trackTexture" xml:space="preserve"><value>轨道贴图</value></data>
+  <data name="Name_trackTextureScale" xml:space="preserve"><value>轨道贴图缩放</value></data>
+  <data name="Name_trackAnimation" xml:space="preserve"><value>轨道出现动画</value></data>
+  <data name="Name_trackDisappearAnimation" xml:space="preserve"><value>轨道消失动画</value></data>
+  <data name="Name_beatsAhead" xml:space="preserve"><value>动画前节拍</value></data>
+  <data name="Name_beatsBehind" xml:space="preserve"><value>动画后节拍</value></data>
   <data name="Name_bgImage" xml:space="preserve"><value>背景图片</value></data>
   <data name="Name_backgroundColor" xml:space="preserve"><value>背景颜色</value></data>
-  <data name="Name_bgImageColor" xml:space="preserve"><value>背景图片颜色</value></data>
-  <data name="Name_parallax" xml:space="preserve"><value>视差</value></data>
+  <data name="Name_bgImageColor" xml:space="preserve"><value>图片颜色</value></data>
+  <data name="Name_parallax" xml:space="preserve"><value>平行</value></data>
   <data name="Name_parallaxOffset" xml:space="preserve"><value>视差偏移</value></data>
-  <data name="Name_bgDisplayMode" xml:space="preserve"><value>背景显示方式</value></data>
-  <data name="Name_bgVideo" xml:space="preserve"><value>背景视频</value></data>
-  <data name="Name_previewImage" xml:space="preserve"><value>预览图片</value></data>
-  <data name="Name_levelDesc" xml:space="preserve"><value>关卡说明</value></data>
+  <data name="Name_bgDisplayMode" xml:space="preserve"><value>显示模式</value></data>
+  <data name="Name_bgVideo" xml:space="preserve"><value>视频背景</value></data>
+  <data name="Name_previewImage" xml:space="preserve"><value>传送门图片</value></data>
+  <data name="Name_levelDesc" xml:space="preserve"><value>关卡描述</value></data>
   <data name="Name_levelTags" xml:space="preserve"><value>关卡标签</value></data>
   <data name="Name_difficulty" xml:space="preserve"><value>难度</value></data>
   <data name="Name_zoom" xml:space="preserve"><value>缩放</value></data>
-  <data name="Name_plane" xml:space="preserve"><value>图层</value></data>
+  <data name="Name_plane" xml:space="preserve"><value>平面</value></data>
   <data name="Name_randomTextureTiling" xml:space="preserve"><value>随机纹理平铺</value></data>
-  <data name="Name_velocityLimitOverLifetime" xml:space="preserve"><value>随时间限制速度</value></data>
+  <data name="Name_velocityLimitOverLifetime" xml:space="preserve"><value>生命周期限速</value></data>
   <data name="Name_font" xml:space="preserve"><value>字体</value></data>
   <data name="Name_landOn" xml:space="preserve"><value>落点</value></data>
   <data name="Name_loopBG" xml:space="preserve"><value>循环背景</value></data>
   <data name="Name_loopVideo" xml:space="preserve"><value>循环视频</value></data>
-  <data name="Name_vidOffset" xml:space="preserve"><value>视频偏移</value></data>
-  <data name="Name_pulseOnFloor" xml:space="preserve"><value>踩砖脉冲</value></data>
-  <data name="Name_floorIconOutlines" xml:space="preserve"><value>图标描边</value></data>
-  <data name="Name_planetEase" xml:space="preserve"><value>星球缓动</value></data>
-  <data name="Name_planetEaseParts" xml:space="preserve"><value>缓动分段数</value></data>
-  <data name="Name_separateCountdownTime" xml:space="preserve"><value>独立倒计时</value></data>
+  <data name="Name_vidOffset" xml:space="preserve"><value>偏移：</value></data>
+  <data name="Name_pulseOnFloor" xml:space="preserve"><value>触发方块时摄像头脉动</value></data>
+  <data name="Name_floorIconOutlines" xml:space="preserve"><value>方块图标描边</value></data>
+  <data name="Name_planetEase" xml:space="preserve"><value>星球轨道缓速</value></data>
+  <data name="Name_planetEaseParts" xml:space="preserve"><value>轨道缓速部分</value></data>
+  <data name="Name_separateCountdownTime" xml:space="preserve"><value>独立冷却时间</value></data>
   <data name="Copy" xml:space="preserve"><value>复制</value></data>
   <data name="Cut" xml:space="preserve"><value>剪切</value></data>
   <data name="Paste" xml:space="preserve"><value>粘贴</value></data>
@@ -374,379 +383,692 @@
   <data name="TilesOnly" xml:space="preserve"><value>纯砖块</value></data>
   <data name="EditSceneModeHelp" xml:space="preserve"><value>切换纯砖块与特效预览，不影响实际播放</value></data>
   <data name="InlineNumberHelp" xml:space="preserve"><value>点击输入，左右拖动调值</value></data>
-  <data name="Name_artistLinks" xml:space="preserve"><value>音乐作者链接</value></data>
+  <data name="Name_artistLinks" xml:space="preserve"><value>艺术家链接</value></data>
   <data name="Name_artistPermission" xml:space="preserve"><value>授权凭证图片</value></data>
-  <data name="Name_autoPlay" xml:space="preserve"><value>创建后自动播放</value></data>
+  <data name="Name_autoPlay" xml:space="preserve"><value>开始时播放</value></data>
   <data name="Name_barelyTag" xml:space="preserve"><value>擦边命中标签</value></data>
   <data name="Name_blendMode" xml:space="preserve"><value>混合模式</value></data>
-  <data name="Name_bubbleAppearEndOffset" xml:space="preserve"><value>气泡完成显现偏移</value></data>
-  <data name="Name_bubbleAppearStartOffset" xml:space="preserve"><value>气泡开始显现偏移</value></data>
-  <data name="Name_bubbleDisappearOffset" xml:space="preserve"><value>气泡消失偏移</value></data>
-  <data name="Name_bubbleSpawnOffset" xml:space="preserve"><value>气泡生成偏移</value></data>
-  <data name="Name_ChangeTrack" xml:space="preserve"><value>更改轨道</value></data>
-  <data name="Name_congratsText" xml:space="preserve"><value>通关文字</value></data>
-  <data name="Name_count" xml:space="preserve"><value>发射数量</value></data>
-  <data name="Name_defaultBGShapeColor" xml:space="preserve"><value>默认背景图案颜色</value></data>
-  <data name="Name_defaultBGShapeType" xml:space="preserve"><value>默认背景图案</value></data>
-  <data name="Name_defaultBGTileColor" xml:space="preserve"><value>默认背景砖块颜色</value></data>
-  <data name="Name_defaultTextColor" xml:space="preserve"><value>默认文字颜色</value></data>
-  <data name="Name_defaultTextShadowColor" xml:space="preserve"><value>默认文字阴影颜色</value></data>
+  <data name="Name_bubbleAppearEndOffset" xml:space="preserve"><value>出现结束偏移</value></data>
+  <data name="Name_bubbleAppearStartOffset" xml:space="preserve"><value>出现起始偏移</value></data>
+  <data name="Name_bubbleDisappearOffset" xml:space="preserve"><value>消失偏移</value></data>
+  <data name="Name_bubbleSpawnOffset" xml:space="preserve"><value>生成偏移</value></data>
+  <data name="Name_ChangeTrack" xml:space="preserve"><value>改变轨道</value></data>
+  <data name="Name_congratsText" xml:space="preserve"><value>“庆贺！”文本</value></data>
+  <data name="Name_count" xml:space="preserve"><value>数量</value></data>
+  <data name="Name_defaultBGShapeColor" xml:space="preserve"><value>教程背景图形颜色</value></data>
+  <data name="Name_defaultBGShapeType" xml:space="preserve"><value>教程背景图形</value></data>
+  <data name="Name_defaultBGTileColor" xml:space="preserve"><value>教程背景图案颜色</value></data>
+  <data name="Name_defaultTextColor" xml:space="preserve"><value>默认文本颜色</value></data>
+  <data name="Name_defaultTextShadowColor" xml:space="preserve"><value>默认文本阴影颜色</value></data>
   <data name="Name_durationRandomMode" xml:space="preserve"><value>时长随机模式</value></data>
   <data name="Name_durationRandomValue" xml:space="preserve"><value>时长随机备选值</value></data>
-  <data name="Name_earlyPerfectTag" xml:space="preserve"><value>偏早完美标签</value></data>
-  <data name="Name_easePartBehavior" xml:space="preserve"><value>缓动分段方式</value></data>
-  <data name="Name_easeParts" xml:space="preserve"><value>缓动分段数</value></data>
+  <data name="Name_earlyPerfectTag" xml:space="preserve"><value>“稍快”标签</value></data>
+  <data name="Name_easePartBehavior" xml:space="preserve"><value>缓速部分行为</value></data>
+  <data name="Name_easeParts" xml:space="preserve"><value>缓速部分</value></data>
   <data name="Name_endColor" xml:space="preserve"><value>结束颜色</value></data>
-  <data name="Name_endOpacity" xml:space="preserve"><value>结束不透明度</value></data>
-  <data name="Name_executeOnCurrentFloor" xml:space="preserve"><value>在当前砖块执行</value></data>
+  <data name="Name_endOpacity" xml:space="preserve"><value>结束透明度</value></data>
+  <data name="Name_executeOnCurrentFloor" xml:space="preserve"><value>在当前节拍方块上执行</value></data>
   <data name="Name_fadeOut" xml:space="preserve"><value>淡出</value></data>
-  <data name="Name_failHitboxOffset" xml:space="preserve"><value>碰撞区域偏移</value></data>
-  <data name="Name_failHitboxRotation" xml:space="preserve"><value>碰撞区域旋转</value></data>
-  <data name="Name_failHitboxScale" xml:space="preserve"><value>碰撞区域缩放</value></data>
-  <data name="Name_failHitboxType" xml:space="preserve"><value>碰撞区域形状</value></data>
+  <data name="Name_failHitboxOffset" xml:space="preserve"><value>判定框偏移</value></data>
+  <data name="Name_failHitboxRotation" xml:space="preserve"><value>判定框旋转</value></data>
+  <data name="Name_failHitboxScale" xml:space="preserve"><value>判定框大小</value></data>
+  <data name="Name_failHitboxType" xml:space="preserve"><value>判定框形状</value></data>
   <data name="Name_Favorites" xml:space="preserve"><value>收藏</value></data>
   <data name="Name_filterProperties" xml:space="preserve"><value>滤镜参数</value></data>
-  <data name="Name_floorCount" xml:space="preserve"><value>砖块数量</value></data>
+  <data name="Name_floorCount" xml:space="preserve"><value>重复方块数</value></data>
   <data name="Name_frameRate" xml:space="preserve"><value>帧率</value></data>
-  <data name="Name_gameSound" xml:space="preserve"><value>游戏音效类型</value></data>
-  <data name="Name_gapLength" xml:space="preserve"><value>间隔长度</value></data>
-  <data name="Name_hideJudgment" xml:space="preserve"><value>隐藏判定</value></data>
-  <data name="Name_hideTileIcon" xml:space="preserve"><value>隐藏砖块图标</value></data>
-  <data name="Name_hitbox" xml:space="preserve"><value>碰撞行为</value></data>
-  <data name="Name_hitboxDecoTag" xml:space="preserve"><value>碰撞装饰标签</value></data>
-  <data name="Name_hitboxDetectTarget" xml:space="preserve"><value>碰撞检测目标</value></data>
-  <data name="Name_hitboxEventTag" xml:space="preserve"><value>碰撞事件标签</value></data>
-  <data name="Name_hitboxRepeatInterval" xml:space="preserve"><value>碰撞重复间隔</value></data>
-  <data name="Name_hitboxTargetPlanet" xml:space="preserve"><value>碰撞检测星球</value></data>
-  <data name="Name_hitboxTriggerType" xml:space="preserve"><value>碰撞触发方式</value></data>
-  <data name="Name_hitsoundOffBeats" xml:space="preserve"><value>非正拍打击音</value></data>
-  <data name="Name_hitsoundOnBeats" xml:space="preserve"><value>正拍打击音</value></data>
+  <data name="Name_gameSound" xml:space="preserve"><value>设定目标：</value></data>
+  <data name="Name_gapLength" xml:space="preserve"><value>间隙长度</value></data>
+  <data name="Name_hideJudgment" xml:space="preserve"><value>隐藏判定文本</value></data>
+  <data name="Name_hideTileIcon" xml:space="preserve"><value>隐藏方块图标</value></data>
+  <data name="Name_hitbox" xml:space="preserve"><value>判定框</value></data>
+  <data name="Name_hitboxDecoTag" xml:space="preserve"><value>待检测装饰标签</value></data>
+  <data name="Name_hitboxDetectTarget" xml:space="preserve"><value>判定框检测目标</value></data>
+  <data name="Name_hitboxEventTag" xml:space="preserve"><value>事件运行标签</value></data>
+  <data name="Name_hitboxRepeatInterval" xml:space="preserve"><value>判定框触发重复间隔</value></data>
+  <data name="Name_hitboxTargetPlanet" xml:space="preserve"><value>判定框目标行星</value></data>
+  <data name="Name_hitboxTriggerType" xml:space="preserve"><value>判定框触发类型</value></data>
+  <data name="Name_hitsoundOffBeats" xml:space="preserve"><value>弱拍击拍音效</value></data>
+  <data name="Name_hitsoundOnBeats" xml:space="preserve"><value>强拍击拍音效</value></data>
   <data name="Name_hitTag" xml:space="preserve"><value>命中判定标签</value></data>
   <data name="Name_holdEndSound" xml:space="preserve"><value>长按结束音效</value></data>
   <data name="Name_holdLoopSound" xml:space="preserve"><value>长按循环音效</value></data>
   <data name="Name_holdMidSound" xml:space="preserve"><value>长按中段音效</value></data>
-  <data name="Name_holdMidSoundDelay" xml:space="preserve"><value>中段音效延迟</value></data>
-  <data name="Name_holdMidSoundTimingRelativeTo" xml:space="preserve"><value>中段音效计时基准</value></data>
-  <data name="Name_holdMidSoundType" xml:space="preserve"><value>中段音效播放方式</value></data>
+  <data name="Name_holdMidSoundDelay" xml:space="preserve"><value>长按中段音效延迟</value></data>
+  <data name="Name_holdMidSoundTimingRelativeTo" xml:space="preserve"><value>关联到……</value></data>
+  <data name="Name_holdMidSoundType" xml:space="preserve"><value>长按中段音效类型</value></data>
   <data name="Name_holdSoundVolume" xml:space="preserve"><value>长按音效音量</value></data>
   <data name="Name_holdStartSound" xml:space="preserve"><value>长按起始音效</value></data>
-  <data name="Name_ignoreInput" xml:space="preserve"><value>忽略输入</value></data>
-  <data name="Name_imageColor" xml:space="preserve"><value>图片着色</value></data>
-  <data name="Name_imageSmoothing" xml:space="preserve"><value>平滑采样</value></data>
-  <data name="Name_interval" xml:space="preserve"><value>重复间隔</value></data>
-  <data name="Name_latePerfectTag" xml:space="preserve"><value>偏晚完美标签</value></data>
+  <data name="Name_ignoreInput" xml:space="preserve"><value>忽略玩家输入</value></data>
+  <data name="Name_imageColor" xml:space="preserve"><value>图片颜色</value></data>
+  <data name="Name_imageSmoothing" xml:space="preserve"><value>图像平滑</value></data>
+  <data name="Name_interval" xml:space="preserve"><value>间隔</value></data>
+  <data name="Name_latePerfectTag" xml:space="preserve"><value>“稍慢”标签</value></data>
   <data name="Name_levelTitlePosition" xml:space="preserve"><value>关卡标题位置</value></data>
-  <data name="Name_levelTitleText" xml:space="preserve"><value>关卡标题文字</value></data>
-  <data name="Name_lockRot" xml:space="preserve"><value>锁定背景旋转</value></data>
-  <data name="Name_lockRotation" xml:space="preserve"><value>锁定旋转</value></data>
-  <data name="Name_lockScale" xml:space="preserve"><value>锁定缩放</value></data>
-  <data name="Name_lossTag" xml:space="preserve"><value>失败标签</value></data>
-  <data name="Name_maskingBackDepth" xml:space="preserve"><value>遮罩后界深度</value></data>
-  <data name="Name_maskingFrontDepth" xml:space="preserve"><value>遮罩前界深度</value></data>
+  <data name="Name_levelTitleText" xml:space="preserve"><value>关卡标题文本</value></data>
+  <data name="Name_lockRot" xml:space="preserve"><value>旋转锁定</value></data>
+  <data name="Name_lockRotation" xml:space="preserve"><value>锁定转角</value></data>
+  <data name="Name_lockScale" xml:space="preserve"><value>锁定大小</value></data>
+  <data name="Name_lossTag" xml:space="preserve"><value>“丢拍”标签</value></data>
+  <data name="Name_maskingBackDepth" xml:space="preserve"><value>遮罩结束深度</value></data>
+  <data name="Name_maskingFrontDepth" xml:space="preserve"><value>遮罩起始深度</value></data>
   <data name="Name_maskingTarget" xml:space="preserve"><value>遮罩目标</value></data>
-  <data name="Name_maskingType" xml:space="preserve"><value>遮罩模式</value></data>
+  <data name="Name_maskingType" xml:space="preserve"><value>遮罩类型</value></data>
   <data name="Name_missTag" xml:space="preserve"><value>漏击标签</value></data>
-  <data name="Name_objectType" xml:space="preserve"><value>物件类型</value></data>
-  <data name="Name_onCheckpointTag" xml:space="preserve"><value>检查点标签</value></data>
+  <data name="Name_objectType" xml:space="preserve"><value>对象类型</value></data>
+  <data name="Name_onCheckpointTag" xml:space="preserve"><value>“重启时”标签</value></data>
   <data name="Name_originalSize" xml:space="preserve"><value>原始尺寸</value></data>
-  <data name="Name_outCam" xml:space="preserve"><value>退出时的相机</value></data>
-  <data name="Name_outEase" xml:space="preserve"><value>退出缓动</value></data>
+  <data name="Name_outCam" xml:space="preserve"><value>在离开自由区段时移动摄像头</value></data>
+  <data name="Name_outEase" xml:space="preserve"><value>缓速</value></data>
   <data name="Name_outTime" xml:space="preserve"><value>退出过渡时长</value></data>
-  <data name="Name_perfectTag" xml:space="preserve"><value>完美判定标签</value></data>
-  <data name="Name_perfectText" xml:space="preserve"><value>完美通关文字</value></data>
+  <data name="Name_perfectTag" xml:space="preserve"><value>“完美”标签</value></data>
+  <data name="Name_perfectText" xml:space="preserve"><value>“完美无瑕！”文本</value></data>
   <data name="Name_planetColor" xml:space="preserve"><value>星球颜色</value></data>
-  <data name="Name_planetColorType" xml:space="preserve"><value>星球颜色预设</value></data>
-  <data name="Name_planetEasePartBehavior" xml:space="preserve"><value>星球缓动分段方式</value></data>
-  <data name="Name_planets" xml:space="preserve"><value>星球数量</value></data>
-  <data name="Name_planetTailColor" xml:space="preserve"><value>尾迹颜色</value></data>
-  <data name="Name_playbackControl" xml:space="preserve"><value>粒子预览</value></data>
-  <data name="Name_PlaySound_hitsound" xml:space="preserve"><value>音效或音频文件</value></data>
-  <data name="Name_PlaySound_playDuration" xml:space="preserve"><value>音效播放时长</value></data>
+  <data name="Name_planetColorType" xml:space="preserve"><value>星球颜色类型</value></data>
+  <data name="Name_planetEasePartBehavior" xml:space="preserve"><value>缓速部分行为</value></data>
+  <data name="Name_planets" xml:space="preserve"><value>行星</value></data>
+  <data name="Name_planetTailColor" xml:space="preserve"><value>星球轨迹颜色</value></data>
+  <data name="Name_playbackControl" xml:space="preserve"><value>粒子发射器</value></data>
+  <data name="Name_PlaySound_hitsound" xml:space="preserve"><value>打拍声：</value></data>
+  <data name="Name_PlaySound_playDuration" xml:space="preserve"><value>时长</value></data>
   <data name="Name_positionRandomMode" xml:space="preserve"><value>位置随机模式</value></data>
   <data name="Name_positionRandomValue" xml:space="preserve"><value>位置随机备选值</value></data>
-  <data name="Name_previewIcon" xml:space="preserve"><value>预览图标</value></data>
-  <data name="Name_previewIconColor" xml:space="preserve"><value>预览图标着色</value></data>
-  <data name="Name_previewSongDuration" xml:space="preserve"><value>试听时长</value></data>
-  <data name="Name_previewSongStart" xml:space="preserve"><value>试听起点</value></data>
-  <data name="Name_repeatType" xml:space="preserve"><value>重复方式</value></data>
+  <data name="Name_previewIcon" xml:space="preserve"><value>关卡图标</value></data>
+  <data name="Name_previewIconColor" xml:space="preserve"><value>关卡图标颜色</value></data>
+  <data name="Name_previewSongDuration" xml:space="preserve"><value>歌曲预览时长</value></data>
+  <data name="Name_previewSongStart" xml:space="preserve"><value>歌曲预览开始</value></data>
+  <data name="Name_repeatType" xml:space="preserve"><value>重复类型</value></data>
   <data name="Name_repetitions" xml:space="preserve"><value>重复次数</value></data>
   <data name="Name_requiredMods" xml:space="preserve"><value>所需模组</value></data>
   <data name="Name_rotationRandomMode" xml:space="preserve"><value>旋转随机模式</value></data>
   <data name="Name_rotationRandomValue" xml:space="preserve"><value>旋转随机备选值</value></data>
   <data name="Name_scalingRatio" xml:space="preserve"><value>缩放比例</value></data>
-  <data name="Name_ScreenTile_tile" xml:space="preserve"><value>画面平铺</value></data>
-  <data name="Name_scroll" xml:space="preserve"><value>滚动量</value></data>
-  <data name="Name_seizureWarning" xml:space="preserve"><value>光敏警告</value></data>
-  <data name="Name_showDefaultBGIfNoImage" xml:space="preserve"><value>无图片时显示默认背景</value></data>
-  <data name="Name_showDefaultBGTile" xml:space="preserve"><value>显示默认背景砖块</value></data>
-  <data name="Name_showStatusText" xml:space="preserve"><value>显示状态文字</value></data>
+  <data name="Name_ScreenTile_tile" xml:space="preserve"><value>平铺</value></data>
+  <data name="Name_scroll" xml:space="preserve"><value>卷屏速度</value></data>
+  <data name="Name_seizureWarning" xml:space="preserve"><value>光敏感性癫痫警告</value></data>
+  <data name="Name_showDefaultBGIfNoImage" xml:space="preserve"><value>默认显示教程背景</value></data>
+  <data name="Name_showDefaultBGTile" xml:space="preserve"><value>显示教程背景图案</value></data>
+  <data name="Name_showStatusText" xml:space="preserve"><value>显示“自动方块”文本</value></data>
   <data name="Name_size" xml:space="preserve"><value>尺寸</value></data>
-  <data name="Name_specialArtistType" xml:space="preserve"><value>音乐作者授权类型</value></data>
-  <data name="Name_speedTrialAim" xml:space="preserve"><value>竞速目标</value></data>
+  <data name="Name_specialArtistType" xml:space="preserve"><value>特殊授权</value></data>
+  <data name="Name_speedTrialAim" xml:space="preserve"><value>飙速模式倍速目标</value></data>
   <data name="Name_startColor" xml:space="preserve"><value>起始颜色</value></data>
-  <data name="Name_startOpacity" xml:space="preserve"><value>起始不透明度</value></data>
-  <data name="Name_state" xml:space="preserve"><value>输入状态</value></data>
-  <data name="Name_stickToFloor" xml:space="preserve"><value>附着到砖块</value></data>
-  <data name="Name_strength" xml:space="preserve"><value>强度</value></data>
-  <data name="Name_syncFloorDepth" xml:space="preserve"><value>同步砖块深度</value></data>
-  <data name="Name_target" xml:space="preserve"><value>目标输入</value></data>
-  <data name="Name_targetEventTag" xml:space="preserve"><value>目标事件标签</value></data>
-  <data name="Name_targetMode" xml:space="preserve"><value>播放操作</value></data>
-  <data name="Name_targetPlanet" xml:space="preserve"><value>目标星球</value></data>
-  <data name="Name_targetTag" xml:space="preserve"><value>目标标签</value></data>
+  <data name="Name_startOpacity" xml:space="preserve"><value>起始透明度</value></data>
+  <data name="Name_state" xml:space="preserve"><value>侦测状态</value></data>
+  <data name="Name_stickToFloor" xml:space="preserve"><value>依附地板</value></data>
+  <data name="Name_strength" xml:space="preserve"><value>力度</value></data>
+  <data name="Name_syncFloorDepth" xml:space="preserve"><value>同步地板深度</value></data>
+  <data name="Name_target" xml:space="preserve"><value>侦测目标</value></data>
+  <data name="Name_targetEventTag" xml:space="preserve"><value>事件运行标签</value></data>
+  <data name="Name_targetMode" xml:space="preserve"><value>模式</value></data>
+  <data name="Name_targetPlanet" xml:space="preserve"><value>目标行星</value></data>
+  <data name="Name_targetTag" xml:space="preserve"><value>标签</value></data>
   <data name="Name_targetType" xml:space="preserve"><value>目标类型</value></data>
   <data name="Name_threshold" xml:space="preserve"><value>阈值</value></data>
   <data name="Name_tile" xml:space="preserve"><value>平铺尺寸</value></data>
-  <data name="Name_tileOffset" xml:space="preserve"><value>砖块偏移</value></data>
-  <data name="Name_tooEarlyTag" xml:space="preserve"><value>提前失误标签</value></data>
-  <data name="Name_tooLateTag" xml:space="preserve"><value>超时失误标签</value></data>
+  <data name="Name_tileOffset" xml:space="preserve"><value>重置方块偏移</value></data>
+  <data name="Name_tooEarlyTag" xml:space="preserve"><value>“特别快"标签</value></data>
+  <data name="Name_tooLateTag" xml:space="preserve"><value>“特别慢”标签</value></data>
   <data name="Name_trackAngle" xml:space="preserve"><value>轨道角度</value></data>
-  <data name="Name_trackColorAnimDuration" xml:space="preserve"><value>轨道变色周期</value></data>
-  <data name="Name_trackColorPulse" xml:space="preserve"><value>轨道颜色脉冲</value></data>
-  <data name="Name_trackGlowColor" xml:space="preserve"><value>轨道辉光颜色</value></data>
-  <data name="Name_trackGlowEnabled" xml:space="preserve"><value>启用轨道辉光</value></data>
-  <data name="Name_trackGlowIntensity" xml:space="preserve"><value>轨道辉光强度</value></data>
-  <data name="Name_trackGraySetSpeedIcon" xml:space="preserve"><value>灰色变速图标</value></data>
-  <data name="Name_trackIcon" xml:space="preserve"><value>砖块图标</value></data>
-  <data name="Name_trackIconAngle" xml:space="preserve"><value>图标角度</value></data>
-  <data name="Name_trackIconFlipped" xml:space="preserve"><value>翻转砖块图标</value></data>
-  <data name="Name_trackIconOutlines" xml:space="preserve"><value>轨道图标描边</value></data>
-  <data name="Name_trackOpacity" xml:space="preserve"><value>轨道不透明度</value></data>
-  <data name="Name_trackPulseLength" xml:space="preserve"><value>脉冲长度</value></data>
-  <data name="Name_trackRedSwirl" xml:space="preserve"><value>红色旋转图标</value></data>
-  <data name="Name_trackSetSpeedIconBpm" xml:space="preserve"><value>变速图标 BPM</value></data>
-  <data name="Name_trackType" xml:space="preserve"><value>砖块类型</value></data>
-  <data name="Name_useMaskingDepth" xml:space="preserve"><value>按深度限制遮罩</value></data>
-  <data name="Name_veryEarlyTag" xml:space="preserve"><value>过早命中标签</value></data>
-  <data name="Name_veryLateTag" xml:space="preserve"><value>过晚命中标签</value></data>
+  <data name="Name_trackColorAnimDuration" xml:space="preserve"><value>色彩动画间隔</value></data>
+  <data name="Name_trackColorPulse" xml:space="preserve"><value>颜色脉冲类型</value></data>
+  <data name="Name_trackGlowColor" xml:space="preserve"><value>轨道发光颜色</value></data>
+  <data name="Name_trackGlowEnabled" xml:space="preserve"><value>允许轨道发光</value></data>
+  <data name="Name_trackGlowIntensity" xml:space="preserve"><value>辉度</value></data>
+  <data name="Name_trackGraySetSpeedIcon" xml:space="preserve"><value>灰色设置速度图标</value></data>
+  <data name="Name_trackIcon" xml:space="preserve"><value>图标</value></data>
+  <data name="Name_trackIconAngle" xml:space="preserve"><value>轨道图标角度</value></data>
+  <data name="Name_trackIconFlipped" xml:space="preserve"><value>轨道图标翻转</value></data>
+  <data name="Name_trackIconOutlines" xml:space="preserve"><value>方块图标描边</value></data>
+  <data name="Name_trackOpacity" xml:space="preserve"><value>透明度</value></data>
+  <data name="Name_trackPulseLength" xml:space="preserve"><value>颜色脉冲长度</value></data>
+  <data name="Name_trackRedSwirl" xml:space="preserve"><value>红色漩涡</value></data>
+  <data name="Name_trackSetSpeedIconBpm" xml:space="preserve"><value>设置速度图标BPM</value></data>
+  <data name="Name_trackType" xml:space="preserve"><value>轨道类型</value></data>
+  <data name="Name_useMaskingDepth" xml:space="preserve"><value>使用遮罩深度</value></data>
+  <data name="Name_veryEarlyTag" xml:space="preserve"><value>“太快”标签</value></data>
+  <data name="Name_veryLateTag" xml:space="preserve"><value>“太慢”标签</value></data>
   <data name="Name_visible" xml:space="preserve"><value>可见</value></data>
-  <data name="Name_warning" xml:space="preserve"><value>提示</value></data>
+  <data name="Name_warning" xml:space="preserve"><value>警告！</value></data>
   <data name="Name_zoomRandomMode" xml:space="preserve"><value>缩放随机模式</value></data>
   <data name="Name_zoomRandomValue" xml:space="preserve"><value>缩放随机备选值</value></data>
-  <data name="Option_Aberration" xml:space="preserve"><value>色差</value></data>
-  <data name="Option_Action1" xml:space="preserve"><value>操作键 1</value></data>
-  <data name="Option_Action2" xml:space="preserve"><value>操作键 2</value></data>
-  <data name="Option_All" xml:space="preserve"><value>全部</value></data>
+  <data name="Option_Aberration" xml:space="preserve"><value>像差</value></data>
+  <data name="Option_Action1" xml:space="preserve"><value>键盘左侧区域</value></data>
+  <data name="Option_Action2" xml:space="preserve"><value>键盘右侧区域</value></data>
+  <data name="Option_All" xml:space="preserve"><value>所有行星</value></data>
   <data name="Option_Any" xml:space="preserve"><value>任意</value></data>
   <data name="Option_Arcade" xml:space="preserve"><value>街机</value></data>
-  <data name="Option_Arial" xml:space="preserve"><value>Arial 字体</value></data>
-  <data name="Option_Assemble" xml:space="preserve"><value>聚拢</value></data>
-  <data name="Option_Assemble_Far" xml:space="preserve"><value>远处聚拢</value></data>
-  <data name="Option_AuthorIsArtist" xml:space="preserve"><value>关卡作者即音乐作者</value></data>
+  <data name="Option_Arial" xml:space="preserve"><value>Arial</value></data>
+  <data name="Option_Assemble" xml:space="preserve"><value>聚合</value></data>
+  <data name="Option_Assemble_Far" xml:space="preserve"><value>聚合：远</value></data>
+  <data name="Option_AuthorIsArtist" xml:space="preserve"><value>我是艺术家本人</value></data>
   <data name="Option_Background" xml:space="preserve"><value>背景</value></data>
   <data name="Option_Basic" xml:space="preserve"><value>基础</value></data>
   <data name="Option_Beat" xml:space="preserve"><value>节拍</value></data>
   <data name="Option_Between" xml:space="preserve"><value>在两值之间随机</value></data>
   <data name="Option_Blink" xml:space="preserve"><value>闪烁</value></data>
-  <data name="Option_Blizzard" xml:space="preserve"><value>暴风雪</value></data>
-  <data name="Option_BluePlanet" xml:space="preserve"><value>蓝色星球</value></data>
+  <data name="Option_Blizzard" xml:space="preserve"><value>暴雪</value></data>
+  <data name="Option_BluePlanet" xml:space="preserve"><value>冰之行星</value></data>
   <data name="Option_Blur" xml:space="preserve"><value>模糊</value></data>
-  <data name="Option_BlurFocus" xml:space="preserve"><value>焦点模糊</value></data>
+  <data name="Option_BlurFocus" xml:space="preserve"><value>模糊聚焦</value></data>
   <data name="Option_Box" xml:space="preserve"><value>方框</value></data>
-  <data name="Option_BurstSpread" xml:space="preserve"><value>均匀散射</value></data>
-  <data name="Option_Camera" xml:space="preserve"><value>相机</value></data>
-  <data name="Option_CameraAspect" xml:space="preserve"><value>相机（适配宽高比）</value></data>
+  <data name="Option_BurstSpread" xml:space="preserve"><value>爆裂传播</value></data>
+  <data name="Option_Camera" xml:space="preserve"><value>镜头</value></data>
+  <data name="Option_CameraAspect" xml:space="preserve"><value>镜头（屏幕比例）</value></data>
   <data name="Option_Capsule" xml:space="preserve"><value>胶囊形</value></data>
-  <data name="Option_Center" xml:space="preserve"><value>中心星球</value></data>
+  <data name="Option_Center" xml:space="preserve"><value>中央行星</value></data>
   <data name="Option_Checkpoint" xml:space="preserve"><value>检查点</value></data>
-  <data name="Option_Chuck" xml:space="preserve"><value>短擦音</value></data>
-  <data name="Option_ClapHit" xml:space="preserve"><value>拍手</value></data>
-  <data name="Option_ClapHitEcho" xml:space="preserve"><value>回声拍手</value></data>
-  <data name="Option_ComicSansMS" xml:space="preserve"><value>Comic Sans MS 字体</value></data>
-  <data name="Option_Compression" xml:space="preserve"><value>压缩失真</value></data>
-  <data name="Option_Confirm" xml:space="preserve"><value>确认键</value></data>
+  <data name="Option_Chuck" xml:space="preserve"><value>低音底鼓</value></data>
+  <data name="Option_ClapHit" xml:space="preserve"><value>拍掌</value></data>
+  <data name="Option_ClapHitEcho" xml:space="preserve"><value>回音拍掌</value></data>
+  <data name="Option_ComicSansMS" xml:space="preserve"><value>Comic Sans MS</value></data>
+  <data name="Option_Compression" xml:space="preserve"><value>压缩</value></data>
+  <data name="Option_Confirm" xml:space="preserve"><value>确定</value></data>
   <data name="Option_Contrast" xml:space="preserve"><value>对比度</value></data>
-  <data name="Option_CourierNew" xml:space="preserve"><value>Courier New 字体</value></data>
+  <data name="Option_CourierNew" xml:space="preserve"><value>Courier New</value></data>
   <data name="Option_Custom" xml:space="preserve"><value>自定义</value></data>
   <data name="Option_Decoration" xml:space="preserve"><value>装饰</value></data>
   <data name="Option_Default" xml:space="preserve"><value>默认</value></data>
   <data name="Option_DefaultBlue" xml:space="preserve"><value>默认蓝色</value></data>
   <data name="Option_DefaultRed" xml:space="preserve"><value>默认红色</value></data>
-  <data name="Option_Difference" xml:space="preserve"><value>差值</value></data>
-  <data name="Option_Disabled" xml:space="preserve"><value>停用</value></data>
-  <data name="Option_DoubleRabbit" xml:space="preserve"><value>双兔</value></data>
+  <data name="Option_Difference" xml:space="preserve"><value>差值模式</value></data>
+  <data name="Option_Disabled" xml:space="preserve"><value>无</value></data>
+  <data name="Option_DoubleRabbit" xml:space="preserve"><value>双兔子</value></data>
   <data name="Option_DoubleSnail" xml:space="preserve"><value>双蜗牛</value></data>
   <data name="Option_Down" xml:space="preserve"><value>向下</value></data>
-  <data name="Option_Drawing" xml:space="preserve"><value>素描</value></data>
-  <data name="Option_Drop" xml:space="preserve"><value>落下</value></data>
-  <data name="Option_EdgeBlackLine" xml:space="preserve"><value>黑色边线</value></data>
-  <data name="Option_EightiesTV" xml:space="preserve"><value>八十年代电视</value></data>
-  <data name="Option_Event" xml:space="preserve"><value>触发事件</value></data>
-  <data name="Option_Extend" xml:space="preserve"><value>伸展</value></data>
-  <data name="Option_Fade" xml:space="preserve"><value>渐变显隐</value></data>
-  <data name="Option_FiftiesTV" xml:space="preserve"><value>五十年代电视</value></data>
-  <data name="Option_FirePlanet" xml:space="preserve"><value>火星球</value></data>
-  <data name="Option_FireTile" xml:space="preserve"><value>火砖音效</value></data>
+  <data name="Option_Drawing" xml:space="preserve"><value>涂鸦</value></data>
+  <data name="Option_Drop" xml:space="preserve"><value>下坠</value></data>
+  <data name="Option_EdgeBlackLine" xml:space="preserve"><value>边缘描黑</value></data>
+  <data name="Option_EightiesTV" xml:space="preserve"><value>80年代电视</value></data>
+  <data name="Option_Event" xml:space="preserve"><value>运行事件</value></data>
+  <data name="Option_Extend" xml:space="preserve"><value>延伸</value></data>
+  <data name="Option_Fade" xml:space="preserve"><value>出现</value></data>
+  <data name="Option_FiftiesTV" xml:space="preserve"><value>50年代电视</value></data>
+  <data name="Option_FirePlanet" xml:space="preserve"><value>火之行星</value></data>
+  <data name="Option_FireTile" xml:space="preserve"><value>火方块</value></data>
   <data name="Option_Fisheye" xml:space="preserve"><value>鱼眼</value></data>
-  <data name="Option_FitToScreen" xml:space="preserve"><value>适应画面</value></data>
-  <data name="Option_Flash" xml:space="preserve"><value>闪动</value></data>
-  <data name="Option_Floor" xml:space="preserve"><value>砖块</value></data>
+  <data name="Option_FitToScreen" xml:space="preserve"><value>拉伸</value></data>
+  <data name="Option_Flash" xml:space="preserve"><value>Flash</value></data>
+  <data name="Option_Floor" xml:space="preserve"><value>地板</value></data>
+  <data name="Option_FloorDecorationType_Normal" xml:space="preserve"><value>标准</value></data>
   <data name="Option_Foreground" xml:space="preserve"><value>前景</value></data>
-  <data name="Option_Funk" xml:space="preserve"><value>迷幻色彩</value></data>
-  <data name="Option_Fuse" xml:space="preserve"><value>引线音效</value></data>
+  <data name="Option_Funk" xml:space="preserve"><value>放克</value></data>
+  <data name="Option_Fuse" xml:space="preserve"><value>引信</value></data>
   <data name="Option_GaussianBlur" xml:space="preserve"><value>高斯模糊</value></data>
   <data name="Option_Gems" xml:space="preserve"><value>宝石</value></data>
-  <data name="Option_Georgia" xml:space="preserve"><value>Georgia 字体</value></data>
-  <data name="Option_Glitch" xml:space="preserve"><value>信号故障</value></data>
-  <data name="Option_Global" xml:space="preserve"><value>世界坐标</value></data>
-  <data name="Option_Glow" xml:space="preserve"><value>辉光</value></data>
+  <data name="Option_Georgia" xml:space="preserve"><value>Georgia</value></data>
+  <data name="Option_Glitch" xml:space="preserve"><value>故障</value></data>
+  <data name="Option_Global" xml:space="preserve"><value>全局</value></data>
+  <data name="Option_Glow" xml:space="preserve"><value>发光</value></data>
   <data name="Option_Gold" xml:space="preserve"><value>金色</value></data>
-  <data name="Option_Grain" xml:space="preserve"><value>胶片颗粒</value></data>
-  <data name="Option_GreenPlanet" xml:space="preserve"><value>绿色星球</value></data>
-  <data name="Option_Grow" xml:space="preserve"><value>放大出现</value></data>
-  <data name="Option_Grow_Spin" xml:space="preserve"><value>旋转放大</value></data>
-  <data name="Option_Hammer" xml:space="preserve"><value>锤击</value></data>
-  <data name="Option_Handheld" xml:space="preserve"><value>掌机画面</value></data>
-  <data name="Option_Hat" xml:space="preserve"><value>踩镲</value></data>
-  <data name="Option_HatHouse" xml:space="preserve"><value>House 踩镲</value></data>
-  <data name="Option_HexagonBlack" xml:space="preserve"><value>黑色六边形</value></data>
-  <data name="Option_Hitsound" xml:space="preserve"><value>打击音</value></data>
-  <data name="Option_HoldArrowLong" xml:space="preserve"><value>长按箭头（长）</value></data>
-  <data name="Option_HoldArrowShort" xml:space="preserve"><value>长按箭头（短）</value></data>
-  <data name="Option_HoldReleaseLong" xml:space="preserve"><value>松开标记（长）</value></data>
-  <data name="Option_HoldReleaseShort" xml:space="preserve"><value>松开标记（短）</value></data>
-  <data name="Option_IcePlanet" xml:space="preserve"><value>冰星球</value></data>
-  <data name="Option_IceTile" xml:space="preserve"><value>冰砖音效</value></data>
-  <data name="Option_Impact" xml:space="preserve"><value>Impact 字体</value></data>
-  <data name="Option_InBack" xml:space="preserve"><value>回拉缓入</value></data>
-  <data name="Option_InBounce" xml:space="preserve"><value>弹跳缓入</value></data>
-  <data name="Option_InCirc" xml:space="preserve"><value>圆弧缓入</value></data>
-  <data name="Option_InCubic" xml:space="preserve"><value>三次缓入</value></data>
-  <data name="Option_InElastic" xml:space="preserve"><value>弹性缓入</value></data>
-  <data name="Option_InExpo" xml:space="preserve"><value>指数缓入</value></data>
-  <data name="Option_InFlash" xml:space="preserve"><value>闪动缓入</value></data>
-  <data name="Option_InOutBack" xml:space="preserve"><value>回拉缓入缓出</value></data>
-  <data name="Option_InOutBounce" xml:space="preserve"><value>弹跳缓入缓出</value></data>
-  <data name="Option_InOutCirc" xml:space="preserve"><value>圆弧缓入缓出</value></data>
-  <data name="Option_InOutCubic" xml:space="preserve"><value>三次缓入缓出</value></data>
-  <data name="Option_InOutElastic" xml:space="preserve"><value>弹性缓入缓出</value></data>
-  <data name="Option_InOutExpo" xml:space="preserve"><value>指数缓入缓出</value></data>
-  <data name="Option_InOutFlash" xml:space="preserve"><value>闪动缓入缓出</value></data>
-  <data name="Option_InOutQuad" xml:space="preserve"><value>二次缓入缓出</value></data>
-  <data name="Option_InOutQuart" xml:space="preserve"><value>四次缓入缓出</value></data>
-  <data name="Option_InOutQuint" xml:space="preserve"><value>五次缓入缓出</value></data>
-  <data name="Option_InOutSine" xml:space="preserve"><value>正弦缓入缓出</value></data>
-  <data name="Option_InputEventState_Down" xml:space="preserve"><value>按下</value></data>
-  <data name="Option_InputEventState_Up" xml:space="preserve"><value>松开</value></data>
-  <data name="Option_InQuad" xml:space="preserve"><value>二次缓入</value></data>
-  <data name="Option_InQuart" xml:space="preserve"><value>四次缓入</value></data>
-  <data name="Option_InQuint" xml:space="preserve"><value>五次缓入</value></data>
-  <data name="Option_InSine" xml:space="preserve"><value>正弦缓入</value></data>
-  <data name="Option_KickChroma" xml:space="preserve"><value>Chroma 底鼓</value></data>
-  <data name="Option_KickHouse" xml:space="preserve"><value>House 底鼓</value></data>
-  <data name="Option_KickRupture" xml:space="preserve"><value>Rupture 底鼓</value></data>
-  <data name="Option_Kill" xml:space="preserve"><value>碰撞即失败</value></data>
+  <data name="Option_Grain" xml:space="preserve"><value>胶片噪点</value></data>
+  <data name="Option_GreenPlanet" xml:space="preserve"><value>风之行星</value></data>
+  <data name="Option_Grow" xml:space="preserve"><value>生长</value></data>
+  <data name="Option_Grow_Spin" xml:space="preserve"><value>生长+旋转</value></data>
+  <data name="Option_Hammer" xml:space="preserve"><value>音锤</value></data>
+  <data name="Option_Handheld" xml:space="preserve"><value>8比特掌机</value></data>
+  <data name="Option_Hat" xml:space="preserve"><value>高帽钹</value></data>
+  <data name="Option_HatHouse" xml:space="preserve"><value>镲片-浩室</value></data>
+  <data name="Option_HexagonBlack" xml:space="preserve"><value>六角形黑圈</value></data>
+  <data name="Option_Hitsound" xml:space="preserve"><value>普通击拍音效</value></data>
+  <data name="Option_HoldArrowLong" xml:space="preserve"><value>长长按箭头</value></data>
+  <data name="Option_HoldArrowShort" xml:space="preserve"><value>短长按箭头</value></data>
+  <data name="Option_HoldReleaseLong" xml:space="preserve"><value>长长按释放</value></data>
+  <data name="Option_HoldReleaseShort" xml:space="preserve"><value>短长按释放</value></data>
+  <data name="Option_IcePlanet" xml:space="preserve"><value>冰之行星</value></data>
+  <data name="Option_IceTile" xml:space="preserve"><value>冰方块</value></data>
+  <data name="Option_Impact" xml:space="preserve"><value>Impact</value></data>
+  <data name="Option_InBack" xml:space="preserve"><value>In Back</value></data>
+  <data name="Option_InBounce" xml:space="preserve"><value>In Bounce</value></data>
+  <data name="Option_InCirc" xml:space="preserve"><value>In Circ</value></data>
+  <data name="Option_InCubic" xml:space="preserve"><value>In Cubic</value></data>
+  <data name="Option_InElastic" xml:space="preserve"><value>In Elastic</value></data>
+  <data name="Option_InExpo" xml:space="preserve"><value>In Expo</value></data>
+  <data name="Option_InFlash" xml:space="preserve"><value>In Flash</value></data>
+  <data name="Option_InOutBack" xml:space="preserve"><value>In-Out Back</value></data>
+  <data name="Option_InOutBounce" xml:space="preserve"><value>In-Out Bounce</value></data>
+  <data name="Option_InOutCirc" xml:space="preserve"><value>In-Out Circ</value></data>
+  <data name="Option_InOutCubic" xml:space="preserve"><value>In-Out Cubic</value></data>
+  <data name="Option_InOutElastic" xml:space="preserve"><value>In-Out Elastic</value></data>
+  <data name="Option_InOutExpo" xml:space="preserve"><value>In-Out Expo</value></data>
+  <data name="Option_InOutFlash" xml:space="preserve"><value>In-Out Flash</value></data>
+  <data name="Option_InOutQuad" xml:space="preserve"><value>In-Out Quad</value></data>
+  <data name="Option_InOutQuart" xml:space="preserve"><value>In-Out Quart</value></data>
+  <data name="Option_InOutQuint" xml:space="preserve"><value>In-Out Quint</value></data>
+  <data name="Option_InOutSine" xml:space="preserve"><value>In-Out Sine</value></data>
+  <data name="Option_InputEventState_Down" xml:space="preserve"><value>按下时</value></data>
+  <data name="Option_InputEventState_Up" xml:space="preserve"><value>释放时</value></data>
+  <data name="Option_InQuad" xml:space="preserve"><value>In Quad</value></data>
+  <data name="Option_InQuart" xml:space="preserve"><value>In Quart</value></data>
+  <data name="Option_InQuint" xml:space="preserve"><value>In Quint</value></data>
+  <data name="Option_InSine" xml:space="preserve"><value>In Sine</value></data>
+  <data name="Option_KickChroma" xml:space="preserve"><value>底鼓-铬</value></data>
+  <data name="Option_KickHouse" xml:space="preserve"><value>底鼓-浩室</value></data>
+  <data name="Option_KickRupture" xml:space="preserve"><value>底鼓-裂解</value></data>
+  <data name="Option_Kill" xml:space="preserve"><value>失败玩家</value></data>
   <data name="Option_LastPosition" xml:space="preserve"><value>上次位置</value></data>
-  <data name="Option_LastPositionNoRotation" xml:space="preserve"><value>上次位置（不跟随旋转）</value></data>
-  <data name="Option_LED" xml:space="preserve"><value>LED 点阵</value></data>
-  <data name="Option_Left" xml:space="preserve"><value>向左</value></data>
-  <data name="Option_LightWater" xml:space="preserve"><value>水面光纹</value></data>
-  <data name="Option_LinearDodge" xml:space="preserve"><value>线性减淡（相加）</value></data>
-  <data name="Option_Long" xml:space="preserve"><value>长砖</value></data>
-  <data name="Option_Mask" xml:space="preserve"><value>写入遮罩</value></data>
+  <data name="Option_LastPositionNoRotation" xml:space="preserve"><value>上次位置（无旋转）</value></data>
+  <data name="Option_LED" xml:space="preserve"><value>LED</value></data>
+  <data name="Option_Left" xml:space="preserve"><value>左</value></data>
+  <data name="Option_LightWater" xml:space="preserve"><value>涟漪</value></data>
+  <data name="Option_LinearDodge" xml:space="preserve"><value>线性减淡</value></data>
+  <data name="Option_Long" xml:space="preserve"><value>长</value></data>
+  <data name="Option_Mask" xml:space="preserve"><value>遮盖其他装饰</value></data>
   <data name="Option_Midspin" xml:space="preserve"><value>中旋</value></data>
   <data name="Option_Minimal" xml:space="preserve"><value>极简</value></data>
   <data name="Option_Mirror" xml:space="preserve"><value>镜像</value></data>
   <data name="Option_MotionBlur" xml:space="preserve"><value>运动模糊</value></data>
-  <data name="Option_MultiPlanetThreeMore" xml:space="preserve"><value>三球及以上</value></data>
-  <data name="Option_MultiPlanetTwo" xml:space="preserve"><value>双星球</value></data>
+  <data name="Option_MultiPlanetThreeMore" xml:space="preserve"><value>三星</value></data>
+  <data name="Option_MultiPlanetTwo" xml:space="preserve"><value>双星</value></data>
   <data name="Option_Multiply" xml:space="preserve"><value>正片叠底</value></data>
   <data name="Option_Neon" xml:space="preserve"><value>霓虹</value></data>
-  <data name="Option_NeonLight" xml:space="preserve"><value>柔光霓虹</value></data>
+  <data name="Option_NeonLight" xml:space="preserve"><value>霓虹灯</value></data>
   <data name="Option_NightVision" xml:space="preserve"><value>夜视</value></data>
-  <data name="Option_Normal" xml:space="preserve"><value>普通</value></data>
+  <data name="Option_Normal" xml:space="preserve"><value>标准</value></data>
   <data name="Option_OilPaint" xml:space="preserve"><value>油画</value></data>
   <data name="Option_Once" xml:space="preserve"><value>仅一次</value></data>
   <data name="Option_OneOrOther" xml:space="preserve"><value>在两值中任选一个</value></data>
-  <data name="Option_Orbiting" xml:space="preserve"><value>绕行星球</value></data>
-  <data name="Option_OutBack" xml:space="preserve"><value>回拉缓出</value></data>
-  <data name="Option_OutBounce" xml:space="preserve"><value>弹跳缓出</value></data>
-  <data name="Option_OutCirc" xml:space="preserve"><value>圆弧缓出</value></data>
-  <data name="Option_OutCubic" xml:space="preserve"><value>三次缓出</value></data>
-  <data name="Option_OutElastic" xml:space="preserve"><value>弹性缓出</value></data>
-  <data name="Option_OutExpo" xml:space="preserve"><value>指数缓出</value></data>
-  <data name="Option_OutFlash" xml:space="preserve"><value>闪动缓出</value></data>
-  <data name="Option_OutQuad" xml:space="preserve"><value>二次缓出</value></data>
-  <data name="Option_OutQuart" xml:space="preserve"><value>四次缓出</value></data>
-  <data name="Option_OutQuint" xml:space="preserve"><value>五次缓出</value></data>
-  <data name="Option_OutSine" xml:space="preserve"><value>正弦缓出</value></data>
-  <data name="Option_Overlay" xml:space="preserve"><value>叠加</value></data>
-  <data name="Option_Overseer" xml:space="preserve"><value>监察者</value></data>
+  <data name="Option_Orbiting" xml:space="preserve"><value>环绕行星</value></data>
+  <data name="Option_OutBack" xml:space="preserve"><value>Out Back</value></data>
+  <data name="Option_OutBounce" xml:space="preserve"><value>Out Bounce</value></data>
+  <data name="Option_OutCirc" xml:space="preserve"><value>Out Circ</value></data>
+  <data name="Option_OutCubic" xml:space="preserve"><value>Out Cubic</value></data>
+  <data name="Option_OutElastic" xml:space="preserve"><value>Out Elastic</value></data>
+  <data name="Option_OutExpo" xml:space="preserve"><value>Out Expo</value></data>
+  <data name="Option_OutFlash" xml:space="preserve"><value>Out Flash</value></data>
+  <data name="Option_OutQuad" xml:space="preserve"><value>Out Quad</value></data>
+  <data name="Option_OutQuart" xml:space="preserve"><value>Out Quart</value></data>
+  <data name="Option_OutQuint" xml:space="preserve"><value>Out Quint</value></data>
+  <data name="Option_OutSine" xml:space="preserve"><value>Out Sine</value></data>
+  <data name="Option_Overlay" xml:space="preserve"><value>叠加模式</value></data>
+  <data name="Option_Overseer" xml:space="preserve"><value>监督者</value></data>
   <data name="Option_PerTouch" xml:space="preserve"><value>每次接触</value></data>
-  <data name="Option_Petals" xml:space="preserve"><value>花瓣</value></data>
-  <data name="Option_PetalsInstant" xml:space="preserve"><value>即时铺满花瓣</value></data>
-  <data name="Option_Pixelate" xml:space="preserve"><value>像素化</value></data>
-  <data name="Option_PixelSnow" xml:space="preserve"><value>像素雪花</value></data>
+  <data name="Option_Petals" xml:space="preserve"><value>落花</value></data>
+  <data name="Option_PetalsInstant" xml:space="preserve"><value>落花（直接）</value></data>
+  <data name="Option_Pixelate" xml:space="preserve"><value>像素</value></data>
+  <data name="Option_PixelSnow" xml:space="preserve"><value>像素雪</value></data>
   <data name="Option_Planet" xml:space="preserve"><value>星球</value></data>
   <data name="Option_Player" xml:space="preserve"><value>玩家</value></data>
-  <data name="Option_PlayerBubble" xml:space="preserve"><value>玩家气泡</value></data>
+  <data name="Option_PlayerBubble" xml:space="preserve"><value>合作泡泡</value></data>
   <data name="Option_Portal" xml:space="preserve"><value>传送门</value></data>
-  <data name="Option_Posterize" xml:space="preserve"><value>色阶压缩</value></data>
-  <data name="Option_PowerDown" xml:space="preserve"><value>关机音</value></data>
-  <data name="Option_PowerUp" xml:space="preserve"><value>开机音</value></data>
-  <data name="Option_PublicLicense" xml:space="preserve"><value>公开许可</value></data>
+  <data name="Option_Posterize" xml:space="preserve"><value>色调分离</value></data>
+  <data name="Option_PowerDown" xml:space="preserve"><value>减速音效</value></data>
+  <data name="Option_PowerUp" xml:space="preserve"><value>加速音效</value></data>
+  <data name="Option_PublicLicense" xml:space="preserve"><value>公共版权</value></data>
   <data name="Option_Rabbit" xml:space="preserve"><value>兔子</value></data>
-  <data name="Option_Rain" xml:space="preserve"><value>雨</value></data>
+  <data name="Option_Rain" xml:space="preserve"><value>雨水</value></data>
   <data name="Option_Rainbow" xml:space="preserve"><value>彩虹</value></data>
-  <data name="Option_RedPlanet" xml:space="preserve"><value>红色星球</value></data>
+  <data name="Option_RedPlanet" xml:space="preserve"><value>火之行星</value></data>
   <data name="Option_Repeat" xml:space="preserve"><value>重复</value></data>
-  <data name="Option_Retract" xml:space="preserve"><value>收回</value></data>
-  <data name="Option_ReverbClack" xml:space="preserve"><value>混响敲击</value></data>
-  <data name="Option_ReverbClap" xml:space="preserve"><value>混响拍手</value></data>
-  <data name="Option_Right" xml:space="preserve"><value>向右</value></data>
+  <data name="Option_Retract" xml:space="preserve"><value>收缩</value></data>
+  <data name="Option_ReverbClack" xml:space="preserve"><value>混响噼啪</value></data>
+  <data name="Option_ReverbClap" xml:space="preserve"><value>混响拍掌</value></data>
+  <data name="Option_Right" xml:space="preserve"><value>右</value></data>
   <data name="Option_Rise" xml:space="preserve"><value>升起</value></data>
-  <data name="Option_Scatter" xml:space="preserve"><value>散开</value></data>
-  <data name="Option_Scatter_Far" xml:space="preserve"><value>散向远处</value></data>
-  <data name="Option_Screen" xml:space="preserve"><value>滤色</value></data>
+  <data name="Option_Scatter" xml:space="preserve"><value>分散</value></data>
+  <data name="Option_Scatter_Far" xml:space="preserve"><value>分散：远</value></data>
+  <data name="Option_Screen" xml:space="preserve"><value>滤色模式</value></data>
   <data name="Option_SelectedFloors" xml:space="preserve"><value>已选砖块</value></data>
-  <data name="Option_Sepia" xml:space="preserve"><value>复古棕色</value></data>
-  <data name="Option_Shaker" xml:space="preserve"><value>沙锤</value></data>
-  <data name="Option_ShakerLoud" xml:space="preserve"><value>重响沙锤</value></data>
+  <data name="Option_Sepia" xml:space="preserve"><value>复古</value></data>
+  <data name="Option_Shaker" xml:space="preserve"><value>沙槌</value></data>
+  <data name="Option_ShakerLoud" xml:space="preserve"><value>沙槌（响）</value></data>
   <data name="Option_Sharpen" xml:space="preserve"><value>锐化</value></data>
-  <data name="Option_Short" xml:space="preserve"><value>短砖</value></data>
-  <data name="Option_Shrink" xml:space="preserve"><value>缩小消失</value></data>
-  <data name="Option_Shrink_Spin" xml:space="preserve"><value>旋转缩小</value></data>
-  <data name="Option_Sidestick" xml:space="preserve"><value>鼓边击</value></data>
-  <data name="Option_Single" xml:space="preserve"><value>单色</value></data>
+  <data name="Option_Short" xml:space="preserve"><value>短</value></data>
+  <data name="Option_Shrink" xml:space="preserve"><value>黯淡</value></data>
+  <data name="Option_Shrink_Spin" xml:space="preserve"><value>黯淡+旋转</value></data>
+  <data name="Option_Sidestick" xml:space="preserve"><value>鼓边</value></data>
+  <data name="Option_Single" xml:space="preserve"><value>单独</value></data>
   <data name="Option_SingleColor" xml:space="preserve"><value>纯色</value></data>
-  <data name="Option_SingSing" xml:space="preserve"><value>Sing Sing 音效</value></data>
-  <data name="Option_Sizzle" xml:space="preserve"><value>滋响</value></data>
+  <data name="Option_SingSing" xml:space="preserve"><value>歌咏</value></data>
+  <data name="Option_Sizzle" xml:space="preserve"><value>镲片</value></data>
   <data name="Option_Snail" xml:space="preserve"><value>蜗牛</value></data>
-  <data name="Option_SnareAcoustic2" xml:space="preserve"><value>原声军鼓 2</value></data>
-  <data name="Option_SnareHouse" xml:space="preserve"><value>House 军鼓</value></data>
-  <data name="Option_SnareVapor" xml:space="preserve"><value>Vapor 军鼓</value></data>
-  <data name="Option_SoftLight" xml:space="preserve"><value>柔光</value></data>
+  <data name="Option_SnareAcoustic2" xml:space="preserve"><value>军鼓原声2</value></data>
+  <data name="Option_SnareHouse" xml:space="preserve"><value>军鼓-浩室</value></data>
+  <data name="Option_SnareVapor" xml:space="preserve"><value>军鼓-蒸汽</value></data>
+  <data name="Option_SoftLight" xml:space="preserve"><value>柔光模式</value></data>
   <data name="Option_Square" xml:space="preserve"><value>正方形</value></data>
-  <data name="Option_Squareshot" xml:space="preserve"><value>方波射击音</value></data>
+  <data name="Option_Squareshot" xml:space="preserve"><value>正角快照</value></data>
   <data name="Option_Standard" xml:space="preserve"><value>标准</value></data>
-  <data name="Option_Static" xml:space="preserve"><value>电视雪花</value></data>
-  <data name="Option_Stick" xml:space="preserve"><value>鼓棒敲击</value></data>
+  <data name="Option_Static" xml:space="preserve"><value>静电</value></data>
+  <data name="Option_Stick" xml:space="preserve"><value>鼓棒</value></data>
   <data name="Option_Stripes" xml:space="preserve"><value>条纹</value></data>
-  <data name="Option_SuperDot" xml:space="preserve"><value>粗点阵</value></data>
-  <data name="Option_Swirl" xml:space="preserve"><value>旋转</value></data>
-  <data name="Option_Switch" xml:space="preserve"><value>交替</value></data>
-  <data name="Option_Tile" xml:space="preserve"><value>砖块</value></data>
+  <data name="Option_SuperDot" xml:space="preserve"><value>点阵</value></data>
+  <data name="Option_Swirl" xml:space="preserve"><value>漩涡</value></data>
+  <data name="Option_Switch" xml:space="preserve"><value>切换</value></data>
+  <data name="Option_Tile" xml:space="preserve"><value>方块</value></data>
   <data name="Option_Tiled" xml:space="preserve"><value>平铺</value></data>
-  <data name="Option_TileRelativeTo_End" xml:space="preserve"><value>末尾砖块</value></data>
-  <data name="Option_TileRelativeTo_Start" xml:space="preserve"><value>起始砖块</value></data>
-  <data name="Option_TimesNewRoman" xml:space="preserve"><value>Times New Roman 字体</value></data>
-  <data name="Option_TrackAnimationType_Fade" xml:space="preserve"><value>淡入</value></data>
-  <data name="Option_TrackAnimationType2_Fade" xml:space="preserve"><value>淡出</value></data>
+  <data name="Option_TileRelativeTo_End" xml:space="preserve"><value>终点方块</value></data>
+  <data name="Option_TileRelativeTo_Start" xml:space="preserve"><value>起点方块</value></data>
+  <data name="Option_TimesNewRoman" xml:space="preserve"><value>Times New Roman</value></data>
+  <data name="Option_TrackAnimationType_Fade" xml:space="preserve"><value>出现</value></data>
+  <data name="Option_TrackAnimationType2_Fade" xml:space="preserve"><value>出现</value></data>
   <data name="Option_Tunnel" xml:space="preserve"><value>隧道</value></data>
-  <data name="Option_Unscaled" xml:space="preserve"><value>原始大小</value></data>
+  <data name="Option_Unscaled" xml:space="preserve"><value>未缩放</value></data>
   <data name="Option_Up" xml:space="preserve"><value>向上</value></data>
-  <data name="Option_VehicleNegative" xml:space="preserve"><value>车辆降档音</value></data>
-  <data name="Option_VehiclePositive" xml:space="preserve"><value>车辆升档音</value></data>
-  <data name="Option_VHS" xml:space="preserve"><value>VHS 录像带</value></data>
-  <data name="Option_VisibleInsideMask" xml:space="preserve"><value>遮罩内可见</value></data>
-  <data name="Option_VisibleOutsideMask" xml:space="preserve"><value>遮罩外可见</value></data>
-  <data name="Option_Volume" xml:space="preserve"><value>随音量变化</value></data>
+  <data name="Option_VehicleNegative" xml:space="preserve"><value>更少星球</value></data>
+  <data name="Option_VehiclePositive" xml:space="preserve"><value>更多星球</value></data>
+  <data name="Option_VHS" xml:space="preserve"><value>录像带</value></data>
+  <data name="Option_VisibleInsideMask" xml:space="preserve"><value>显示叠层</value></data>
+  <data name="Option_VisibleOutsideMask" xml:space="preserve"><value>隐藏叠层</value></data>
+  <data name="Option_Volume" xml:space="preserve"><value>音量</value></data>
   <data name="Option_WaterDrop" xml:space="preserve"><value>水滴</value></data>
-  <data name="Option_Waves" xml:space="preserve"><value>波纹</value></data>
-  <data name="Option_Weird3D" xml:space="preserve"><value>错位立体</value></data>
+  <data name="Option_Waves" xml:space="preserve"><value>示波</value></data>
+  <data name="Option_Weird3D" xml:space="preserve"><value>怪异3D</value></data>
   <data name="PropertyApply" xml:space="preserve"><value>应用</value></data>
   <data name="PropertyBrowse" xml:space="preserve"><value>浏览…</value></data>
   <data name="PropertyTagSuggestions" xml:space="preserve"><value>选择已有标签</value></data>
   <data name="PropertyTextEdit" xml:space="preserve"><value>编辑文本…</value></data>
   <data name="PropertyUnknownValue" xml:space="preserve"><value>使用原始值</value></data>
+  <data name="Timeline" xml:space="preserve"><value>时间轴</value></data>
+  <data name="TimelineAndEvents" xml:space="preserve"><value>时间轴与事件</value></data>
+  <data name="TimelineFloorNumber" xml:space="preserve"><value>砖块 #{0}</value></data>
+  <data name="TimelineFloorAtTime" xml:space="preserve"><value>砖块 #{0} · {1}</value></data>
+  <data name="TimeSignature" xml:space="preserve"><value>拍号</value></data>
+  <data name="TimelineFit" xml:space="preserve"><value>查看全曲</value></data>
+  <data name="TimelineMeasure" xml:space="preserve"><value>第 {0:0} 小节 · 第 {1} 拍</value></data>
+  <data name="TimelineAtTime" xml:space="preserve"><value>拍点 {0}</value></data>
+  <data name="TimelineNumerator" xml:space="preserve"><value>每小节拍数</value></data>
+  <data name="TimelineDenominator" xml:space="preserve"><value>分母（拍值）</value></data>
+  <data name="TimelineApplyHere" xml:space="preserve"><value>从此拍应用</value></data>
+  <data name="TimelineApplyAtStart" xml:space="preserve"><value>设为初始拍号</value></data>
+  <data name="TimelineRemoveSignature" xml:space="preserve"><value>移除此拍号</value></data>
+  <data name="TimelineHelp" xml:space="preserve"><value>拖动定位 · Shift 拖动吸附整拍 · 滚轮缩放 · Shift 滚轮平移</value></data>
+  <data name="Fullscreen" xml:space="preserve"><value>全屏</value></data>
+  <data name="Name_AddDecoration_depth" xml:space="preserve"><value>深度</value></data>
+  <data name="Name_AddDecoration_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
+  <data name="Name_AddDecoration_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_AddDecoration_relativeTo" xml:space="preserve"><value>相对于</value></data>
+  <data name="Name_AddDecoration_tile" xml:space="preserve"><value>平铺装饰</value></data>
+  <data name="Name_AddObject_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
+  <data name="Name_AddObject_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_AddObject_relativeTo" xml:space="preserve"><value>相对于</value></data>
+  <data name="Name_AddParticle_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
+  <data name="Name_AddParticle_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_AddParticle_relativeTo" xml:space="preserve"><value>相对于</value></data>
+  <data name="Name_AddText_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
+  <data name="Name_AddText_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_AddText_relativeTo" xml:space="preserve"><value>相对于</value></data>
+  <data name="Name_AutoPlayTiles_enabled" xml:space="preserve"><value>设置为</value></data>
+  <data name="Name_BackgroundSettings_bgImage" xml:space="preserve"><value>背景图片</value></data>
+  <data name="Name_Bloom_color" xml:space="preserve"><value>颜色</value></data>
+  <data name="Name_Bloom_enabled" xml:space="preserve"><value>设置为</value></data>
+  <data name="Name_Bloom_intensity" xml:space="preserve"><value>强度</value></data>
+  <data name="Name_CameraSettings_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_CameraSettings_relativeTo" xml:space="preserve"><value>关联到</value></data>
+  <data name="Name_CustomBackground_bgImage" xml:space="preserve"><value>图片</value></data>
+  <data name="Name_DecorationSettings" xml:space="preserve"><value>装饰</value></data>
+  <data name="Name_EventSettings" xml:space="preserve"><value>事件</value></data>
+  <data name="Name_FreeRoamRemove_position" xml:space="preserve"><value>位置偏移</value></data>
+  <data name="Name_FreeRoamRemove_size" xml:space="preserve"><value>要移除的区域</value></data>
+  <data name="Name_FreeRoamTwirl_position" xml:space="preserve"><value>位置偏移</value></data>
+  <data name="Name_FreeRoamWarning_position" xml:space="preserve"><value>位置偏移</value></data>
+  <data name="Name_FreeRoam_size" xml:space="preserve"><value>自由区域大小</value></data>
+  <data name="Name_HallOfMirrors_enabled" xml:space="preserve"><value>设置为</value></data>
+  <data name="Name_MoveCamera_position" xml:space="preserve"><value>位置</value></data>
+  <data name="Name_MoveCamera_relativeTo" xml:space="preserve"><value>关联到</value></data>
+  <data name="Name_MoveDecorations_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>
+  <data name="Name_MoveDecorations_relativeTo" xml:space="preserve"><value>相对于</value></data>
+  <data name="Name_MoveTrack_scale" xml:space="preserve"><value>缩放</value></data>
+  <data name="Name_PositionTrack_relativeTo" xml:space="preserve"><value>关联到</value></data>
+  <data name="Name_RepeatEvents_tag" xml:space="preserve"><value>目标标签</value></data>
+  <data name="Name_SetFilterAdvanced_enabled" xml:space="preserve"><value>设置为</value></data>
+  <data name="Name_SetFilter_enabled" xml:space="preserve"><value>设置为</value></data>
+  <data name="Name_SetFilter_intensity" xml:space="preserve"><value>强度</value></data>
+  <data name="Name_ShakeScreen_intensity" xml:space="preserve"><value>速度</value></data>
+  <data name="Name_decorations" xml:space="preserve"><value>装饰</value></data>
+  <data name="Option_AngleCorrectionDirection_Backward" xml:space="preserve"><value>后退</value></data>
+  <data name="Option_AngleCorrectionDirection_Forward" xml:space="preserve"><value>前进</value></data>
+  <data name="Option_BGShapeType_Default" xml:space="preserve"><value>默认</value></data>
+  <data name="Option_BGShapeType_Disabled" xml:space="preserve"><value>无</value></data>
+  <data name="Option_BGShapeType_SingleColor" xml:space="preserve"><value>纯色</value></data>
+  <data name="Option_BgDisplayMode_FitToScreen" xml:space="preserve"><value>拉伸</value></data>
+  <data name="Option_BgDisplayMode_Tiled" xml:space="preserve"><value>平铺</value></data>
+  <data name="Option_BgDisplayMode_Unscaled" xml:space="preserve"><value>未缩放</value></data>
+  <data name="Option_CamMovementType_Global" xml:space="preserve"><value>全局</value></data>
+  <data name="Option_CamMovementType_LastPosition" xml:space="preserve"><value>上次位置</value></data>
+  <data name="Option_CamMovementType_LastPositionNoRotation" xml:space="preserve"><value>上次位置（无旋转）</value></data>
+  <data name="Option_CamMovementType_Player" xml:space="preserve"><value>玩家</value></data>
+  <data name="Option_CamMovementType_Tile" xml:space="preserve"><value>方块</value></data>
+  <data name="Option_CustomFloorIcon_Checkpoint" xml:space="preserve"><value>检查点</value></data>
+  <data name="Option_CustomFloorIcon_Default" xml:space="preserve"><value>默认</value></data>
+  <data name="Option_CustomFloorIcon_DoubleRabbit" xml:space="preserve"><value>双兔子</value></data>
+  <data name="Option_CustomFloorIcon_DoubleSnail" xml:space="preserve"><value>双蜗牛</value></data>
+  <data name="Option_CustomFloorIcon_HoldArrowLong" xml:space="preserve"><value>长长按箭头</value></data>
+  <data name="Option_CustomFloorIcon_HoldArrowShort" xml:space="preserve"><value>短长按箭头</value></data>
+  <data name="Option_CustomFloorIcon_HoldReleaseLong" xml:space="preserve"><value>长长按释放</value></data>
+  <data name="Option_CustomFloorIcon_HoldReleaseShort" xml:space="preserve"><value>短长按释放</value></data>
+  <data name="Option_CustomFloorIcon_MultiPlanetThreeMore" xml:space="preserve"><value>三星</value></data>
+  <data name="Option_CustomFloorIcon_MultiPlanetTwo" xml:space="preserve"><value>双星</value></data>
+  <data name="Option_CustomFloorIcon_None" xml:space="preserve"><value>无</value></data>
+  <data name="Option_CustomFloorIcon_Portal" xml:space="preserve"><value>传送门</value></data>
+  <data name="Option_CustomFloorIcon_Rabbit" xml:space="preserve"><value>兔子</value></data>
+  <data name="Option_CustomFloorIcon_Snail" xml:space="preserve"><value>蜗牛</value></data>
+  <data name="Option_CustomFloorIcon_Swirl" xml:space="preserve"><value>漩涡</value></data>
+  <data name="Option_DecPlacementType_BluePlanet" xml:space="preserve"><value>冰之行星</value></data>
+  <data name="Option_DecPlacementType_Camera" xml:space="preserve"><value>镜头</value></data>
+  <data name="Option_DecPlacementType_CameraAspect" xml:space="preserve"><value>镜头（屏幕比例）</value></data>
+  <data name="Option_DecPlacementType_Global" xml:space="preserve"><value>全局</value></data>
+  <data name="Option_DecPlacementType_GreenPlanet" xml:space="preserve"><value>风之行星</value></data>
+  <data name="Option_DecPlacementType_LastPosition" xml:space="preserve"><value>上次位置</value></data>
+  <data name="Option_DecPlacementType_RedPlanet" xml:space="preserve"><value>火之行星</value></data>
+  <data name="Option_DecPlacementType_Tile" xml:space="preserve"><value>方块</value></data>
+  <data name="Option_DecorationBlendMode_Difference" xml:space="preserve"><value>差值模式</value></data>
+  <data name="Option_DecorationBlendMode_LinearDodge" xml:space="preserve"><value>线性减淡</value></data>
+  <data name="Option_DecorationBlendMode_Multiply" xml:space="preserve"><value>正片叠底</value></data>
+  <data name="Option_DecorationBlendMode_None" xml:space="preserve"><value>无</value></data>
+  <data name="Option_DecorationBlendMode_Overlay" xml:space="preserve"><value>叠加模式</value></data>
+  <data name="Option_DecorationBlendMode_Screen" xml:space="preserve"><value>滤色模式</value></data>
+  <data name="Option_DecorationBlendMode_SoftLight" xml:space="preserve"><value>柔光模式</value></data>
+  <data name="Option_EasePartBehavior_Mirror" xml:space="preserve"><value>镜像</value></data>
+  <data name="Option_EasePartBehavior_Repeat" xml:space="preserve"><value>重复</value></data>
+  <data name="Option_Ease_Flash" xml:space="preserve"><value>Flash</value></data>
+  <data name="Option_Ease_InBack" xml:space="preserve"><value>In Back</value></data>
+  <data name="Option_Ease_InBounce" xml:space="preserve"><value>In Bounce</value></data>
+  <data name="Option_Ease_InCirc" xml:space="preserve"><value>In Circ</value></data>
+  <data name="Option_Ease_InCubic" xml:space="preserve"><value>In Cubic</value></data>
+  <data name="Option_Ease_InElastic" xml:space="preserve"><value>In Elastic</value></data>
+  <data name="Option_Ease_InExpo" xml:space="preserve"><value>In Expo</value></data>
+  <data name="Option_Ease_InFlash" xml:space="preserve"><value>In Flash</value></data>
+  <data name="Option_Ease_InOutBack" xml:space="preserve"><value>In-Out Back</value></data>
+  <data name="Option_Ease_InOutBounce" xml:space="preserve"><value>In-Out Bounce</value></data>
+  <data name="Option_Ease_InOutCirc" xml:space="preserve"><value>In-Out Circ</value></data>
+  <data name="Option_Ease_InOutCubic" xml:space="preserve"><value>In-Out Cubic</value></data>
+  <data name="Option_Ease_InOutElastic" xml:space="preserve"><value>In-Out Elastic</value></data>
+  <data name="Option_Ease_InOutExpo" xml:space="preserve"><value>In-Out Expo</value></data>
+  <data name="Option_Ease_InOutFlash" xml:space="preserve"><value>In-Out Flash</value></data>
+  <data name="Option_Ease_InOutQuad" xml:space="preserve"><value>In-Out Quad</value></data>
+  <data name="Option_Ease_InOutQuart" xml:space="preserve"><value>In-Out Quart</value></data>
+  <data name="Option_Ease_InOutQuint" xml:space="preserve"><value>In-Out Quint</value></data>
+  <data name="Option_Ease_InOutSine" xml:space="preserve"><value>In-Out Sine</value></data>
+  <data name="Option_Ease_InQuad" xml:space="preserve"><value>In Quad</value></data>
+  <data name="Option_Ease_InQuart" xml:space="preserve"><value>In Quart</value></data>
+  <data name="Option_Ease_InQuint" xml:space="preserve"><value>In Quint</value></data>
+  <data name="Option_Ease_InSine" xml:space="preserve"><value>In Sine</value></data>
+  <data name="Option_Ease_Linear" xml:space="preserve"><value>Linear</value></data>
+  <data name="Option_Ease_OutBack" xml:space="preserve"><value>Out Back</value></data>
+  <data name="Option_Ease_OutBounce" xml:space="preserve"><value>Out Bounce</value></data>
+  <data name="Option_Ease_OutCirc" xml:space="preserve"><value>Out Circ</value></data>
+  <data name="Option_Ease_OutCubic" xml:space="preserve"><value>Out Cubic</value></data>
+  <data name="Option_Ease_OutElastic" xml:space="preserve"><value>Out Elastic</value></data>
+  <data name="Option_Ease_OutExpo" xml:space="preserve"><value>Out Expo</value></data>
+  <data name="Option_Ease_OutFlash" xml:space="preserve"><value>Out Flash</value></data>
+  <data name="Option_Ease_OutQuad" xml:space="preserve"><value>Out Quad</value></data>
+  <data name="Option_Ease_OutQuart" xml:space="preserve"><value>Out Quart</value></data>
+  <data name="Option_Ease_OutQuint" xml:space="preserve"><value>Out Quint</value></data>
+  <data name="Option_Ease_OutSine" xml:space="preserve"><value>Out Sine</value></data>
+  <data name="Option_Filter_Aberration" xml:space="preserve"><value>像差</value></data>
+  <data name="Option_Filter_Arcade" xml:space="preserve"><value>街机</value></data>
+  <data name="Option_Filter_Blizzard" xml:space="preserve"><value>暴雪</value></data>
+  <data name="Option_Filter_Blur" xml:space="preserve"><value>模糊</value></data>
+  <data name="Option_Filter_BlurFocus" xml:space="preserve"><value>模糊聚焦</value></data>
+  <data name="Option_Filter_Compression" xml:space="preserve"><value>压缩</value></data>
+  <data name="Option_Filter_Contrast" xml:space="preserve"><value>对比度</value></data>
+  <data name="Option_Filter_Drawing" xml:space="preserve"><value>涂鸦</value></data>
+  <data name="Option_Filter_EdgeBlackLine" xml:space="preserve"><value>边缘描黑</value></data>
+  <data name="Option_Filter_EightiesTV" xml:space="preserve"><value>80年代电视</value></data>
+  <data name="Option_Filter_FiftiesTV" xml:space="preserve"><value>50年代电视</value></data>
+  <data name="Option_Filter_Fisheye" xml:space="preserve"><value>鱼眼</value></data>
+  <data name="Option_Filter_Funk" xml:space="preserve"><value>放克</value></data>
+  <data name="Option_Filter_GaussianBlur" xml:space="preserve"><value>高斯模糊</value></data>
+  <data name="Option_Filter_Glitch" xml:space="preserve"><value>故障</value></data>
+  <data name="Option_Filter_Grain" xml:space="preserve"><value>胶片噪点</value></data>
+  <data name="Option_Filter_Grayscale" xml:space="preserve"><value>灰阶</value></data>
+  <data name="Option_Filter_Handheld" xml:space="preserve"><value>8比特掌机</value></data>
+  <data name="Option_Filter_HexagonBlack" xml:space="preserve"><value>六角形黑圈</value></data>
+  <data name="Option_Filter_Invert" xml:space="preserve"><value>反色</value></data>
+  <data name="Option_Filter_LED" xml:space="preserve"><value>LED</value></data>
+  <data name="Option_Filter_LightWater" xml:space="preserve"><value>涟漪</value></data>
+  <data name="Option_Filter_MotionBlur" xml:space="preserve"><value>运动模糊</value></data>
+  <data name="Option_Filter_Neon" xml:space="preserve"><value>霓虹</value></data>
+  <data name="Option_Filter_NightVision" xml:space="preserve"><value>夜视</value></data>
+  <data name="Option_Filter_OilPaint" xml:space="preserve"><value>油画</value></data>
+  <data name="Option_Filter_Petals" xml:space="preserve"><value>落花</value></data>
+  <data name="Option_Filter_PetalsInstant" xml:space="preserve"><value>落花（直接）</value></data>
+  <data name="Option_Filter_PixelSnow" xml:space="preserve"><value>像素雪</value></data>
+  <data name="Option_Filter_Pixelate" xml:space="preserve"><value>像素</value></data>
+  <data name="Option_Filter_Posterize" xml:space="preserve"><value>色调分离</value></data>
+  <data name="Option_Filter_Rain" xml:space="preserve"><value>雨水</value></data>
+  <data name="Option_Filter_Sepia" xml:space="preserve"><value>复古</value></data>
+  <data name="Option_Filter_Sharpen" xml:space="preserve"><value>锐化</value></data>
+  <data name="Option_Filter_Static" xml:space="preserve"><value>静电</value></data>
+  <data name="Option_Filter_SuperDot" xml:space="preserve"><value>点阵</value></data>
+  <data name="Option_Filter_Tunnel" xml:space="preserve"><value>隧道</value></data>
+  <data name="Option_Filter_VHS" xml:space="preserve"><value>录像带</value></data>
+  <data name="Option_Filter_WaterDrop" xml:space="preserve"><value>水滴</value></data>
+  <data name="Option_Filter_Waves" xml:space="preserve"><value>示波</value></data>
+  <data name="Option_Filter_Weird3D" xml:space="preserve"><value>怪异3D</value></data>
+  <data name="Option_FloorDecorationType_Midspin" xml:space="preserve"><value>中旋</value></data>
+  <data name="Option_FontName_Arial" xml:space="preserve"><value>Arial</value></data>
+  <data name="Option_FontName_ComicSansMS" xml:space="preserve"><value>Comic Sans MS</value></data>
+  <data name="Option_FontName_CourierNew" xml:space="preserve"><value>Courier New</value></data>
+  <data name="Option_FontName_Default" xml:space="preserve"><value>默认</value></data>
+  <data name="Option_FontName_Georgia" xml:space="preserve"><value>Georgia</value></data>
+  <data name="Option_FontName_Impact" xml:space="preserve"><value>Impact</value></data>
+  <data name="Option_FontName_TimesNewRoman" xml:space="preserve"><value>Times New Roman</value></data>
+  <data name="Option_GameSound_Hitsound" xml:space="preserve"><value>普通击拍音效</value></data>
+  <data name="Option_GameSound_Midspin" xml:space="preserve"><value>中旋击拍音效</value></data>
+  <data name="Option_HitSound_Chuck" xml:space="preserve"><value>低音底鼓</value></data>
+  <data name="Option_HitSound_ClapHit" xml:space="preserve"><value>拍掌</value></data>
+  <data name="Option_HitSound_ClapHitEcho" xml:space="preserve"><value>回音拍掌</value></data>
+  <data name="Option_HitSound_FireTile" xml:space="preserve"><value>火方块</value></data>
+  <data name="Option_HitSound_Hammer" xml:space="preserve"><value>音锤</value></data>
+  <data name="Option_HitSound_Hat" xml:space="preserve"><value>高帽钹</value></data>
+  <data name="Option_HitSound_HatHouse" xml:space="preserve"><value>镲片-浩室</value></data>
+  <data name="Option_HitSound_IceTile" xml:space="preserve"><value>冰方块</value></data>
+  <data name="Option_HitSound_Kick" xml:space="preserve"><value>底鼓</value></data>
+  <data name="Option_HitSound_KickChroma" xml:space="preserve"><value>底鼓-铬</value></data>
+  <data name="Option_HitSound_KickHouse" xml:space="preserve"><value>底鼓-浩室</value></data>
+  <data name="Option_HitSound_KickRupture" xml:space="preserve"><value>底鼓-裂解</value></data>
+  <data name="Option_HitSound_PowerDown" xml:space="preserve"><value>减速音效</value></data>
+  <data name="Option_HitSound_PowerUp" xml:space="preserve"><value>加速音效</value></data>
+  <data name="Option_HitSound_ReverbClack" xml:space="preserve"><value>混响噼啪</value></data>
+  <data name="Option_HitSound_ReverbClap" xml:space="preserve"><value>混响拍掌</value></data>
+  <data name="Option_HitSound_Shaker" xml:space="preserve"><value>沙槌</value></data>
+  <data name="Option_HitSound_ShakerLoud" xml:space="preserve"><value>沙槌（响）</value></data>
+  <data name="Option_HitSound_Sidestick" xml:space="preserve"><value>鼓边</value></data>
+  <data name="Option_HitSound_Sizzle" xml:space="preserve"><value>镲片</value></data>
+  <data name="Option_HitSound_SnareAcoustic2" xml:space="preserve"><value>军鼓原声2</value></data>
+  <data name="Option_HitSound_SnareHouse" xml:space="preserve"><value>军鼓-浩室</value></data>
+  <data name="Option_HitSound_SnareVapor" xml:space="preserve"><value>军鼓-蒸汽</value></data>
+  <data name="Option_HitSound_Squareshot" xml:space="preserve"><value>正角快照</value></data>
+  <data name="Option_HitSound_Stick" xml:space="preserve"><value>鼓棒</value></data>
+  <data name="Option_HitSound_VehicleNegative" xml:space="preserve"><value>更少星球</value></data>
+  <data name="Option_HitSound_VehiclePositive" xml:space="preserve"><value>更多星球</value></data>
+  <data name="Option_HitboxDetectTarget_Decoration" xml:space="preserve"><value>装饰</value></data>
+  <data name="Option_HitboxDetectTarget_Planet" xml:space="preserve"><value>行星</value></data>
+  <data name="Option_HitboxTargetPlanet_Any" xml:space="preserve"><value>任意</value></data>
+  <data name="Option_HitboxTargetPlanet_Center" xml:space="preserve"><value>中央行星</value></data>
+  <data name="Option_HitboxTargetPlanet_Orbiting" xml:space="preserve"><value>环绕行星</value></data>
+  <data name="Option_HitboxTriggerType_Once" xml:space="preserve"><value>单次</value></data>
+  <data name="Option_HitboxTriggerType_PerTouch" xml:space="preserve"><value>每次接触</value></data>
+  <data name="Option_HitboxTriggerType_Repeat" xml:space="preserve"><value>重复</value></data>
+  <data name="Option_HitboxType_Event" xml:space="preserve"><value>运行事件</value></data>
+  <data name="Option_HitboxType_Kill" xml:space="preserve"><value>失败玩家</value></data>
+  <data name="Option_HitboxType_None" xml:space="preserve"><value>禁用</value></data>
+  <data name="Option_Hitbox_Box" xml:space="preserve"><value>盒形</value></data>
+  <data name="Option_Hitbox_Capsule" xml:space="preserve"><value>胶囊形</value></data>
+  <data name="Option_Hitbox_Circle" xml:space="preserve"><value>环形</value></data>
+  <data name="Option_HoldEndSound_Fuse" xml:space="preserve"><value>引信</value></data>
+  <data name="Option_HoldLoopSound_Fuse" xml:space="preserve"><value>引信</value></data>
+  <data name="Option_HoldMidSoundTimingRelativeTo_End" xml:space="preserve"><value>终点方块</value></data>
+  <data name="Option_HoldMidSoundTimingRelativeTo_Start" xml:space="preserve"><value>起点方块</value></data>
+  <data name="Option_HoldMidSoundType_Once" xml:space="preserve"><value>一次</value></data>
+  <data name="Option_HoldMidSoundType_Repeat" xml:space="preserve"><value>重复</value></data>
+  <data name="Option_HoldMidSound_Fuse" xml:space="preserve"><value>引信</value></data>
+  <data name="Option_HoldMidSound_SingSing" xml:space="preserve"><value>歌咏</value></data>
+  <data name="Option_HoldStartSound_Fuse" xml:space="preserve"><value>引信</value></data>
+  <data name="Option_InputEventTarget_Action1" xml:space="preserve"><value>键盘左侧区域</value></data>
+  <data name="Option_InputEventTarget_Action2" xml:space="preserve"><value>键盘右侧区域</value></data>
+  <data name="Option_InputEventTarget_Any" xml:space="preserve"><value>任意</value></data>
+  <data name="Option_InputEventTarget_Confirm" xml:space="preserve"><value>确定</value></data>
+  <data name="Option_InputEventTarget_Down" xml:space="preserve"><value>下</value></data>
+  <data name="Option_InputEventTarget_Left" xml:space="preserve"><value>左</value></data>
+  <data name="Option_InputEventTarget_Right" xml:space="preserve"><value>右</value></data>
+  <data name="Option_InputEventTarget_Up" xml:space="preserve"><value>上</value></data>
+  <data name="Option_MaskingType_Mask" xml:space="preserve"><value>遮盖其他装饰</value></data>
+  <data name="Option_MaskingType_None" xml:space="preserve"><value>无</value></data>
+  <data name="Option_MaskingType_VisibleInsideMask" xml:space="preserve"><value>显示叠层</value></data>
+  <data name="Option_MaskingType_VisibleOutsideMask" xml:space="preserve"><value>隐藏叠层</value></data>
+  <data name="Option_ObjectDecorationType_Floor" xml:space="preserve"><value>地板</value></data>
+  <data name="Option_ObjectDecorationType_Planet" xml:space="preserve"><value>星球</value></data>
+  <data name="Option_ObjectDecorationType_PlayerBubble" xml:space="preserve"><value>合作泡泡</value></data>
+  <data name="Option_ParticleArcMode_BurstSpread" xml:space="preserve"><value>爆裂传播</value></data>
+  <data name="Option_ParticleArcMode_Loop" xml:space="preserve"><value>循环</value></data>
+  <data name="Option_ParticleArcMode_PingPong" xml:space="preserve"><value>Ping Pong</value></data>
+  <data name="Option_ParticleArcMode_Random" xml:space="preserve"><value>随机</value></data>
+  <data name="Option_ParticlePlayMode_Clear" xml:space="preserve"><value>停止并清空</value></data>
+  <data name="Option_ParticlePlayMode_Start" xml:space="preserve"><value>开始</value></data>
+  <data name="Option_ParticlePlayMode_Stop" xml:space="preserve"><value>停止</value></data>
+  <data name="Option_ParticleShape_Box" xml:space="preserve"><value>方盒</value></data>
+  <data name="Option_ParticleShape_BoxEdge" xml:space="preserve"><value>方盒边缘</value></data>
+  <data name="Option_ParticleShape_Circle" xml:space="preserve"><value>圆形</value></data>
+  <data name="Option_ParticleShape_Donut" xml:space="preserve"><value>圆环</value></data>
+  <data name="Option_ParticleShape_Rectangle" xml:space="preserve"><value>矩形</value></data>
+  <data name="Option_ParticleShape_Sphere" xml:space="preserve"><value>球</value></data>
+  <data name="Option_PlanetCount_ThreePlanets" xml:space="preserve"><value>三星</value></data>
+  <data name="Option_PlanetCount_TwoPlanets" xml:space="preserve"><value>双星</value></data>
+  <data name="Option_PlanetDecorationColorType_Custom" xml:space="preserve"><value>自定义</value></data>
+  <data name="Option_PlanetDecorationColorType_DefaultBlue" xml:space="preserve"><value>默认蓝色</value></data>
+  <data name="Option_PlanetDecorationColorType_DefaultRed" xml:space="preserve"><value>默认红色</value></data>
+  <data name="Option_PlanetDecorationColorType_Gold" xml:space="preserve"><value>金色</value></data>
+  <data name="Option_PlanetDecorationColorType_Overseer" xml:space="preserve"><value>监督者</value></data>
+  <data name="Option_PlanetDecorationColorType_PlayerBlue" xml:space="preserve"><value>玩家蓝色</value></data>
+  <data name="Option_PlanetDecorationColorType_PlayerRed" xml:space="preserve"><value>玩家红色</value></data>
+  <data name="Option_PlanetDecorationColorType_Rainbow" xml:space="preserve"><value>虹色</value></data>
+  <data name="Option_RepeatType_Beat" xml:space="preserve"><value>节拍</value></data>
+  <data name="Option_RepeatType_Floor" xml:space="preserve"><value>方块</value></data>
+  <data name="Option_SpecialArtistType_AnotherAlias" xml:space="preserve"><value>允许艺术家别名</value></data>
+  <data name="Option_SpecialArtistType_AuthorIsArtist" xml:space="preserve"><value>我是艺术家本人</value></data>
+  <data name="Option_SpecialArtistType_Collaboration" xml:space="preserve"><value>允许艺术家协作</value></data>
+  <data name="Option_SpecialArtistType_PublicLicense" xml:space="preserve"><value>公共版权</value></data>
+  <data name="Option_SpeedType_Bpm" xml:space="preserve"><value>BPM</value></data>
+  <data name="Option_SpeedType_Multiplier" xml:space="preserve"><value>倍频器</value></data>
+  <data name="Option_TargetPlanet_All" xml:space="preserve"><value>所有行星</value></data>
+  <data name="Option_TargetPlanet_Both" xml:space="preserve"><value>多选行星</value></data>
+  <data name="Option_TargetPlanet_FirePlanet" xml:space="preserve"><value>火之行星</value></data>
+  <data name="Option_TargetPlanet_GreenPlanet" xml:space="preserve"><value>风之行星</value></data>
+  <data name="Option_TargetPlanet_IcePlanet" xml:space="preserve"><value>冰之行星</value></data>
+  <data name="Option_TileRelativeTo_ThisTile" xml:space="preserve"><value>本方块</value></data>
+  <data name="Option_TileShape_Long" xml:space="preserve"><value>长</value></data>
+  <data name="Option_TileShape_Short" xml:space="preserve"><value>短</value></data>
+  <data name="Option_TrackAnimationType2_Retract" xml:space="preserve"><value>收缩</value></data>
+  <data name="Option_TrackAnimationType2_Scatter" xml:space="preserve"><value>分散</value></data>
+  <data name="Option_TrackAnimationType2_Scatter_Far" xml:space="preserve"><value>分散：远</value></data>
+  <data name="Option_TrackAnimationType2_Shrink" xml:space="preserve"><value>黯淡</value></data>
+  <data name="Option_TrackAnimationType2_Shrink_Spin" xml:space="preserve"><value>黯淡+旋转</value></data>
+  <data name="Option_TrackAnimationType_Assemble" xml:space="preserve"><value>聚合</value></data>
+  <data name="Option_TrackAnimationType_Assemble_Far" xml:space="preserve"><value>聚合：远</value></data>
+  <data name="Option_TrackAnimationType_Drop" xml:space="preserve"><value>下坠</value></data>
+  <data name="Option_TrackAnimationType_Extend" xml:space="preserve"><value>延伸</value></data>
+  <data name="Option_TrackAnimationType_Grow" xml:space="preserve"><value>生长</value></data>
+  <data name="Option_TrackAnimationType_Grow_Spin" xml:space="preserve"><value>生长+旋转</value></data>
+  <data name="Option_TrackAnimationType_Rise" xml:space="preserve"><value>升起</value></data>
+  <data name="Option_TrackColorPulse_Backward" xml:space="preserve"><value>后退</value></data>
+  <data name="Option_TrackColorPulse_Forward" xml:space="preserve"><value>前进</value></data>
+  <data name="Option_TrackStyle_Basic" xml:space="preserve"><value>基础</value></data>
+  <data name="Option_TrackStyle_Gems" xml:space="preserve"><value>宝石</value></data>
+  <data name="Option_TrackStyle_Minimal" xml:space="preserve"><value>极简</value></data>
+  <data name="Option_TrackStyle_Neon" xml:space="preserve"><value>霓虹</value></data>
+  <data name="Option_TrackStyle_NeonLight" xml:space="preserve"><value>霓虹灯</value></data>
+  <data name="Option_TrackStyle_Standard" xml:space="preserve"><value>标准</value></data>
 </root>

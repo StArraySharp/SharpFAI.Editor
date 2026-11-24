@@ -40,11 +40,10 @@ internal sealed class BackgroundRenderer : IDisposable
     public void Draw(LevelPlaybackSettings settings, Camera2D camera, Vector2 origin, ImageDecorationRenderer? sprites)
     {
         Vector2 viewport = new(camera.ViewportWidth, camera.ViewportHeight);
-        Vector2 imageSize = _image == 0 ? new Vector2(96f) : _imageSize;
-        Vector2 size = _image == 0 ? imageSize : settings.Display == BackgroundDisplay.FitToScreen
-            ? viewport * settings.BackgroundScale : imageSize * camera.Zoom * settings.BackgroundScale;
+        Vector2 size = settings.Display == BackgroundDisplay.FitToScreen
+            ? viewport * settings.BackgroundScale : _imageSize * camera.Zoom * settings.BackgroundScale;
         Vector2 movement = (camera.Position - origin) * (Vector2.One - settings.Parallax) * camera.Zoom;
-        float angle = settings.LockBackgroundRotation ? 0 : MathHelper.DegreesToRadians(camera.Rotation);
+        float angle = _image != 0 && settings.LockBackgroundRotation ? 0 : MathHelper.DegreesToRadians(camera.Rotation);
         bool repeat = settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled;
 
         if (_image != 0 && sprites is not null)
@@ -60,13 +59,18 @@ internal sealed class BackgroundRenderer : IDisposable
         GL.Uniform4(GL.GetUniformLocation(_program, "uTint"), settings.ImageTint);
         GL.Uniform4(GL.GetUniformLocation(_program, "uPattern"), settings.PatternColor);
         GL.Uniform4(GL.GetUniformLocation(_program, "uAccent"), settings.PatternAccent);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uShowTiles"), settings.ShowPatternTiles ? 1 : 0);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uShapeMode"), (int)settings.PatternShape);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uZoom"), camera.Zoom);
+        GL.Uniform2(GL.GetUniformLocation(_program, "uShapeOffset"), (camera.Position - origin) * .5f);
         GL.Uniform1(GL.GetUniformLocation(_program, "uAngle"), angle);
         GL.Uniform1(GL.GetUniformLocation(_program, "uHasImage"), _image != 0 ? 1 : 0);
         GL.Uniform1(GL.GetUniformLocation(_program, "uRepeat"), repeat ? 1 : 0);
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, _image);
         GL.Enable(EnableCap.Blend);
-        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        GL.BlendFuncSeparate(BlendingFactorSrc.SrcAlpha, BlendingFactorDest.OneMinusSrcAlpha,
+            BlendingFactorSrc.One, BlendingFactorDest.OneMinusSrcAlpha);
         GL.BindVertexArray(_vao);
         GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
         GL.BindVertexArray(0);

@@ -30,6 +30,73 @@ public sealed class TrackEditingRegressionTests
     private static string State(EditorDocument document) => document.SnapshotForPlayback().root.ToString();
 
     [Test]
+    public void TileRotationTransformsTheThreeSupportedEventPositionsInOneUndo()
+    {
+        var document = Chart();
+        document.PasteEvents(2, [JObject.Parse("{eventType:'PositionTrack', positionOffset:[1,2]}"),
+            JObject.Parse("{eventType:'MoveTrack', positionOffset:[3,4]}"),
+            JObject.Parse("{eventType:'MoveCamera', position:[5,6], zoom:120}"),
+            JObject.Parse("{eventType:'MoveDecorations', positionOffset:[7,8]}")], false);
+        document.PasteEvents(4, [JObject.Parse("{eventType:'MoveCamera', position:[9,10]}")], false);
+        string before = State(document);
+
+        var rotation = new TrackTransform(90);
+        document.TransformTiles(2, 3, rotation.Angle, rotation);
+
+        Assert.That(document.IncomingAngle(2), Is.EqualTo(90));
+        var events = document.Events(2);
+        Assert.That(events[0]["positionOffset"]!.Values<double>(), Is.EqualTo(new[] { -2d, 1d }));
+        Assert.That(events[1]["positionOffset"]!.Values<double>(), Is.EqualTo(new[] { -4d, 3d }));
+        Assert.That(events[2]["position"]!.Values<double>(), Is.EqualTo(new[] { -6d, 5d }));
+        Assert.That(events[2].Value<int>("zoom"), Is.EqualTo(120));
+        Assert.That(events[3]["positionOffset"]!.Values<double>(), Is.EqualTo(new[] { 7d, 8d }));
+        Assert.That(document.Events(4)[0]["position"]!.Values<double>(), Is.EqualTo(new[] { 9d, 10d }));
+
+        string after = State(document);
+        document.Undo();
+        Assert.That(State(document), Is.EqualTo(before));
+        document.Redo();
+        Assert.That(State(document), Is.EqualTo(after));
+    }
+
+    [Test]
+    public void FineRotationAndFlipsRespectMissingAxesAndTheSyncSwitch()
+    {
+        var document = Chart();
+        document.PasteEvents(2, [JObject.Parse("{eventType:'MoveCamera', position:[2,null]}")], false);
+        var move = document.Events(2).Single();
+        var rotation = new TrackTransform(22.5);
+        document.TransformTiles(2, 2, rotation.Angle);
+        Assert.That(document.IncomingAngle(2), Is.EqualTo(22.5));
+        Assert.That(JToken.DeepEquals(move["position"], JArray.Parse("[2,null]")), Is.True);
+
+        var flip = TrackTransform.HorizontalFlip;
+        document.TransformTiles(2, 2, flip.Angle, flip);
+        Assert.That(document.IncomingAngle(2), Is.EqualTo(157.5));
+        Assert.That(move["position"]![0]!.Value<double>(), Is.EqualTo(-2));
+        Assert.That(move["position"]![1]!.Type, Is.EqualTo(JTokenType.Null));
+
+        document.TransformTiles(2, 2, rotation.Angle, rotation);
+        Assert.That(move["position"]![0]!.Value<double>(), Is.EqualTo(-2 * Math.Cos(Math.PI / 8)).Within(1e-9));
+        Assert.That(move["position"]![1]!.Value<double>(), Is.EqualTo(-2 * Math.Sin(Math.PI / 8)).Within(1e-9));
+    }
+
+    [TestCase(1, 2, false, 1.25, 2.5)]
+    [TestCase(1, 2, true, 0.5, 1)]
+    [TestCase(1, 1, true, 0.5, 1)]
+    [TestCase(1, 3, false, 1.25, 2.5)]
+    [TestCase(3, 3, false, 0, 0)]
+    public void SelectionTimingUsesStartingTempoAndTheOptionalEndpoint(int first, int last, bool excludeLast,
+        double duration, double beats)
+    {
+        var stats = TrackSelectionStatistics.Calculate([-0.25, 0, 0.5, 1.25], [60, 120, 80, 80], first, last, excludeLast);
+        Assert.That(stats, Is.Not.Null);
+        Assert.That(stats!.Value.Duration, Is.EqualTo(duration));
+        Assert.That(stats.Value.Beats, Is.EqualTo(beats));
+        Assert.That(stats.Value.Angle, Is.EqualTo(beats * 180));
+    }
+
+    [Test]
     public void InsertRelocatesAbsoluteAndEndReferencesAndRestoresInOneUndo()
     {
         var document = Chart();

@@ -240,7 +240,7 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void SyncAudio()
     {
-        if (!_audioAvailable)
+        if (!_audioAvailable || _progressScrubbing)
         {
             return;
         }

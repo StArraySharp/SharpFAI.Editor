@@ -25,11 +25,11 @@ dotnet run --project .\SharpFAI.Editor -c Release
 dotnet run --project .\SharpFAI.Player -c Release -- --open ".\example.adofai"
 ```
 
-原版滤镜使用本机 ADOFAI 安装中的构建输入。资源配置见 [GameFiles 说明](GameFiles/README.md)。
+原版滤镜使用本机 ADOFAI 安装中的构建输入。完整步骤见 [构建指南](docs/build.md)。
 
 ## 打包与测试
 
-在仓库根目录通过 PowerShell 7 运行发布脚本可生成 Windows x64 单文件，输出位于 `publish/`。 [publish.ps1](publish.ps1)
+在仓库根目录通过 PowerShell 7 运行发布脚本，可在 `publish/` 生成自包含的 Windows x64 编辑器和资源准备工具。 [publish.ps1](publish.ps1)
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1

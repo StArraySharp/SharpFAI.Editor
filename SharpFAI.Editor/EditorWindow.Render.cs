@@ -30,6 +30,7 @@ internal sealed unsafe partial class EditorWindow
             var request = settings.CreateRequest(sourcePath, snapshot);
             LevelRenderer renderer = _videoRenderSource ??= new LevelRenderer();
             renderer.SkipAudio = _applicationSettings.SkipAudio;
+            renderer.ApplyVisualSettings(_applicationSettings);
             _videoExport ??= new VideoExportSession(renderer);
             if (!renderer.Load(snapshot, sourcePath))
                 throw new InvalidOperationException(renderer.LoadError ?? renderer.Status);

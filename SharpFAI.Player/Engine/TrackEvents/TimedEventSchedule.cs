@@ -39,6 +39,7 @@ internal static class TimedEventSchedule
             }
         }
 
+        var conditions = repetitions.Count == 0 ? null : ImageDecorationTimeline.ReadConditions(events);
         List<ScheduledEvent<T>> scheduled = [];
         foreach (T item in events.OfType<T>())
         {
@@ -60,7 +61,9 @@ internal static class TimedEventSchedule
             float angle = item.Enabled("angleOffset", item.AngleOffset) ?? 0;
             float duration = item.Enabled("duration", item.Duration) ?? 0;
             EventEnums.Ease ease = item.Enabled("ease", item.Ease) ?? EventEnums.Ease.Linear;
-            int count = Math.Max(0, repeat.Count);
+            // The game registers only the original copy when its effect is judgment-bound.
+            int count = repeat.Count > 0 && (conditions is null ||
+                !ImageDecorationTimeline.TryGetCondition(item, conditions, out _)) ? repeat.Count : 0;
             int previousFloor = source;
             double repeatedBeats = 0;
             for (long i = 0; i <= count; i++)

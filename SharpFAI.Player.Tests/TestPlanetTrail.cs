@@ -14,6 +14,53 @@ namespace SharpFAI.Player.Tests;
 public sealed class TestPlanetTrail
 {
     [Test]
+    public void PaletteChangesRecolorExistingTrailsWithoutChangingTheirShape()
+    {
+        using var renderer = new LevelRenderer();
+        var trail = (PlanetTrail)typeof(LevelRenderer).GetField("_trail", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(renderer)!;
+        trail.RecordPlanet(1, new Vector2(0, 0), PlanetTrail.RedTint, .1);
+        trail.RecordPlanet(1, new Vector2(10, 0), PlanetTrail.RedTint, .2);
+        trail.RecordPlanet(0, new Vector2(0, 20), PlanetTrail.BlueTint, .1);
+        trail.RecordPlanet(0, new Vector2(10, 20), PlanetTrail.BlueTint, .2);
+        var original = trail.Build(.25).ToArray();
+
+        renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults with
+        {
+            FirePlanetColor = "#00FF00",
+            IcePlanetColor = "#FF00FF",
+        });
+        var recolored = trail.Build(.25).ToArray();
+
+        Assert.That(recolored.Select(sample => (sample.Center, sample.Size, sample.Tint.W)),
+            Is.EqualTo(original.Select(sample => (sample.Center, sample.Size, sample.Tint.W))));
+        Assert.That(recolored.Where(sample => sample.Center.Y == 0)
+            .All(sample => sample.Tint.X == 0f && sample.Tint.Y > 0f && sample.Tint.Z == 0f), Is.True);
+        Assert.That(recolored.Where(sample => sample.Center.Y == 20)
+            .All(sample => sample.Tint.X > 0f && sample.Tint.Y == 0f && sample.Tint.X == sample.Tint.Z), Is.True);
+
+        renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults);
+        Assert.That(trail.Build(.25).ToArray(), Is.EqualTo(original));
+    }
+
+    [TestCase(0, 0)]
+    [TestCase(50, 6)]
+    [TestCase(100, 1)]
+    [TestCase(200, 0)]
+    public void TrailLengthControlsRetainedHistory(int percent, int firstPosition)
+    {
+        var trail = new PlanetTrail { ActiveLifetime = PlanetTrail.Lifetime * percent / 100d };
+        for (int i = 0; i <= 10; i++)
+            trail.RecordPlanet(1, new Vector2(i, 0), PlanetTrail.RedTint, i / 10d);
+
+        var samples = trail.Build(1);
+        if (percent == 0)
+            Assert.That(samples.Length, Is.Zero);
+        else
+            Assert.That(samples[0].Center.X, Is.EqualTo(firstPosition));
+    }
+
+    [Test]
     public void DenseTrailViewportKeepsTheSameVisibleSamplesInOrder()
     {
         var trail = new PlanetTrail();
@@ -96,6 +143,24 @@ public sealed class TestPlanetTrail
             renderer.Render();
             int samples = trail.SampleCount;
             Assert.That(samples, Is.GreaterThan(0), "A late initial frame needs its recent trail history.");
+            renderer.SeekForOfflineRender(1.25);
+            renderer.Render();
+            Assert.That(trail.SampleCount, Is.EqualTo(samples));
+            renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults with
+            {
+                FirePlanetColor = "#00FF00", IcePlanetColor = "#FF00FF",
+            });
+            renderer.Render();
+            Assert.That(trail.SampleCount, Is.EqualTo(samples));
+            var recolored = trail.Build(1.25).ToArray();
+            Assert.That(recolored.Any(sample => sample.Tint.Y > 0f && sample.Tint.X == 0f), Is.True);
+            Assert.That(recolored.Any(sample => sample.Tint.X > 0f && sample.Tint.X == sample.Tint.Z), Is.True);
+
+            renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults with { PlanetTrailPercent = 0 });
+            renderer.SeekForOfflineRender(1.25);
+            renderer.Render();
+            Assert.That(trail.SampleCount, Is.Zero);
+            renderer.ApplyVisualSettings(ApplicationSettings.PlayerDefaults);
             renderer.SeekForOfflineRender(1.25);
             renderer.Render();
             Assert.That(trail.SampleCount, Is.EqualTo(samples));

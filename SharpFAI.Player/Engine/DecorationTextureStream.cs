@@ -6,24 +6,21 @@ namespace SharpFAI.Player.Engine;
 internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 1024 * 1024,
     bool preferReuse = true, bool useImmutableStorage = true) : IDisposable
 {
-    internal readonly record struct Key(string Image, bool Smoothing, bool RepeatX, bool RepeatY);
-
-    private sealed class Slot(int handle, int width, int height, DecorationChannels channels, bool smoothing, long bytes)
+    private sealed class Slot(int handle, int width, int height, DecorationChannels channels, long bytes)
     {
         public int Handle { get; } = handle;
         public int Width { get; } = width;
         public int Height { get; } = height;
         public DecorationChannels Channels { get; } = channels;
-        public bool Smoothing { get; } = smoothing;
         public long Bytes { get; } = bytes;
         public long LastUsed { get; set; }
         public int UploadedRows { get; set; }
         public double NeededAt { get; set; } = double.NegativeInfinity;
-        public Key Key { get; set; }
+        public string Image { get; set; } = "";
     }
 
     private readonly List<Slot> _slots = [];
-    private readonly Dictionary<Key, Slot> _images = [];
+    private readonly Dictionary<string, Slot> _images = new(StringComparer.Ordinal);
     private long _frame;
     private long _bytes;
     private double _time = double.NegativeInfinity;
@@ -38,24 +35,24 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
         _frame++;
     }
 
-    public int Get(Key key, in DecorationImage image)
+    public int Get(string name, in DecorationImage image)
     {
-        if (!_images.TryGetValue(key, out Slot? slot))
-            slot = Acquire(key, image, allowOverBudget: true)!;
+        if (!_images.TryGetValue(name, out Slot? slot))
+            slot = Acquire(name, image, allowOverBudget: true)!;
         if (slot.UploadedRows < slot.Height)
             Upload(slot, image, slot.Height - slot.UploadedRows);
         slot.LastUsed = _frame;
         return slot.Handle;
     }
 
-    public bool Prefetch(Key key, in DecorationImage image, double neededAt) =>
-        Prefetch(key, image, neededAt, int.MaxValue, out bool ready) || !ready;
+    public bool Prefetch(string name, in DecorationImage image, double neededAt) =>
+        Prefetch(name, image, neededAt, int.MaxValue, out bool ready) || !ready;
 
     // A partially uploaded texture is reserved but cannot be drawn until all rows exist.
-    public bool Prefetch(Key key, in DecorationImage image, double neededAt, int byteBudget, out bool ready)
+    public bool Prefetch(string name, in DecorationImage image, double neededAt, int byteBudget, out bool ready)
     {
-        if (!_images.TryGetValue(key, out Slot? slot))
-            slot = Acquire(key, image, allowOverBudget: false);
+        if (!_images.TryGetValue(name, out Slot? slot))
+            slot = Acquire(name, image, allowOverBudget: false);
         ready = slot is not null && slot.UploadedRows == slot.Height;
         if (slot is null)
             return false;
@@ -69,11 +66,11 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
         return true;
     }
 
-    public bool TryTake(Key key, out int handle)
+    public bool TryTake(string name, out int handle)
     {
-        if (_images.TryGetValue(key, out Slot? slot) && slot.UploadedRows == slot.Height)
+        if (_images.TryGetValue(name, out Slot? slot) && slot.UploadedRows == slot.Height)
         {
-            _images.Remove(key);
+            _images.Remove(name);
             _slots.Remove(slot);
             _bytes -= slot.Bytes;
             handle = slot.Handle;
@@ -83,32 +80,27 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
         return false;
     }
 
-    private Slot? Acquire(Key key, in DecorationImage image, bool allowOverBudget)
+    private Slot? Acquire(string name, in DecorationImage image, bool allowOverBudget)
     {
-        long bytes = image.TextureBytes;
+        long bytes = image.StorageBytes;
         var slot = preferReuse || _bytes + bytes > idleTextureBudget
-            ? FindReusable(image, key.Smoothing) : null;
+            ? FindReusable(image) : null;
         if (slot is null)
-            slot = Allocate(image, key.Smoothing, bytes, allowOverBudget);
+            slot = Allocate(image, bytes, allowOverBudget);
         else
-            _images.Remove(slot.Key);
+            _images.Remove(slot.Image);
         if (slot is null)
             return null;
 
-        GL.BindTexture(TextureTarget.Texture2D, slot.Handle);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS,
-            (int)(key.RepeatX ? TextureWrapMode.Repeat : TextureWrapMode.ClampToEdge));
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT,
-            (int)(key.RepeatY ? TextureWrapMode.Repeat : TextureWrapMode.ClampToEdge));
-        slot.Key = key;
+        slot.Image = name;
         slot.LastUsed = _frame;
         slot.UploadedRows = 0;
         slot.NeededAt = double.NegativeInfinity;
-        _images.Add(key, slot);
+        _images.Add(name, slot);
         return slot;
     }
 
-    private Slot? FindReusable(in DecorationImage image, bool smoothing)
+    private Slot? FindReusable(in DecorationImage image)
     {
         Slot? oldest = null;
         foreach (Slot slot in _slots)
@@ -116,7 +108,7 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
             // Keep the current frame's handles stable for sprite batches. Leave the
             // preceding frames alone while the GPU is still consuming their draws.
             if (!IsIdle(slot) || slot.Width != image.Width || slot.Height != image.Height ||
-                slot.Smoothing != smoothing || slot.Channels != image.Channels)
+                slot.Channels != image.Channels)
                 continue;
             if (oldest is null || slot.LastUsed < oldest.LastUsed)
                 oldest = slot;
@@ -124,7 +116,7 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
         return oldest;
     }
 
-    private Slot? Allocate(in DecorationImage image, bool smoothing, long bytes, bool allowOverBudget)
+    private Slot? Allocate(in DecorationImage image, long bytes, bool allowOverBudget)
     {
         if (!allowOverBudget && bytes > idleTextureBudget)
             return null;
@@ -140,7 +132,7 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
                     return null;
                 break;
             }
-            _images.Remove(oldest.Key);
+            _images.Remove(oldest.Image);
             _slots.Remove(oldest);
             _bytes -= oldest.Bytes;
             GL.DeleteTexture(oldest.Handle);
@@ -166,11 +158,11 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
                 (int)(image.Channels == DecorationChannels.Gray ? All.One : All.Green));
         }
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
-            (int)(smoothing ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
-            (int)(smoothing ? TextureMagFilter.Linear : TextureMagFilter.Nearest));
+            (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
         _bytes += bytes;
-        var allocated = new Slot(handle, image.Width, image.Height, image.Channels, smoothing, bytes);
+        var allocated = new Slot(handle, image.Width, image.Height, image.Channels, bytes);
         _slots.Add(allocated);
         return allocated;
     }

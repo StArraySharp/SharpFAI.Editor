@@ -20,6 +20,8 @@ internal sealed unsafe class LevelPanel
 
     public void Draw(LevelRenderer renderer, float top, bool rendering, AudioCalibrationWindow calibration)
     {
+        if (!_expanded || rendering || renderer.IsLoading || renderer.Level is null)
+            renderer.SetProgressScrubbing(false);
         ImGuiViewport* viewport = ImGui.GetMainViewport();
         float left = viewport->Pos.x;
         float tabSize = ImGui.GetFrameHeight() + 2f;
@@ -139,9 +141,20 @@ internal sealed unsafe class LevelPanel
 
         float progress = (float)renderer.Progress;
         ImGui.SetNextItemWidth(-1f);
-        string time = $"{FormatTime(renderer.PlayTime)} / {FormatTime(renderer.Duration)}";
-        if (ImGui.SliderFloat("##progress", ref progress, 0f, 1f, time, 0) != 0)
+        bool changed = ImGui.SliderFloat("##progress", ref progress, 0f, 1f, "", 0) != 0;
+        renderer.SetProgressScrubbing(ImGui.IsItemActive() != 0 &&
+            ImGui.IsMouseDown((int)ImGuiMouseButton.ImGuiMouseButton_Left) != 0);
+        if (changed)
             renderer.Seek(progress * renderer.Duration);
+        string time = $"{FormatTime(renderer.PlayTime)} / {FormatTime(renderer.Duration)}";
+        ImVec2 min = ImGui.GetItemRectMin();
+        ImVec2 max = ImGui.GetItemRectMax();
+        ImVec2 size = ImGui.CalcTextSize(time);
+        ImDrawList* draw = ImGui.GetWindowDrawList();
+        ImDrawList.PushClipRect(draw, min, max, 1);
+        ImDrawList.AddText(draw, new ImVec2 { x = (min.x + max.x - size.x) * .5f, y = (min.y + max.y - size.y) * .5f },
+            ImGui.GetColorU32((int)ImGuiCol.ImGuiCol_Text, 1f), time);
+        ImDrawList.PopClipRect(draw);
     }
 
     private void DrawManualPlay(LevelRenderer renderer)

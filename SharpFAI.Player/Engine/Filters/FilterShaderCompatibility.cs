@@ -4,11 +4,13 @@ namespace SharpFAI.Player.Engine.Filters;
 
 internal static class FilterShaderCompatibility
 {
-    internal static string AdaptFragment(string shaderName, string source)
+    internal const string HlslccDxbcHeader = "// SharpFAI HLSLcc DXBC\n";
+
+    internal static string AdaptFragment(string shaderName, string source, bool translatedDxbc = false)
     {
         if (string.Equals(shaderName, "CameraFilterPack_TV_VHS", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(shaderName, "CameraFilterPack/TV_VHS", StringComparison.OrdinalIgnoreCase))
-            return AdaptVhs(source);
+            return AdaptVhs(source, translatedDxbc);
 
         if (!string.Equals(shaderName, "CameraFilterPack_Oculus_ThermaVision", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(shaderName, "CameraFilterPack/Oculus_ThermaVision", StringComparison.OrdinalIgnoreCase))
@@ -49,7 +51,7 @@ internal static class FilterShaderCompatibility
         return source.Insert(main[0].Index + main[0].Length, guard);
     }
 
-    private static string AdaptVhs(string source)
+    private static string AdaptVhs(string source, bool translatedDxbc)
     {
         string code = MaskCommentsAndDirectives(source);
         var main = Regex.Matches(code, @"\bvoid\s+main\s*\(\s*(?:void\s*)?\)\s*\{", RegexOptions.CultureInvariant);
@@ -70,7 +72,13 @@ internal static class FilterShaderCompatibility
         // noise hashes in D3D UVs. Its pre-roll flip cancels that conversion, and
         // its post-roll sample flip cancels the texture conversion. The parasite
         // hash still uses pre-flip roll Y, but its threshold uses post-flip Y.
-        (string Before, string After)[] changes =
+        (string Before, string After)[] changes = translatedDxbc
+            ?
+            [
+                ("vs_TEXCOORD0.xy * _MainTex_ST.xy", "vec2(vs_TEXCOORD0.x, 1.0 - vs_TEXCOORD0.y) * _MainTex_ST.xy"),
+                ("texture(_MainTex, u_xlat3.xy)", "texture(_MainTex, vec2(u_xlat3.x, 1.0 - u_xlat3.y))")
+            ]
+            :
         [
             ("u_xlat1.x = u_xlat2.y;", "u_xlat2.y = 1.0 - u_xlat2.y; u_xlat1.x = u_xlat2.y;"),
             ("u_xlat5 = _TimeX * _Value3 + u_xlat2.y;", "u_xlat5 = _TimeX * _Value3 + (1.0 - u_xlat2.y);"),

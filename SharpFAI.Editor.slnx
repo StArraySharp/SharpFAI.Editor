@@ -6,4 +6,7 @@
   <Project Path="SharpFAI.Editor.Tests/SharpFAI.Editor.Tests.csproj" />
   <Project Path="SharpFAI.SourceGenerator/SharpFAI.SourceGenerator.csproj" />
   <Project Path="SharpFAI.Player.Tests/SharpFAI.Player.Tests.csproj" />
+  <Folder Name="/Build/">
+    <Project Path="build/PrepareGameAssets/PrepareGameAssets.csproj" />
+  </Folder>
 </Solution>

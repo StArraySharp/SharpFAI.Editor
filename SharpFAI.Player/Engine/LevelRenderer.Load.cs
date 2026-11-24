@@ -1,3 +1,4 @@
+using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using SharpFAI.Player.Engine.Events;
 using SharpFAI.Player.Engine.Play;
@@ -18,6 +19,7 @@ public sealed unsafe partial class LevelRenderer
 
     internal string? LevelPath { get; private set; }
     private bool _keepSceneDuringLoad;
+    private nint _effectWarmupFence;
 
     internal bool ReloadLevel() => !IsLoading && LevelPath is { } path && Load(path);
 
@@ -77,8 +79,10 @@ public sealed unsafe partial class LevelRenderer
 
         int textureCapacity = _floorTextureCapacity;
         bool skipAudio = SkipAudio;
+        int decorationTexturePercent = _visualSettings.DecorationTexturePercent;
         CancellationToken token = cts.Token;
-        _loadTask = Task.Run(() => BuildLevel(path, textureCapacity, token, readLevel, editorSnapshot, skipAudio), token);
+        _loadTask = Task.Run(() => BuildLevel(path, textureCapacity, token, readLevel, editorSnapshot, skipAudio,
+            decorationTexturePercent), token);
         return true;
     }
 
@@ -87,6 +91,9 @@ public sealed unsafe partial class LevelRenderer
     {
         _preparingLevelEffects = false;
         _shaderPrewarm = null;
+        _backgroundPrewarm.Clear();
+        _textureWarmupOrder = [];
+        DeleteEffectWarmupFence();
         CancellationTokenSource? cts = _loadCts;
         _loadCts = null;
 
@@ -148,7 +155,7 @@ public sealed unsafe partial class LevelRenderer
     /// the audio. All of it is CPU-only and never touches OpenGL.
     /// </summary>
     private LevelLoadResult BuildLevel(string path, int textureCapacity, CancellationToken token, Func<Level> readLevel,
-        bool editorSnapshot, bool skipAudio)
+        bool editorSnapshot, bool skipAudio, int decorationTexturePercent)
     {
         List<(string Phase, double Milliseconds)> timings = [];
         System.Diagnostics.Stopwatch phaseClock = System.Diagnostics.Stopwatch.StartNew();
@@ -209,14 +216,15 @@ public sealed unsafe partial class LevelRenderer
             || rawSettings?["disableV15Features"]?.ToObject<bool>() == true;
         var decorationsTask = Task.Run(() => ImageDecorationTimeline.Build(events, floors, timeline.EntryTimes,
             timeline.FloorBpms, directory, warnings, token, legacyMasks, Floor.length * 2f * settings.TileLength,
-            editable: editorSnapshot), token);
+            editable: editorSnapshot, texturePercent: decorationTexturePercent), token);
         (string? musicPath, DecodedAudio? music, DecodedAudio? hitsound) = BuildAudio(level, path, floors, timeline,
             settings, (phase, milliseconds) => timings.Add((phase, milliseconds)));
         MarkPhase("构建装饰与背景");
         var decorations = decorationsTask.GetAwaiter().GetResult();
-        decorations?.BindCameraFilters(floors, timeline.FloorBpms, filters, backgroundFilters);
         var backdrop = BackdropTimeline.Build(settings, events, floors, timeline.EntryTimes, timeline.FloorBpms,
             directory, warnings);
+        decorations?.BindTimedEffects(floors, timeline.FloorBpms, filters, backgroundFilters,
+            cameraTimeline, backdrop, sceneEffects, trackRuntime);
         if (!string.IsNullOrWhiteSpace(settings.BackgroundVideo))
         {
             warnings.Add("当前播放器暂不播放关卡背景视频");
@@ -226,6 +234,18 @@ public sealed unsafe partial class LevelRenderer
         MarkPhase(floors.Count >= VisibleFloorIndex.MinimumResidentFloorCount ? "构建可见砖块索引" : "烘焙网格");
         var (materialOptions, visibility, geometry, guides) = BuildTrackGeometry(floors, trackStates, trackRuntime,
             timeline, settings, directory, textureCapacity, token);
+        IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? floorTextures;
+        try
+        {
+            MarkPhase("解码轨道纹理");
+            floorTextures = OfficialFloorRenderer.PrepareBuiltInTextures(geometry, token);
+        }
+        catch
+        {
+            geometry?.Dispose();
+            guides?.Dispose();
+            throw;
+        }
 
         // Finish up: record the last phase and clear the running-phase text
         phaseClock.Stop();
@@ -239,6 +259,7 @@ public sealed unsafe partial class LevelRenderer
             Floors = floors,
             FloorPositionRemainders = floorPositionRemainders,
             Geometry = geometry,
+            FloorTextures = floorTextures,
             Visibility = visibility,
             Guides = guides,
             TrackStates = trackStates,
@@ -254,6 +275,7 @@ public sealed unsafe partial class LevelRenderer
             BackgroundFilterTimeline = backgroundFilters,
             SceneEffects = sceneEffects,
             Decorations = decorations,
+            DecorationTexturePercent = decorationTexturePercent,
             ManualTrack = new ManualTrack(floors, timeline, events),
             MusicPath = musicPath,
             Music = music,
@@ -298,6 +320,7 @@ public sealed unsafe partial class LevelRenderer
     {
         bool resident = floors.Count >= VisibleFloorIndex.MinimumResidentFloorCount;
         var materials = runtime.PrepareMaterials(token);
+        runtime.PrepareSeekCheckpoints(token);
         var visibility = resident ? VisibleFloorIndex.Build(floors, states, runtime, materials, token) : null;
         FloorGeometry? geometry = null;
         if (!resident)
@@ -354,7 +377,7 @@ public sealed unsafe partial class LevelRenderer
         {
             if (result.Geometry is { } geometry)
             {
-                CommitLoadedFloorGeometry(geometry);
+                CommitLoadedFloorGeometry(geometry, result.FloorTextures);
             }
             if (result.Guides is { } guides)
             {
@@ -390,6 +413,7 @@ public sealed unsafe partial class LevelRenderer
             _hasBounds = true;
         }
         _settings = result.Settings;
+        _loadedDecorationTexturePercent = result.DecorationTexturePercent;
         _warnings.AddRange(result.Warnings);
         _backdrop = result.Backdrop;
         if (_backdrop.NeedsBackgroundRenderer)
@@ -450,10 +474,27 @@ public sealed unsafe partial class LevelRenderer
     private void BeginLevelEffectWarmup()
     {
         BeginShaderPrewarm();
+        _backgroundPrewarm.Clear();
+        if (_background is not null && _backdrop is { } backdrop)
+        {
+            const long byteBudget = 64L * 1024 * 1024;
+            long bytes = 0;
+            var scheduled = new HashSet<(byte[] Pixels, bool Smooth, bool Repeat)>();
+            foreach (var state in backdrop.BackgroundStates)
+            {
+                if (state.Pixels is not { } pixels || bytes + pixels.Pixels.LongLength > byteBudget)
+                    continue;
+                if (!scheduled.Add((pixels.Pixels, state.Settings.ImageSmoothing, IsBackgroundRepeated(state.Settings))))
+                    continue;
+                _backgroundPrewarm.Enqueue(state);
+                bytes += pixels.Pixels.LongLength;
+            }
+        }
         _staticTextureIndex = 0;
         _prewarmedTextureBytes = 0;
+        ReserveLargeTextureWarmup();
         _preparingLevelEffects = _shaderPrewarm is not null || _imageDecorations is { Items.Count: > 0 } ||
-            _componentPrewarm.Count > 0 || !_schedulesPrewarmed || !_scenePrewarmed;
+            _componentPrewarm.Count > 0 || _backgroundPrewarm.Count > 0 || !_schedulesPrewarmed || !_scenePrewarmed;
         if (_preparingLevelEffects)
         {
             _loadPhase = "准备渲染资源";
@@ -461,12 +502,98 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
+    private void ReserveLargeTextureWarmup()
+    {
+        const long mib = 1024L * 1024;
+        const long baseReserve = 320 * mib;
+        _reservedLargeTextures.Clear();
+        _reservedLargeTextureBytes = 0;
+        _textureWarmupOrder = [];
+        if (_imageDecorations is not { } decorations)
+            return;
+
+        const long baseBudget = 384 * mib;
+        _texturePrewarmBudget = TextureWarmupBudget(baseBudget);
+        long reserveLimit = Math.Min(_texturePrewarmBudget - 64 * mib, 1152 * mib);
+        _textureWarmupOrder = decorations.StaticTextureUploads;
+        var animation = decorations.AnimationUploads.Where(entry => decorations.Images.ContainsKey(entry.Image))
+            .DistinctBy(entry => entry.Image, StringComparer.Ordinal).ToArray();
+        if (animation.Sum(entry => decorations.Images[entry.Image].StorageBytes) <= 64 * mib)
+            _textureWarmupOrder = _textureWarmupOrder.Concat(animation.Select(entry => (entry.Image, entry.Start)))
+                .OrderBy(entry => entry.Start).ToArray();
+
+        // Reserve part of the normal preload budget for nearby activations whose combined uploads
+        // are most likely to overrun the playback transfer budget.
+        var large = decorations.StaticTextureUploads.Select(entry =>
+            (entry.Image, entry.Start, Bytes: decorations.Images[entry.Image].StorageBytes))
+            .Where(entry => entry.Bytes >= 16 * mib && entry.Bytes <= reserveLimit).ToArray();
+        int bestStart = 0, bestEnd = 0;
+        for (int start = 0; start < large.Length; start++)
+        {
+            long total = 0;
+            int end = start;
+            for (; end < large.Length && large[end].Start - large[start].Start <= 2.0; end++)
+            {
+                if (total + large[end].Bytes > baseReserve)
+                    break;
+                total += large[end].Bytes;
+            }
+            if (total <= _reservedLargeTextureBytes)
+                continue;
+            _reservedLargeTextureBytes = total;
+            bestStart = start;
+            bestEnd = end;
+        }
+        for (int index = bestStart; index < bestEnd; index++)
+            _reservedLargeTextures.Add(large[index].Image);
+
+        if (reserveLimit == baseReserve)
+            return;
+
+        // Spend additional headroom on large artwork reused across time. These textures
+        // can enter view again after a seek, long after their first prefetch deadline.
+        var uses = decorations.StaticTexturePrefetches.GroupBy(entry => entry.Image, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        foreach (var entry in large.OrderByDescending(entry => decorations.TextureUseSeconds.GetValueOrDefault(entry.Image))
+                     .ThenByDescending(entry => uses.GetValueOrDefault(entry.Image))
+                     .ThenByDescending(entry => entry.Bytes))
+        {
+            if (_reservedLargeTextureBytes + entry.Bytes <= reserveLimit && _reservedLargeTextures.Add(entry.Image))
+                _reservedLargeTextureBytes += entry.Bytes;
+        }
+
+        // Give early scene assets and reused sprites precedence over one-time
+        // images so a cold jump can reuse more of the next scene's working set.
+        _textureWarmupOrder = _textureWarmupOrder.OrderBy(entry => entry.Start > 12)
+            .ThenByDescending(entry => decorations.TextureUseSeconds.GetValueOrDefault(entry.Image))
+            .ThenByDescending(entry => uses.GetValueOrDefault(entry.Image))
+            .ThenBy(entry => entry.Start).ToArray();
+    }
+
+    private static long TextureWarmupBudget(long fallback)
+    {
+        const string extension = "GL_NVX_gpu_memory_info";
+        int count = GL.GetInteger(GetPName.NumExtensions);
+        for (int i = 0; i < count; i++)
+        {
+            if (GL.GetString(StringNameIndexed.Extensions, i) != extension)
+                continue;
+            // GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX is reported in KiB.
+            long freeBytes = GL.GetInteger((GetPName)0x9049) * 1024L;
+            return Math.Clamp(freeBytes * 2 / 3, fallback, 2560L * 1024 * 1024);
+        }
+        return fallback;
+    }
+
     private void BeginShaderPrewarm()
     {
-        var foreground = (_filterTimeline?.ShaderNames() ?? []).Concat(_sceneEffects?.ShaderNames() ?? []).ToArray();
-        var background = (_backgroundFilterTimeline?.ShaderNames() ?? []).ToArray();
+        var filters = _visualSettings.CameraFilters ? _filterTimeline : null;
+        var backgroundFilters = _visualSettings.CameraFilters ? _backgroundFilterTimeline : null;
+        var screenEffects = _visualSettings.ScreenEffects ? _sceneEffects : null;
+        var foreground = (filters?.ShaderNames() ?? []).Concat(screenEffects?.ShaderNames() ?? []).ToArray();
+        var background = (backgroundFilters?.ShaderNames() ?? []).ToArray();
         var programs = foreground.Concat(background).Distinct(StringComparer.Ordinal).ToArray();
-        var textures = (_filterTimeline?.TextureNames() ?? []).Concat(_backgroundFilterTimeline?.TextureNames() ?? [])
+        var textures = (filters?.TextureNames() ?? []).Concat(backgroundFilters?.TextureNames() ?? [])
             .Distinct(StringComparer.Ordinal);
         var jobs = new Queue<(string Name, int? Pass)>();
         foreach (string shader in programs)
@@ -476,15 +603,15 @@ public sealed unsafe partial class LevelRenderer
             jobs.Enqueue((texture, null));
 
         _componentPrewarm.Clear();
-        if (_filterTimeline is { } filters)
+        if (filters is not null)
             foreach (string name in filters.ComponentNamesForWarmup())
                 _componentPrewarm.Add((filters, name));
-        if (_backgroundFilterTimeline is { } backgroundFilters)
+        if (backgroundFilters is not null)
             foreach (string name in backgroundFilters.ComponentNamesForWarmup())
                 _componentPrewarm.Add((backgroundFilters, name));
         _componentPrewarmIndex = 0;
-        _schedulesPrewarmed = _filterTimeline is null && _backgroundFilterTimeline is null;
-        _scenePrewarmed = _sceneEffects is null;
+        _schedulesPrewarmed = filters is null && backgroundFilters is null;
+        _scenePrewarmed = screenEffects is null;
 
         _shaderPrewarm = jobs.Count == 0 ? null : jobs;
         _shaderPrewarmTotal = jobs.Count;
@@ -498,6 +625,15 @@ public sealed unsafe partial class LevelRenderer
     {
         if (!_preparingLevelEffects && _shaderPrewarm is null)
             return;
+        if (_effectWarmupFence != 0)
+        {
+            var status = GL.ClientWaitSync(_effectWarmupFence, ClientWaitSyncFlags.SyncFlushCommandsBit, 0);
+            if (status == WaitSyncStatus.TimeoutExpired)
+                return;
+            DeleteEffectWarmupFence();
+            FinishEffectWarmup();
+            return;
+        }
         var clock = System.Diagnostics.Stopwatch.StartNew();
         double budget = _preparingLevelEffects ? 6.0 : _isPlaying ? 1.0 : 4.0;
         while (_shaderPrewarm is { Count: > 0 } pending)
@@ -517,6 +653,17 @@ public sealed unsafe partial class LevelRenderer
 
         if (!_preparingLevelEffects)
             return;
+
+        if (_backgroundPrewarm.Count > 0 && _background is { } background)
+        {
+            using var state = new GlRenderStateScope();
+            while (_backgroundPrewarm.TryDequeue(out var image))
+            {
+                background.SetImage(image.Pixels, image.Settings.ImageSmoothing, IsBackgroundRepeated(image.Settings));
+                if (clock.Elapsed.TotalMilliseconds >= budget)
+                    return;
+            }
+        }
 
         // Instantiating and drawing each chart filter once moves its JIT work and the driver's
         // first-draw specialisation off the frame where the chart first switches effects.
@@ -551,17 +698,28 @@ public sealed unsafe partial class LevelRenderer
         if (_imageDecorations is { Items.Count: > 0 } decorations && DecorationShader() is { } sprites)
         {
             // Limit speculative residency. Animated sequences still use their streaming pool.
-            const long preloadBudget = 384L * 1024 * 1024;
             using var state = new GlRenderStateScope();
-            while (_staticTextureIndex < decorations.StaticTextureUploads.Length)
+            while (_staticTextureIndex < _textureWarmupOrder.Length)
             {
-                var key = decorations.StaticTextureUploads[_staticTextureIndex++].Key;
-                var image = decorations.Images[key.Image];
-                long bytes = image.TextureBytes;
-                if (_prewarmedTextureBytes + bytes > preloadBudget)
-                    continue;
-                sprites.PrewarmTexture(key, image);
-                _prewarmedTextureBytes += bytes;
+                var (name, firstUse) = _textureWarmupOrder[_staticTextureIndex];
+                var image = decorations.Images[name];
+                long bytes = image.StorageBytes;
+                if (_reservedLargeTextures.Contains(name))
+                {
+                    bool transferred = sprites.PrewarmLargeTexture(name, image, firstUse, out bool ready);
+                    if (!ready && transferred)
+                        return;
+                    _reservedLargeTextures.Remove(name);
+                    _reservedLargeTextureBytes -= bytes;
+                    if (ready)
+                        _prewarmedTextureBytes += bytes;
+                }
+                else if (_prewarmedTextureBytes + _reservedLargeTextureBytes + bytes <= _texturePrewarmBudget)
+                {
+                    sprites.PrewarmTexture(name, image);
+                    _prewarmedTextureBytes += bytes;
+                }
+                _staticTextureIndex++;
                 if (clock.Elapsed.TotalMilliseconds >= budget)
                     return;
             }
@@ -569,7 +727,22 @@ public sealed unsafe partial class LevelRenderer
         if (_filterCamerasToPrewarm > 0)
             _filterBackend?.PrewarmTargets((int)_camera.ViewportWidth, (int)_camera.ViewportHeight,
                 _filterCamerasToPrewarm, _prewarmBloom, _prewarmMotionBlur);
-        OpenTK.Graphics.OpenGL4.GL.Finish();
+        _effectWarmupFence = GL.FenceSync(SyncCondition.SyncGpuCommandsComplete, WaitSyncFlags.None);
+        if (_effectWarmupFence == 0)
+            FinishEffectWarmup();
+    }
+
+    private void DeleteEffectWarmupFence()
+    {
+        if (_effectWarmupFence == 0)
+            return;
+        GL.DeleteSync(_effectWarmupFence);
+        _effectWarmupFence = 0;
+    }
+
+    private void FinishEffectWarmup()
+    {
+        _textureWarmupOrder = [];
         // Bulk image decoding leaves large temporary buffers behind. Reclaim them
         // during the loading screen on exceptionally large charts, before audio starts.
         if (_imageDecorations is { } loaded &&
@@ -676,6 +849,7 @@ public sealed unsafe partial class LevelRenderer
         _runtimeTrackActive = false;
         _runtimeTrackBeforeOffline = false;
         _offlineSubSample = false;
+        _progressScrubbing = false;
         _floorVisualTime = double.NaN;
         _selectedFloor = -1;
         _entryTimes = [];

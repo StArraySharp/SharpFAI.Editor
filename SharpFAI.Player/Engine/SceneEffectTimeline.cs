@@ -7,7 +7,7 @@ using SharpFAI.Serialization;
 
 namespace SharpFAI.Player.Engine;
 
-internal sealed class SceneEffectTimeline : IDisposable
+internal sealed class SceneEffectTimeline(TriggeredEventSchedule<SceneEffectEvent> triggers) : IDisposable
 {
     private readonly record struct Sample(TrackTiming Timing, Vector2 From, Vector2 To)
     {
@@ -31,17 +31,34 @@ internal sealed class SceneEffectTimeline : IDisposable
     private ScreenPass? _tilePass;
     private ScreenPass? _scrollPass;
     private FilterTimeline.Entry? _bloomPass;
+    private int _compiledRevision = -1;
+    internal TriggeredEventSchedule<SceneEffectEvent> Triggers { get; } = triggers;
 
     public static SceneEffectTimeline? Build(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors,
         double[] times, double[]? bpms)
     {
         if (!events.Any(item => item is SceneEffectEvent))
             return null;
-        var timeline = new SceneEffectTimeline();
+        var timeline = new SceneEffectTimeline(new(TimedEventSchedule.Build<SceneEffectEvent>(
+            events, floors, times, bpms, preserveChartOrder: true)));
         timeline._rotations = events.OfType<SceneEffectEvent>()
             .Where(item => item.EventType == EventType.SetPlanetRotation && item.IsActive && (uint)item.Floor < (uint)floors.Count)
             .OrderBy(item => item.Floor).ToArray();
-        foreach (var entry in TimedEventSchedule.Build<SceneEffectEvent>(events, floors, times, bpms, preserveChartOrder: true))
+        timeline.Compile();
+        return timeline;
+    }
+
+    private void Compile()
+    {
+        if (_compiledRevision == Triggers.Revision)
+            return;
+        _tile.Clear();
+        _scroll.Clear();
+        foreach (var channel in _scales)
+            channel.Clear();
+        _bloom.Clear();
+        _shakes.Clear();
+        foreach (var entry in Triggers.Active)
         {
             var item = entry.Event;
             TrackTiming timing = entry.Timing;
@@ -53,20 +70,20 @@ internal sealed class SceneEffectTimeline : IDisposable
                         float strength = item.Enabled("strength", item.Strength) ?? 0f;
                         float intensity = item.Enabled("intensity", item.Intensity) ?? 100f;
                         if (float.IsFinite(strength) && float.IsFinite(intensity))
-                            timeline._shakes.Add(new CameraShake(timing, strength, intensity / 100f,
-                                item.Enabled("fadeOut", item.FadeOut) ?? true, timeline._shakes.Count));
+                            _shakes.Add(new CameraShake(timing, strength, intensity / 100f,
+                                item.Enabled("fadeOut", item.FadeOut) ?? true, _shakes.Count));
                     }
                     break;
                 case EventType.ScreenTile:
                     Vector2 to = ReadVector(item.Enabled("tile", item.Tile), Vector2.One);
-                    Vector2 from = timeline._tile.Count == 0 ? Vector2.One : timeline._tile[^1].To;
-                    timeline._tile.Add(new Sample(timing, from, to));
+                    Vector2 from = _tile.Count == 0 ? Vector2.One : _tile[^1].To;
+                    _tile.Add(new Sample(timing, from, to));
                     break;
                 case EventType.ScreenScroll:
                     Vector2 speed = ReadVector(item.Enabled("scroll", item.Scroll), Vector2.Zero) / 100f;
-                    Vector2 offset = timeline._scroll.Count == 0 || timeline._scroll[^1].Speed == Vector2.Zero
-                        ? Vector2.Zero : timeline._scroll[^1].At(timing.Start);
-                    timeline._scroll.Add(new ScrollSample(timing.Start, offset, speed));
+                    Vector2 offset = _scroll.Count == 0 || _scroll[^1].Speed == Vector2.Zero
+                        ? Vector2.Zero : _scroll[^1].At(timing.Start);
+                    _scroll.Add(new ScrollSample(timing.Start, offset, speed));
                     break;
                 case EventType.ScalePlanets:
                     float scale = (item.Enabled("scale", item.Scale) ?? 100f) / 100f;
@@ -75,32 +92,36 @@ internal sealed class SceneEffectTimeline : IDisposable
                     {
                         if (target != "All" && target != Planets[index])
                             continue;
-                        var channel = timeline._scales[index];
+                        var channel = _scales[index];
                         Vector2 current = channel.Count == 0 ? Vector2.One : channel[^1].At(timing.Start);
                         channel.Add(new Sample(timing, current, new Vector2(scale)));
                     }
                     break;
                 case EventType.Bloom:
-                    Vector2 previous = timeline._bloom.Count == 0 ? new Vector2(.75f, .5f) : timeline._bloom[^1].Amount.To;
-                    Vector4 previousTint = timeline._bloom.Count == 0 ? Vector4.One : timeline._bloom[^1].Tint.To;
+                    Vector2 previous = _bloom.Count == 0 ? new Vector2(.75f, .5f) : _bloom[^1].Amount.To;
+                    Vector4 previousTint = _bloom.Count == 0 ? Vector4.One : _bloom[^1].Tint.To;
                     Vector2 amount = new((item.Enabled("threshold", item.Threshold) ?? 75f) / 100f,
                         (item.Enabled("intensity", item.Intensity) ?? 50f) / 100f);
                     Vector4 tint = Vector4.One;
                     if (FloorTrackStateResolver.ParseColor(item.Enabled("color", item.Color)) is { } color)
                         tint = new Vector4(color.X, color.Y, color.Z, color.W);
-                    timeline._bloom.Add(new BloomSample(new Sample(timing, previous, amount),
+                    _bloom.Add(new BloomSample(new Sample(timing, previous, amount),
                         new FilterTimeline.ParameterTween(previousTint, tint, timing), item.Enabled("enabled", item.EffectEnabled) ?? true));
                     break;
             }
         }
-        return timeline;
+        _compiledRevision = Triggers.Revision;
     }
 
-    public float PlanetScale(int planet, double time) =>
-        Read(_scales[planet], time, Vector2.One).X;
+    public float PlanetScale(int planet, double time)
+    {
+        Compile();
+        return Read(_scales[planet], time, Vector2.One).X;
+    }
 
     public OpenTK.Mathematics.Vector2 ShakeAt(double time)
     {
+        Compile();
         int index = IndexAt(_shakes, time, item => item.Start);
         return index < 0 ? OpenTK.Mathematics.Vector2.Zero : _shakes[index].At(time);
     }
@@ -113,6 +134,7 @@ internal sealed class SceneEffectTimeline : IDisposable
 
     public bool HasScreenEffect(double time)
     {
+        Compile();
         int index = IndexAt(_scroll, time, item => item.Start);
         return FindBloom(time) is { Enabled: true } || Read(_tile, time, Vector2.One) != Vector2.One ||
             (index >= 0 && _scroll[index].Speed != Vector2.Zero);
@@ -120,11 +142,14 @@ internal sealed class SceneEffectTimeline : IDisposable
 
     public IEnumerable<string> ShaderNames()
     {
-        if (_bloom.Exists(sample => sample.Enabled))
+        if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.Bloom &&
+            sample.Event.Enabled("enabled", sample.Event.EffectEnabled) != false))
             yield return VideoBloomPass.ShaderName;
-        if (_tile.Exists(sample => sample.To != Vector2.One))
+        if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.ScreenTile &&
+            ReadVector(sample.Event.Enabled("tile", sample.Event.Tile), Vector2.One) != Vector2.One))
             yield return "ADOFAI/ScreenTile";
-        if (_scroll.Exists(sample => sample.Speed != Vector2.Zero))
+        if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.ScreenScroll &&
+            ReadVector(sample.Event.Enabled("scroll", sample.Event.Scroll), Vector2.Zero) != Vector2.Zero))
             yield return "ADOFAI/ScreenScroll";
     }
 
@@ -140,7 +165,7 @@ internal sealed class SceneEffectTimeline : IDisposable
         {
             source = backend.RentTarget(8, 8, 0);
             destination = backend.RentTarget(8, 8, 0);
-            if (_bloom.Count > 0)
+            if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.Bloom))
             {
                 var bloom = BloomPass(backend);
                 float intensity = bloom.Intensity;
@@ -154,9 +179,9 @@ internal sealed class SceneEffectTimeline : IDisposable
                     bloom.Intensity = intensity;
                 }
             }
-            if (_tile.Count > 0)
+            if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.ScreenTile))
                 TilePass(backend).Render(source, destination);
-            if (_scroll.Count > 0)
+            if (Triggers.Authored.Any(sample => sample.Event.EventType == EventType.ScreenScroll))
                 ScrollPass(backend).Render(source, destination);
         }
         catch (Exception)
@@ -187,6 +212,7 @@ internal sealed class SceneEffectTimeline : IDisposable
 
     public void AppendScreenPasses(OpenGlFilterBackend backend, double time, List<FilterTimeline.Entry> active)
     {
+        Compile();
         if (FindBloom(time) is { Enabled: true } bloom)
         {
             var filter = BloomPass(backend);

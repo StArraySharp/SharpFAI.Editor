@@ -18,11 +18,10 @@ internal sealed unsafe partial class EditorWindow
             binding.Angle, binding.Fine, binding.Extra)).ToArray();
     private bool FineDirections => ImGui.IsKeyDown(ImGuiKey.ImGuiKey_GraveAccent) != 0;
 
-    private bool _grid = true;
     private bool _directionGuide = true;
     private bool _showArbitraryAngle;
     private string? _angleDraft;
-    private bool _centerEditSelection = true;
+    private int? _centerEditFloor = 0;
     private enum CanvasGesture { None, Click, Drag }
     private readonly record struct PendingTile(int Floor, int Version, double Direction);
     private readonly List<PendingTile> _pendingTiles = [];
@@ -52,7 +51,7 @@ internal sealed unsafe partial class EditorWindow
         _hasFloorSelection = true;
         _rangeAnchor = null;
         _playbackFloor = floor;
-        _centerEditSelection = center;
+        _centerEditFloor = center ? floor : null;
         _centerEditDecoration = null;
         _inspectDecoration = false;
         _decoration = null;
@@ -150,7 +149,6 @@ internal sealed unsafe partial class EditorWindow
                 SelectFloor(_floor, false);
         }
         WidgetDraw.ItemTooltip(L.T("EditSceneModeHelp"));
-        EditViewCheckbox("Grid", ref _grid);
         EditViewCheckbox("DirectionGuide", ref _directionGuide);
         EditViewCheckbox("LockPath", ref _pathLocked);
         EditViewCheckbox("Angle", ref _showArbitraryAngle);
@@ -177,7 +175,7 @@ internal sealed unsafe partial class EditorWindow
             else if (_hasFloorSelection)
             {
                 _playbackFloor = _floor;
-                _centerEditSelection = true;
+                _centerEditFloor = _floor;
             }
         }
         bool ready = HasCurrentPlayback;
@@ -224,8 +222,6 @@ internal sealed unsafe partial class EditorWindow
         ImDrawList* draw = ImGui.GetWindowDrawList();
         ImDrawList.PushClipRect(draw, origin, end, 1);
         float tileSize = renderer.TileSpacing;
-        if (_grid)
-            DrawGrid(draw, origin, end, Screen(Vector2.Zero), Math.Max(23, tileSize * renderer.Camera.Zoom / scale.X));
 
         uint accent = WidgetDraw.U32(61, 223, 206);
         for (int i = 1; i < pending.Count; i++)
@@ -563,10 +559,10 @@ internal sealed unsafe partial class EditorWindow
         var previous = _savedEditCamera ?? (renderer.Camera.Position, renderer.Camera.Zoom);
         _savedEditCamera = null;
         renderer.SelectFloor(floor);
-        if (_centerEditSelection && renderer.TryGetFloorCenter(floor, out Vector2 center))
+        if (_centerEditFloor is int focus && renderer.TryGetFloorCenter(focus, out Vector2 center))
             previous.Position = center;
         RestoreEditCamera(renderer, previous);
-        _centerEditSelection = false;
+        _centerEditFloor = null;
     }
 
     private static void RestoreEditCamera(LevelRenderer renderer, (Vector2 Position, float Zoom) view)
@@ -581,16 +577,6 @@ internal sealed unsafe partial class EditorWindow
         renderer.Pan(Vector2.Zero);
         renderer.Camera.Position = position;
         renderer.Camera.MarkDirty();
-    }
-
-    private static void DrawGrid(ImDrawList* draw, ImVec2 origin, ImVec2 end, ImVec2 anchor, float spacing)
-    {
-        float x0 = origin.x + ((anchor.x - origin.x) % spacing + spacing) % spacing;
-        float y0 = origin.y + ((anchor.y - origin.y) % spacing + spacing) % spacing;
-        uint color = WidgetDraw.U32(45, 47, 62);
-        for (float y = y0; y < end.y; y += spacing)
-            for (float x = x0; x < end.x; x += spacing)
-                ImDrawList.AddRectFilled(draw, WidgetDraw.V2(x, y), WidgetDraw.V2(x + 1, y + 1), color);
     }
 
     private double? DrawDirectionGuide(ImDrawList* draw, ImVec2 floor, ImVec2 origin, ImVec2 end, ImVec2 cursor,

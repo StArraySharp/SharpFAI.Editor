@@ -92,13 +92,13 @@ public sealed unsafe partial class LevelRenderer
             "PositionTrack" => EditorLayers.Track | EditorLayers.Decoration,
             "ColorTrack" or "ChangeTrack" or "AnimateTrack" or "MoveTrack" or "RecolorTrack" or
             "TileDimensions" or "Hide" or "SetFloorIcon" => EditorLayers.Track,
-            "RepeatEvents" => EditorLayers.Track | TimedLayers,
+            "RepeatEvents" or "SetConditionalEvents" => EditorLayers.Track | TimedLayers,
             "MoveCamera" => EditorLayers.Camera,
             "SetFilter" or "SetFilterAdvanced" => EditorLayers.Filter,
             "ScreenTile" or "ScreenScroll" or "ScalePlanets" or "SetPlanetRotation" or "Bloom" or "ShakeScreen" => EditorLayers.Scene,
             "Flash" or "HallOfMirrors" or "CustomBackground" => EditorLayers.Backdrop,
             "AddDecoration" or "AddText" or "AddObject" or "AddParticle" or "MoveDecorations" or "SetText" or "SetObject" or
-            "SetParticle" or "EmitParticle" or "SetConditionalEvents" => EditorLayers.Decoration,
+            "SetParticle" or "EmitParticle" => EditorLayers.Decoration,
             "ScaleMargin" or "AutoPlayTiles" or "Multitap" or "Checkpoint" => EditorLayers.Manual,
             _ => EditorLayers.None,
         };
@@ -161,6 +161,7 @@ public sealed unsafe partial class LevelRenderer
         var runtime = _trackRuntime!;
         var visibility = _visibleFloorIndex;
         var oldDecorations = _imageDecorations;
+        int texturePercent = _loadedDecorationTexturePercent;
         var oldBackdrop = _backdrop;
         string path = LevelPath!;
         string? directory = Path.GetDirectoryName(path);
@@ -204,6 +205,7 @@ public sealed unsafe partial class LevelRenderer
                 {
                     update.Runtime = new RuntimeTrackTimeline(events, floors, runtime.Baseline,
                         timeline.EntryTimes, timeline.Pitch, timeline.FloorBpms);
+                    update.Runtime.PrepareSeekCheckpoints(token);
                     update.Visibility = visibility?.WithTiming(update.Runtime, token);
                     if (Has(EditorLayers.Timing))
                         update.Guides = TrackGuideMesh.Build(floors, trackStates, runtime.Baseline, timeline,
@@ -223,7 +225,7 @@ public sealed unsafe partial class LevelRenderer
                 if (Has(EditorLayers.Decoration))
                     update.Decoration = ImageDecorationTimeline.Build(events, nextFloors, timeline.EntryTimes, timeline.FloorBpms,
                         directory, update.Warnings, token, UsesLegacyMasks(settingsJson), Floor.length * 2f * settings.TileLength,
-                        editable: true, cachedImages: oldDecorations?.Images);
+                        editable: true, cachedImages: oldDecorations?.Images, texturePercent: texturePercent);
                 if (Has(EditorLayers.Backdrop))
                 {
                     update.Backdrop = BackdropTimeline.Build(settings, events, nextFloors, timeline.EntryTimes, timeline.FloorBpms,
@@ -321,6 +323,10 @@ public sealed unsafe partial class LevelRenderer
     {
         var layers = LastEditorRevisionLayers = update.Layers;
         bool Has(EditorLayers layer) => (layers & layer) != 0;
+        bool rebindTriggers = Has(EditorLayers.Decoration | EditorLayers.Filter | EditorLayers.Camera |
+            EditorLayers.Scene | EditorLayers.Backdrop | EditorLayers.Track | EditorLayers.Timing | EditorLayers.Rate);
+        if (rebindTriggers)
+            ResetDecorationTriggers();
         _level = update.Level;
         if (!JToken.DeepEquals(_level.root["settings"], update.SettingsJson)) WriteEditorSettings(_level, update.SettingsJson);
         if (Has(EditorLayers.Backdrop))
@@ -344,19 +350,7 @@ public sealed unsafe partial class LevelRenderer
             _sceneEffects = update.Scene;
         }
         if (Has(EditorLayers.Filter | EditorLayers.Scene)) BeginShaderPrewarm();
-        if (Has(EditorLayers.Decoration | EditorLayers.Filter))
-        {
-            ResetDecorationTriggers();
-            if (Has(EditorLayers.Decoration)) _imageDecorations = update.Decoration;
-            if (_imageDecorations is { } decoration)
-                decoration.BindCameraFilters(update.Track?.Floors ?? _floors, update.Timeline.FloorBpms,
-                    _filterTimeline, _backgroundFilterTimeline);
-            else
-            {
-                _filterTimeline?.SetAutomaticSchedule(null);
-                _backgroundFilterTimeline?.SetAutomaticSchedule(null);
-            }
-        }
+        if (Has(EditorLayers.Decoration)) _imageDecorations = update.Decoration;
         if (update.Track is { } track)
         {
             ClearFloorChunks();
@@ -397,6 +391,8 @@ public sealed unsafe partial class LevelRenderer
                 _trackGuideRenderer = update.Guides is { } guides ? new TrackGuideRenderer(_uploader, guides) : null;
             }
         }
+        if (rebindTriggers)
+            BindDecorationEffects(update.Timeline.FloorBpms);
         if (Has(EditorLayers.Bindings) || Has(EditorLayers.Track)) SetEditorEvents(update.Events);
         if (Has(EditorLayers.Bindings))
         {
@@ -438,7 +434,8 @@ public sealed unsafe partial class LevelRenderer
             _lastFilterTime = double.NaN;
             _colorHistory?.Reset();
             if (Has(EditorLayers.Timing | EditorLayers.Track | EditorLayers.Camera)) _cameraSnap = true;
-            ApplyTimeline(previewCameraEvents: !_cameraFree);
+            ApplyTimeline(previewCameraEvents: !_cameraFree,
+                automaticConditions: rebindTriggers && (_isPlaying || _playTime > 0));
         }
         _warnings.AddRange(update.Warnings.Where(warning => !_warnings.Contains(warning)));
     }

@@ -29,6 +29,9 @@ public sealed class PlanetTrail
 
     /// <summary>Particle lifetime in seconds.</summary>
     public const double Lifetime = 0.94;
+    internal double ActiveLifetime { get; set; } = Lifetime;
+    internal Vector3? FireColorOverride { get; set; }
+    internal Vector3? IceColorOverride { get; set; }
 
     /// <summary>Initial particle size.</summary>
     public const float StartSize = 0.8f;
@@ -39,8 +42,8 @@ public sealed class PlanetTrail
     /// <summary>ColourModule start colour, blue.</summary>
     public static readonly Vector4 BlueTint = new(0f, 0.19f, 1f, 0.5333f);
 
-    /// <summary>Red component at the end of the colour ramp.</summary>
-    private const float RampEndRed = 0.6118f;
+    /// <summary>Brightness at the oldest end of the colour ramp.</summary>
+    private const float RampEndIntensity = 0.6118f;
 
     /// <summary>Sample spacing in pixels.</summary>
     private const float SpacingArc = 10f;
@@ -117,6 +120,9 @@ public sealed class PlanetTrail
 
     internal void RecordPlanet(int id, Vector2 position, Vector4 tint, double now, bool preserveHistory = false)
     {
+        if (ActiveLifetime <= 0)
+            return;
+
         switch (id)
         {
             case 0:
@@ -152,6 +158,12 @@ public sealed class PlanetTrail
 
     internal ReadOnlySpan<Sample> Build(double now, FloorRegion? view)
     {
+        if (ActiveLifetime <= 0)
+        {
+            SampleCount = 0;
+            return [];
+        }
+
         // Expire every history, including planets that are no longer being recorded.
         Trim(_timesRed, _headRed, now, ref _countRed);
         Trim(_timesBlue, _headBlue, now, ref _countBlue);
@@ -166,9 +178,9 @@ public sealed class PlanetTrail
         }
 
         int written = 0;
-        written += Resample(_positionsRed, _timesRed, _tintsRed, _headRed, _countRed, now, _samples, written, view);
-        written += Resample(_positionsBlue, _timesBlue, _tintsBlue, _headBlue, _countBlue, now, _samples, written, view);
-        written += Resample(_positionsThird, _timesThird, _tintsThird, _headThird, _countThird, now, _samples, written, view);
+        written += Resample(_positionsRed, _timesRed, _tintsRed, _headRed, _countRed, now, _samples, written, view, FireColorOverride);
+        written += Resample(_positionsBlue, _timesBlue, _tintsBlue, _headBlue, _countBlue, now, _samples, written, view, IceColorOverride);
+        written += Resample(_positionsThird, _timesThird, _tintsThird, _headThird, _countThird, now, _samples, written, view, null);
 
         SampleCount = written;
         return _samples.AsSpan(0, written);
@@ -199,9 +211,9 @@ public sealed class PlanetTrail
     /// Resample one history at equal arc-length intervals. Positions interpolate between neighbouring
     /// history points; the spacing is small enough that the polyline error is invisible.
     /// </summary>
-    private static int Resample(
+    private int Resample(
         Vector2[] positions, double[] times, Vector4[] tints,
-        int head, int count, double now, Sample[] output, int offset, FloorRegion? view)
+        int head, int count, double now, Sample[] output, int offset, FloorRegion? view, Vector3? colorOverride)
     {
         if (count < 2)
         {
@@ -237,7 +249,9 @@ public sealed class PlanetTrail
         int written = 0;
 
         double age = now - times[Index(head, count, count - 1, mask)];
-        float activity = (float)Math.Clamp(1.0 - age / Lifetime, 0.0, 1.0) * MathF.Min(1f, totalLength / SpacingArc);
+        float activity = (float)Math.Clamp(1.0 - age / ActiveLifetime, 0.0, 1.0) * MathF.Min(1f, totalLength / SpacingArc);
+        // Use the current palette for the whole trail so changing it does not discard history.
+        Vector3 endColor = (colorOverride ?? Vector3.UnitX) * RampEndIntensity;
         for (int i = 0; i < points; i++)
         {
             float target = i * step;
@@ -268,10 +282,11 @@ public sealed class PlanetTrail
                 continue;
 
             Vector4 baseTint = tints[a];
+            Vector3 color = colorOverride ?? baseTint.Xyz;
             Vector4 tint = new(
-                float.Lerp(baseTint.X, RampEndRed, 1f - t),
-                float.Lerp(baseTint.Y, 0f, 1f - t),
-                float.Lerp(baseTint.Z, 0f, 1f - t),
+                float.Lerp(color.X, endColor.X, 1f - t),
+                float.Lerp(color.Y, endColor.Y, 1f - t),
+                float.Lerp(color.Z, endColor.Z, 1f - t),
                 baseTint.W * fade * activity);
 
             output[offset + written] = new Sample(position, size, tint);
@@ -286,7 +301,7 @@ public sealed class PlanetTrail
         (head - count + index) & mask;
 
     /// <summary>Push a point, updating only the timestamp when stationary.</summary>
-    private static void Push(
+    private void Push(
         ref Vector2[] positions, ref double[] times, ref Vector4[] tints,
         ref int head, ref int count, Vector2 position, Vector4 tint, double now, bool preserveHistory)
     {
@@ -337,13 +352,13 @@ public sealed class PlanetTrail
     }
 
     /// <summary>Drop history points past the lifetime.</summary>
-    private static void Trim(double[] times, int head, double now, ref int count)
+    private void Trim(double[] times, int head, double now, ref int count)
     {
         while (count > 0)
         {
             int start = (head - count) & (times.Length - 1);
 
-            if (now - times[start] <= Lifetime)
+            if (now - times[start] <= ActiveLifetime)
             {
                 break;
             }

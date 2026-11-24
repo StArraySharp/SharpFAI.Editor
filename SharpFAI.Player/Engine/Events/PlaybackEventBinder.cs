@@ -163,6 +163,8 @@ internal static class PlaybackEventBinder
         PlaybackEvent item = (PlaybackEvent)serializer.Deserialize(reader, type)!;
         item.EventType = source.EventType;
         item.Source = source;
+        if (item is AddObjectDecoration obj)
+            obj.ObjectType = obj.ObjectType switch { "0" => "Floor", "1" => "Planet", "2" => "PlayerBubble", _ => obj.ObjectType };
         if (item is AddImageDecoration image)
             MigrateDecoration(image, sourceToken, settings);
         if (item is AddImageDecoration or MoveImageDecoration && (int?)settings?["version"] == 7 &&
