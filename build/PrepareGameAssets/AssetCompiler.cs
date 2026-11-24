@@ -8,7 +8,7 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
     private static readonly string[] RequiredTextures =
     [
         "CameraFilterPack_VHS1.png", "CameraFilterPack_VHS2.png", "MotionBlurJitter.png",
-        "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png",
+        "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png", "tutorial_tile.png",
     ];
     private static readonly Regex ShaderDeclaration = new(@"(?m)^[ \t]*Shader\s+""([^""]+)""");
 

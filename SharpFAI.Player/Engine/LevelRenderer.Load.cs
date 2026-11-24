@@ -475,13 +475,16 @@ public sealed unsafe partial class LevelRenderer
     {
         BeginShaderPrewarm();
         _backgroundPrewarm.Clear();
-        if (_background is not null && _backdrop is { } backdrop)
+        if (_background is { } background && _backdrop is { } backdrop)
         {
+            using var stateScope = new GlRenderStateScope();
             const long byteBudget = 64L * 1024 * 1024;
             long bytes = 0;
             var scheduled = new HashSet<(byte[] Pixels, bool Smooth, bool Repeat)>();
             foreach (var state in backdrop.BackgroundStates)
             {
+                if (state.ShowsDefaultPattern)
+                    background.PrepareTutorial(state.Settings);
                 if (state.Pixels is not { } pixels || bytes + pixels.Pixels.LongLength > byteBudget)
                     continue;
                 if (!scheduled.Add((pixels.Pixels, state.Settings.ImageSmoothing, IsBackgroundRepeated(state.Settings))))

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
+    <ApplicationIcon>../SharpFAI.Player/Resources/SharpFAI.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

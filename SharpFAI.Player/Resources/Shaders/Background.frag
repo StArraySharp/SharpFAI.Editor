@@ -8,56 +8,29 @@ uniform vec2 uSize;
 uniform vec2 uMovement;
 uniform vec4 uTint;
 uniform vec4 uPattern;
-uniform vec4 uAccent;
-uniform bool uShowTiles;
-uniform int uShapeMode;
-uniform float uZoom;
-uniform vec2 uShapeOffset;
 uniform float uAngle;
 uniform bool uHasImage;
+uniform bool uHasTutorialTile;
 uniform bool uRepeat;
 
-vec4 over(vec4 bottom, vec3 rgb, float alpha)
+vec4 tutorialTile(vec2 screen)
 {
-    float total = alpha + bottom.a * (1.0 - alpha);
-    return vec4(mix(bottom.rgb, rgb, alpha / max(total, 0.0001)), total);
-}
+    // BGStaticCam has a 10-unit view height and the sprite follows its position 1:1.
+    float angle = uAngle - radians(29.156113);
+    float c = cos(angle);
+    float s = sin(angle);
+    vec2 local = mat2(c, s, -s, c) * screen * (10.0 / 1.8714299);
+    vec2 halfSize = vec2(13.126585, 12.5) * 0.5;
+    if (any(greaterThan(abs(local), halfSize)))
+        discard;
 
-float band(vec2 p, float tilt, float width, float length, float aa)
-{
-    float distance = max(abs(p.y - tilt * p.x) - width, abs(p.x) - length);
-    return 1.0 - smoothstep(-aa, aa, distance);
-}
+    vec2 uv = (local + halfSize) / 0.48;
+    if (uHasTutorialTile)
+        return texture(uImage, uv) * uPattern;
 
-vec4 defaultBackground(vec2 world)
-{
-    float aa = 1.0 / uZoom;
-    vec4 result = vec4(0.0);
-    if (uShowTiles)
-    {
-        // The tile layer follows the camera's position while retaining world-space size and orientation.
-        vec2 cell = mat2(0.8734, -0.4872, 0.4872, 0.8734) * world / 90.0;
-        vec2 corner = abs(fract(cell + 0.5) - 0.5) - 0.42;
-        float distance = length(max(corner, 0.0)) + min(max(corner.x, corner.y), 0.0) - 0.07;
-        float coverage = 1.0 - smoothstep(-aa / 90.0, aa / 90.0, distance);
-        coverage = mix(0.96, coverage, smoothstep(1.0, 4.0, 90.0 * uZoom));
-        result = vec4(uPattern.rgb, uPattern.a * coverage);
-    }
-
-    if (uShapeMode != 2)
-    {
-        vec2 p = world + uShapeOffset;
-        vec2 triangle = p - vec2(-265.0, -165.0);
-        float edge = max(-triangle.y - 86.0, abs(triangle.x) + 0.65 * triangle.y - 53.0);
-        float triangleMask = 1.0 - smoothstep(-aa, aa, edge);
-        float purpleBand = band(p - vec2(375.0, 135.0), 0.32, 17.0, 510.0, aa);
-        float tealBand = band(p - vec2(510.0, -135.0), -0.35, 31.0, 390.0, aa);
-        bool singleColor = uShapeMode == 1;
-        result = over(result, singleColor ? uAccent.rgb : vec3(0.19, 0.13, 0.24), triangleMask * 0.42);
-        result = over(result, singleColor ? uAccent.rgb : vec3(0.22, 0.14, 0.27), purpleBand * 0.42);
-        result = over(result, singleColor ? uAccent.rgb : vec3(0.08, 0.21, 0.23), tealBand * 0.46);
-    }
-    return result;
+    // Source-only builds can still display a pattern before preparing game assets.
+    vec2 square = abs(fract(uv + 0.5) - 0.5);
+    return vec4(uPattern.rgb, uPattern.a * step(max(square.x, square.y), 0.15));
 }
 
 void main()
@@ -66,7 +39,7 @@ void main()
     float s = sin(uAngle);
     if (!uHasImage)
     {
-        color = defaultBackground(mat2(c, s, -s, c) * (vScreen * uViewport) / uZoom);
+        color = tutorialTile(vScreen * vec2(uViewport.x / uViewport.y, 1.0));
         return;
     }
 

@@ -31,6 +31,7 @@ public static class Program
         {
             ClientSize = new Vector2i(1280, 720),
             Title = "SharpFAI Player",
+            Icon = ApplicationIcon.Load(),
             StartVisible = false,
             APIVersion = new Version(4, 1),
             Profile = ContextProfile.Core,

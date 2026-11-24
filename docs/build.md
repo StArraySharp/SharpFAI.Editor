@@ -18,7 +18,7 @@ cd SharpFAI.Editor
 
 ## 2. 准备原版滤镜资源
 
-构建基础编辑器和播放器可跳过此步。要启用从 ADOFAI 导入的滤镜和纹理，在仓库根目录运行下列命令，选择游戏安装目录或它的 `*_Data` 目录。
+构建基础编辑器和播放器可跳过此步。要启用从 ADOFAI 导入的滤镜和教程背景平铺贴图，在仓库根目录运行下列命令，选择游戏安装目录或它的 `*_Data` 目录。
 
 ```powershell
 dotnet run --project .\build\PrepareGameAssets -c Release

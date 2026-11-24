@@ -9,6 +9,8 @@ internal sealed class BackgroundRenderer : IDisposable
 {
     private readonly int _program = SpriteRenderer.LinkProgram("Background.vert", "Background.frag");
     private readonly int _vao = GL.GenVertexArray();
+    private int _tutorialShapes;
+    private int? _tutorialTile;
     private int _image;
     private Vector2 _imageSize;
     private int _white;
@@ -26,18 +28,19 @@ internal sealed class BackgroundRenderer : IDisposable
         var key = (pixels.Pixels, smoothing, repeat);
         if (_textures.TryGetValue(key, out _image))
             return;
-        _image = ImageDecoder.Upload(pixels, generateMipmaps: smoothing, repeat: repeat);
+        _image = Upload(pixels, smoothing, repeat);
         _textures.Add(key, _image);
-        if (!smoothing)
-        {
-            GL.BindTexture(TextureTarget.Texture2D, _image);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
-        }
     }
 
-    public void Draw(LevelPlaybackSettings settings, Camera2D camera, Vector2 origin, ImageDecorationRenderer? sprites)
+    public void PrepareTutorial(LevelPlaybackSettings settings)
+    {
+        if (settings.ShowPatternTiles)
+            _tutorialTile ??= LoadTutorialTile();
+        if (settings.PatternShape != BackgroundShape.Disabled && _tutorialShapes == 0)
+            _tutorialShapes = SpriteRenderer.LinkProgram("TutorialShapes.vert", "TutorialShapes.frag");
+    }
+
+    public int Draw(LevelPlaybackSettings settings, Camera2D camera, Vector2 origin, ImageDecorationRenderer? sprites)
     {
         Vector2 viewport = new(camera.ViewportWidth, camera.ViewportHeight);
         Vector2 size = settings.Display == BackgroundDisplay.FitToScreen
@@ -49,34 +52,91 @@ internal sealed class BackgroundRenderer : IDisposable
         if (_image != 0 && sprites is not null)
         {
             DrawImage(sprites, settings.ImageTint, viewport, size, movement, angle, repeat);
-            return;
+            return 1;
         }
 
+        int draws = 0;
+        if (_image != 0 || settings.ShowPatternTiles)
+        {
+            DrawBackdrop(settings, viewport, size, movement, angle, repeat);
+            draws++;
+        }
+        if (_image == 0 && settings.PatternShape != BackgroundShape.Disabled)
+        {
+            DrawTutorialShapes(settings, viewport, camera.Position, angle);
+            draws++;
+        }
+        return draws;
+    }
+
+    private void DrawBackdrop(LevelPlaybackSettings settings, Vector2 viewport, Vector2 size, Vector2 movement,
+        float angle, bool repeat)
+    {
+        int texture = _image != 0 ? _image : _tutorialTile ??= LoadTutorialTile();
         GL.UseProgram(_program);
         GL.Uniform2(GL.GetUniformLocation(_program, "uViewport"), viewport);
         GL.Uniform2(GL.GetUniformLocation(_program, "uSize"), size);
         GL.Uniform2(GL.GetUniformLocation(_program, "uMovement"), movement);
         GL.Uniform4(GL.GetUniformLocation(_program, "uTint"), settings.ImageTint);
         GL.Uniform4(GL.GetUniformLocation(_program, "uPattern"), settings.PatternColor);
-        GL.Uniform4(GL.GetUniformLocation(_program, "uAccent"), settings.PatternAccent);
-        GL.Uniform1(GL.GetUniformLocation(_program, "uShowTiles"), settings.ShowPatternTiles ? 1 : 0);
-        GL.Uniform1(GL.GetUniformLocation(_program, "uShapeMode"), (int)settings.PatternShape);
-        GL.Uniform1(GL.GetUniformLocation(_program, "uZoom"), camera.Zoom);
-        GL.Uniform2(GL.GetUniformLocation(_program, "uShapeOffset"), (camera.Position - origin) * .5f);
         GL.Uniform1(GL.GetUniformLocation(_program, "uAngle"), angle);
         GL.Uniform1(GL.GetUniformLocation(_program, "uHasImage"), _image != 0 ? 1 : 0);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uHasTutorialTile"), _image == 0 && texture != 0 ? 1 : 0);
         GL.Uniform1(GL.GetUniformLocation(_program, "uRepeat"), repeat ? 1 : 0);
         GL.ActiveTexture(TextureUnit.Texture0);
-        GL.BindTexture(TextureTarget.Texture2D, _image);
+        GL.BindTexture(TextureTarget.Texture2D, texture);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uImage"), 0);
+        DrawTriangles(3);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    private void DrawTutorialShapes(LevelPlaybackSettings settings, Vector2 viewport, Vector2 position, float angle)
+    {
+        if (_tutorialShapes == 0)
+            PrepareTutorial(settings);
+        GL.UseProgram(_tutorialShapes);
+        // BGMovingCam uses a fixed orthographic size of 5. Scene coordinates are
+        // 1/100 of SharpFAI world coordinates and the shapes follow half the camera delta.
+        GL.Uniform2(GL.GetUniformLocation(_tutorialShapes, "uProjectionScale"), new Vector2(viewport.Y / viewport.X, 1f) / 5f);
+        GL.Uniform2(GL.GetUniformLocation(_tutorialShapes, "uParallaxOffset"), position / 200f);
+        GL.Uniform1(GL.GetUniformLocation(_tutorialShapes, "uAngle"), angle);
+        GL.Uniform1(GL.GetUniformLocation(_tutorialShapes, "uSingleColor"), settings.PatternShape == BackgroundShape.SingleColor ? 1 : 0);
+        GL.Uniform3(GL.GetUniformLocation(_tutorialShapes, "uShapeColor"), settings.PatternAccent.Xyz);
+        DrawTriangles(8 * 6 + 3);
+    }
+
+    private void DrawTriangles(int count)
+    {
         GL.Enable(EnableCap.Blend);
         GL.BlendFuncSeparate(BlendingFactorSrc.SrcAlpha, BlendingFactorDest.OneMinusSrcAlpha,
             BlendingFactorSrc.One, BlendingFactorDest.OneMinusSrcAlpha);
         GL.BindVertexArray(_vao);
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, count);
         GL.BindVertexArray(0);
         GL.Disable(EnableCap.Blend);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
         GL.UseProgram(0);
+    }
+
+    private static int LoadTutorialTile()
+    {
+        if (EmbeddedAssets.Read("Resources.Filters.tutorial_tile.png") is not { } bytes)
+            return 0;
+        var image = ImageDecoder.Decode(bytes);
+        ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
+        return Upload(image, smoothing: false, repeat: true);
+    }
+
+    private static int Upload(ImageDecoder.RgbaImage image, bool smoothing, bool repeat)
+    {
+        int texture = ImageDecoder.Upload(image, generateMipmaps: smoothing, repeat: repeat);
+        if (!smoothing)
+        {
+            GL.BindTexture(TextureTarget.Texture2D, texture);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+        }
+        return texture;
     }
 
     private void DrawImage(ImageDecorationRenderer sprites, Vector4 tint, Vector2 viewport,
@@ -111,6 +171,10 @@ internal sealed class BackgroundRenderer : IDisposable
             GL.DeleteTexture(texture);
         if (_white != 0)
             GL.DeleteTexture(_white);
+        if (_tutorialTile is > 0)
+            GL.DeleteTexture(_tutorialTile.Value);
+        if (_tutorialShapes != 0)
+            GL.DeleteProgram(_tutorialShapes);
         GL.DeleteVertexArray(_vao);
         GL.DeleteProgram(_program);
     }

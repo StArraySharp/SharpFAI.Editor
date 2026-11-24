@@ -1,5 +1,8 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Compression;
+using System.IO.Hashing;
+using System.Text;
 using NUnit.Framework;
 
 namespace SharpFAI.Editor.Tests;
@@ -52,6 +55,114 @@ public sealed class LevelArchiveTests
         var document = new EditorDocument(path);
         Assert.That(document.LastFloor, Is.EqualTo(2));
         Assert.That(File.Exists(Path.Combine(Path.GetDirectoryName(document.Path)!, "assets", "song.ogg")), Is.True);
+    }
+
+    [Test]
+    public void UsesVerifiedUnicodePathForAnUnmarkedKoreanFilename()
+    {
+        Encoding korean = CodePagesEncodingProvider.Instance.GetEncoding(949)!;
+        string source = CreateZip(korean, ("자료/에셋.png", "image"), ("level.adofai", "chart"));
+        string corrected = "谱面/日本語/에셋.png";
+        AddUnicodePath(source, corrected);
+
+        LevelArchive result = LevelArchive.Extract(source);
+
+        Assert.That(result.Levels, Is.EqualTo(new[] { "level.adofai" }));
+        Assert.That(File.ReadAllText(Path.Combine(result.DirectoryPath, "谱面", "日本語", "에셋.png")), Is.EqualTo("image"));
+    }
+
+    [Test]
+    public void UsesUnicodeDirectoryNamesInZip64Archives()
+    {
+        string source = CreateZip(("level.adofai", "chart"));
+        AddUnicodePath(source, "日本語.adofai");
+        byte[] data = File.ReadAllBytes(source);
+        int end = data.Length - 22;
+        uint directorySize = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(end + 12));
+        uint directoryOffset = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(end + 16));
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(end + 16), uint.MaxValue);
+        using (var writer = new BinaryWriter(File.Create(source)))
+        {
+            writer.Write(data.AsSpan(0, end));
+            writer.Write(0x06064b50u);
+            writer.Write(44UL);
+            writer.Write((ushort)45);
+            writer.Write((ushort)45);
+            writer.Write(0u);
+            writer.Write(0u);
+            writer.Write(1UL);
+            writer.Write(1UL);
+            writer.Write((ulong)directorySize);
+            writer.Write((ulong)directoryOffset);
+            writer.Write(0x07064b50u);
+            writer.Write(0u);
+            writer.Write((ulong)end);
+            writer.Write(1u);
+            writer.Write(data.AsSpan(end));
+        }
+
+        Assert.That(LevelArchive.Extract(source).Levels, Is.EqualTo(new[] { "日本語.adofai" }));
+    }
+
+    [Test]
+    public void UsesVerifiedNamesToInferTheEncodingForEntriesWithMissingMetadata()
+    {
+        Encoding korean = CodePagesEncodingProvider.Instance.GetEncoding(949)!;
+        string source = CreateZip(korean, ("자료.adofai", "chart"), ("에셋.png", "image"));
+        AddUnicodePath(source, "자료.adofai");
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("zh-CN");
+            LevelArchive result = LevelArchive.Extract(source);
+            Assert.That(File.ReadAllText(Path.Combine(result.DirectoryPath, "에셋.png")), Is.EqualTo("image"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void PreservesTheOriginalNameWhenUnicodePathIsStaleOrUtf8IsExplicit(bool utf8)
+    {
+        string path = utf8 ? "日本語.adofai" : "level.adofai";
+        string source = CreateZip((path, "chart"));
+        AddUnicodePath(source, "other.adofai", validChecksum: utf8);
+
+        Assert.That(LevelArchive.Extract(source).Levels, Is.EqualTo(new[] { path }));
+    }
+
+    [Test]
+    public void RejectsAnUnsafePathAfterUnicodeDecoding()
+    {
+        string source = CreateZip(("alias", "data"), ("level.adofai", "chart"));
+        AddUnicodePath(source, "資料/NUL.txt");
+        Assert.That(() => LevelArchive.Extract(source), Throws.TypeOf<InvalidDataException>());
+        AssertNoOutput();
+    }
+
+    [TestCase(936, "zh-CN", "谱面/节奏.adofai")]
+    [TestCase(950, "zh-TW", "譜面/節奏.adofai")]
+    [TestCase(932, "ja-JP", "譜面/リズム.adofai")]
+    [TestCase(949, "ko-KR", "자료/리듬.adofai")]
+    [TestCase(437, "en-US", "café.adofai")]
+    public void ReadsLegacyNamesWithoutEncodingMetadata(int codePage, string culture, string path)
+    {
+        Encoding encoding = CodePagesEncodingProvider.Instance.GetEncoding(codePage)!;
+        string source = CreateZip(encoding, (path, "chart"));
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+            Assert.That(LevelArchive.Extract(source).Levels,
+                Is.EqualTo(new[] { path.Replace('/', Path.DirectorySeparatorChar) }));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Test]
@@ -134,12 +245,38 @@ public sealed class LevelArchiveTests
         File.WriteAllBytes(source, data);
     }
 
+    private static void AddUnicodePath(string source, string name, bool validChecksum = true)
+    {
+        byte[] data = File.ReadAllBytes(source);
+        int central = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(data.Length - 6, 4));
+        int nameLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(central + 28, 2));
+        int extraLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(central + 30, 2));
+        int insert = central + 46 + nameLength + extraLength;
+        byte[] utf8 = Encoding.UTF8.GetBytes(name);
+        uint crc = Crc32.HashToUInt32(data.AsSpan(central + 46, nameLength));
+        byte[] extra = new byte[9 + utf8.Length];
+        BinaryPrimitives.WriteUInt16LittleEndian(extra, 0x7075);
+        BinaryPrimitives.WriteUInt16LittleEndian(extra.AsSpan(2), (ushort)(extra.Length - 4));
+        extra[4] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(extra.AsSpan(5), validChecksum ? crc : ~crc);
+        utf8.CopyTo(extra, 9);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(central + 30), (ushort)(extraLength + extra.Length));
+        uint directorySize = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(data.Length - 10));
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(data.Length - 10), directorySize + (uint)extra.Length);
+        using var output = File.Create(source);
+        output.Write(data.AsSpan(0, insert));
+        output.Write(extra);
+        output.Write(data.AsSpan(insert));
+    }
+
     private void AssertNoOutput() => Assert.That(Directory.EnumerateDirectories(_directory), Is.Empty);
 
-    private string CreateZip(params (string Name, string Content)[] entries)
+    private string CreateZip(params (string Name, string Content)[] entries) => CreateZip(null, entries);
+
+    private string CreateZip(Encoding? encoding, params (string Name, string Content)[] entries)
     {
         string path = Path.Combine(_directory, "levels.ZIP");
-        using ZipArchive zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        using ZipArchive zip = ZipFile.Open(path, ZipArchiveMode.Create, encoding);
         foreach (var (name, content) in entries)
         {
             ZipArchiveEntry entry = zip.CreateEntry(name);

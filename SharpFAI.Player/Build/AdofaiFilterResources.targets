@@ -189,7 +189,7 @@
         if (Directory.Exists(UnityAssets))
         {
             string textures = Path.Combine(UnityAssets, "Texture2D");
-            foreach (string file in new[] { "MotionBlurJitter.png", "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png" })
+            foreach (string file in new[] { "MotionBlurJitter.png", "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png", "tutorial_tile.png" })
             {
                 string path = Path.Combine(textures, file);
                 if (!File.Exists(path))

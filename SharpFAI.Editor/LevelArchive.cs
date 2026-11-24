@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.IO.Hashing;
+using System.Text;
 
 namespace SharpFAI.Editor;
 
@@ -9,6 +10,7 @@ internal sealed record LevelArchive(string DirectoryPath, IReadOnlyList<string> 
     private const long MaxFileBytes = 2L * 1024 * 1024 * 1024;
     private const long MaxTotalBytes = 4L * 1024 * 1024 * 1024;
     private const int MaxPaths = 16_384;
+    internal const int MaxPathLength = 1024;
 
     private static readonly char[] InvalidNameChars = ['<', '>', ':', '"', '|', '?', '*'];
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
@@ -26,21 +28,25 @@ internal sealed record LevelArchive(string DirectoryPath, IReadOnlyList<string> 
         using FileStream file = File.OpenRead(path);
         if (file.Length > MaxArchiveBytes)
             throw new InvalidDataException("The ZIP file exceeds the 4 GiB import limit.");
-        using var zip = new ZipArchive(file, ZipArchiveMode.Read);
+        // Latin-1 preserves the bytes of names without the ZIP UTF-8 flag.
+        using var zip = new ZipArchive(file, ZipArchiveMode.Read, leaveOpen: true, entryNameEncoding: Encoding.Latin1);
         if (zip.Entries.Count > MaxPaths)
             throw new InvalidDataException("The ZIP contains too many entries.");
+        string[] names = ZipEntryNames.Read(file, zip.Entries);
 
         var paths = new Dictionary<string, (string Path, bool Directory)>(StringComparer.OrdinalIgnoreCase);
         var files = new List<(ZipArchiveEntry Entry, string Path)>();
         var levels = new List<string>();
         long total = 0;
-        foreach (ZipArchiveEntry entry in zip.Entries)
+        for (int index = 0; index < zip.Entries.Count; index++)
         {
-            string name = entry.FullName.Replace('\\', '/');
+            ZipArchiveEntry entry = zip.Entries[index];
+            string decodedName = names[index];
+            string name = decodedName.Replace('\\', '/');
             int unixType = (entry.ExternalAttributes >> 16) & 0xf000;
             if (unixType is not (0 or 0x4000 or 0x8000) ||
                 (entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException($"The ZIP contains a link or special file: {entry.FullName}");
+                throw new InvalidDataException($"The ZIP contains a link or special file: {decodedName}");
 
             bool hasTrailingSlash = name.EndsWith('/');
             bool isDirectory = hasTrailingSlash || unixType == 0x4000 ||
@@ -48,8 +54,8 @@ internal sealed record LevelArchive(string DirectoryPath, IReadOnlyList<string> 
             if (hasTrailingSlash)
                 name = name[..^1];
             string[] parts = name.Split('/');
-            if (name.Length > 1024 || parts.Length > 32 || parts.Any(IsInvalidName))
-                throw new InvalidDataException($"The ZIP contains an invalid path: {entry.FullName}");
+            if (name.Length > MaxPathLength || parts.Length > 32 || parts.Any(IsInvalidName))
+                throw new InvalidDataException($"The ZIP contains an invalid path: {decodedName}");
 
             string relativePath = "";
             for (int i = 0; i < parts.Length; i++)
@@ -58,14 +64,14 @@ internal sealed record LevelArchive(string DirectoryPath, IReadOnlyList<string> 
                 bool directory = i < parts.Length - 1 || isDirectory;
                 if (!paths.TryAdd(relativePath, (relativePath, directory)) &&
                     (!directory || !paths[relativePath].Directory || paths[relativePath].Path != relativePath))
-                    throw new InvalidDataException($"The ZIP contains conflicting paths: {entry.FullName}");
+                    throw new InvalidDataException($"The ZIP contains conflicting paths: {decodedName}");
                 if (paths.Count > MaxPaths)
                     throw new InvalidDataException("The ZIP contains too many files and directories.");
             }
 
             long length = entry.Length;
             if (length < 0 || length > maxFileBytes || length > maxTotalBytes - total || (isDirectory && length != 0))
-                throw new InvalidDataException($"Invalid ZIP entry size or import limit exceeded: {entry.FullName}");
+                throw new InvalidDataException($"Invalid ZIP entry size or import limit exceeded: {decodedName}");
             if (isDirectory)
                 continue;
 
@@ -108,16 +114,16 @@ internal sealed record LevelArchive(string DirectoryPath, IReadOnlyList<string> 
                 while ((read = input.Read(buffer, 0, buffer.Length)) != 0)
                 {
                     if (read > remaining)
-                        throw new InvalidDataException($"The ZIP entry exceeds its declared size: {entry.FullName}");
+                        throw new InvalidDataException($"The ZIP entry exceeds its declared size: {relativePath}");
                     checksum.Append(buffer.AsSpan(0, read));
                     destination.Write(buffer, 0, read);
                     remaining -= read;
                 }
                 if (remaining != 0)
-                    throw new InvalidDataException($"The ZIP entry is shorter than its declared size: {entry.FullName}");
+                    throw new InvalidDataException($"The ZIP entry is shorter than its declared size: {relativePath}");
                 // ZipArchive may stop at the declared size even if the compressed data has more content.
                 if (checksum.GetCurrentHashAsUInt32() != entry.Crc32)
-                    throw new InvalidDataException($"The ZIP entry failed its CRC-32 check: {entry.FullName}");
+                    throw new InvalidDataException($"The ZIP entry failed its CRC-32 check: {relativePath}");
             }
         }
         catch

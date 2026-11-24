@@ -281,7 +281,7 @@ public sealed unsafe partial class LevelRenderer
             }
             else
             {
-                // Only the background image and flash belong to the background camera.
+                // Draw the background image or tutorial layers before compositing the main camera.
                 if (_backgroundPasses.Count > 0)
                     _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _backgroundPasses,
                         DrawBackgroundPlane, background: true, clearSource: clearSource);
@@ -463,8 +463,7 @@ public sealed unsafe partial class LevelRenderer
             }
             if (state.Pixels is not null || state.ShowsDefaultPattern)
             {
-                background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
-                DrawCalls++;
+                DrawCalls += background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
             }
         }
         DrawFlash(foreground: false);

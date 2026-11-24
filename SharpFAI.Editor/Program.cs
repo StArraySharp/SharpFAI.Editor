@@ -68,6 +68,7 @@ internal static class Program
                 ClientSize = new Vector2i(1440, 860),
                 MinimumClientSize = new Vector2i(960, 620),
                 Title = "SharpFAI Editor",
+                Icon = SharpFAI.Player.ApplicationIcon.Load(),
                 APIVersion = new Version(4, 1),
                 Profile = ContextProfile.Core,
                 Vsync = VSyncMode.On,

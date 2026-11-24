@@ -8,6 +8,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>Resources/SharpFAI.ico</ApplicationIcon>
 
     <!-- Single-file publish: shaders and textures are embedded, so the bundle stays self-contained -->
     <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
@@ -39,6 +40,7 @@
     <EmbeddedResource Include="Resources\planet.png" />
     <EmbeddedResource Include="Resources\particle.png" />
     <EmbeddedResource Include="Resources\DefaultNullDecoration.png" />
+    <EmbeddedResource Include="Resources\SharpFAI.png" />
     <EmbeddedResource Include="Resources\Floor\*.png" />
     <EmbeddedResource Include="Resources\PlayerIcons\*.png" />
   </ItemGroup>
