@@ -31,6 +31,8 @@ TestResults/
 /tools/
 /tmp-compare/
 /snapshot.ps1
+/release-atl.ps1
+/release.ps1
 /AGENTS.md
 
 # Tool logs

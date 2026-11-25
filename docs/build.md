@@ -47,7 +47,7 @@ dotnet run --project .\build\PrepareGameAssets -c Release -- --export-zip ".\ado
 dotnet run --project .\build\PrepareGameAssets -c Release -- --import-zip "D:\Archives\adofai-assets.zip"
 ```
 
-已打包的 `PrepareGameAssets.exe` 也接受这两个参数。省略路径会打开文件选择窗口。ZIP 包含构建用的纹理、GLSL、资源元数据和游戏程序集。
+省略路径会打开文件选择窗口。ZIP 包含构建用的纹理、GLSL、资源元数据和游戏程序集。
 
 ## 3. 编译与运行
 
@@ -62,7 +62,7 @@ dotnet run --project .\SharpFAI.Editor -c Release --no-build
 dotnet run --project .\SharpFAI.Editor -c Release --no-build -- --player --open "D:\Charts\example.adofai"
 ```
 
-Windows 发布包可直接运行 `.\SharpFAI.Editor.exe --player`。`--player --help` 会列出截图、视频导出和参数覆盖选项。
+Windows 发布包可在可执行文件名后加 `--player` 启动播放器。`--player --help` 会列出截图、视频导出和参数覆盖选项。
 
 ## 4. 测试和打包
 
@@ -72,25 +72,28 @@ dotnet test .\SharpFAI.Editor.slnx -c Release
 
 需要桌面 OpenGL 的集成测试可单独选择运行。涉及 MP4 编码的测试还需要 FFmpeg。
 
-在仓库根目录用 PowerShell 7 生成自包含单文件。默认发布 Windows x64、Linux x64、macOS x64 和 macOS arm64 编辑器，以及 Windows x64 资源准备工具：
+在仓库根目录用 PowerShell 7 生成自包含单文件。默认打包 Windows、Linux 和 macOS。
 
 | 文件 | 说明 |
 | --- | --- |
-| `publish/SharpFAI.Editor.exe` | Windows x64 |
+| `publish/SharpFAI.Editor-win-x64-<版本>.exe` | Windows x64 |
 | `publish/SharpFAI.Editor-linux-x64-<版本>` | Linux x64 |
 | `publish/SharpFAI.Editor-osx-x64-<版本>` | macOS x64 |
 | `publish/SharpFAI.Editor-osx-arm64-<版本>` | macOS arm64 |
-| `publish/PrepareGameAssets.exe` | Windows x64 资源准备工具 |
-| `publish/SharpFAI.Editor-universal-<版本>.zip` | 以上全部产物 |
+| `publish/SharpFAI.Editor-MultiPlatforms-<版本>.zip` | 四个可执行文件和字体许可证 |
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1
 ```
 
-用 `-Runtime` 只打包指定平台，可选 `win-x64`、`linux-x64`、`osx-x64`、`osx-arm64`。只选择非 Windows 平台时不会生成资源准备工具。
+用 `-Runtime` 打包指定平台，可选 `win-x64`、`linux-x64`、`osx-x64`、`osx-arm64`。
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1 -Runtime linux-x64,osx-arm64
 ```
 
-已生成资源准备工具时，可在源码工作区直接运行 `.\publish\PrepareGameAssets.exe`，或传入 `--game-dir` 指定游戏安装目录。工具将资源写入工作区的 `GameFiles`，供下一次构建使用。
+维护者可使用本地 `release.ps1` 发布。先提交并推送对应版本的源码。脚本从 Git 凭据助手读取 GitHub 登录凭据，从本地脚本配置读取 ATL 登录信息。它调用一次 `publish.ps1`，将各平台可执行文件上传到 GitHub Releases，将 MultiPlatforms ZIP 上传到 ATL。需要预览操作时加 `-WhatIf`。
+
+```powershell
+pwsh -NoProfile -File .\release.ps1 -Tag stable -Changelog "中文更新说明"
+```

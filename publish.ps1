@@ -9,8 +9,6 @@ $ErrorActionPreference = 'Stop'
 $publishDirectory = Join-Path $PSScriptRoot 'publish'
 $artifactsDirectory = Join-Path $PSScriptRoot 'SharpFAI.Editor/obj/single-file-publish'
 $editorProject = Join-Path $PSScriptRoot 'SharpFAI.Editor/SharpFAI.Editor.csproj'
-$assetProject = Join-Path $PSScriptRoot 'build/PrepareGameAssets/PrepareGameAssets.csproj'
-$assetRuntime = 'win-x64'
 
 $version = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup |
     ForEach-Object { $_.VersionPrefix } |
@@ -40,10 +38,11 @@ foreach ($packageSource in $Source) {
 }
 
 function Get-EditorFileName([string]$runtime) {
+    $fileName = "SharpFAI.Editor-$runtime-$version"
     if ($runtime -eq 'win-x64') {
-        return 'SharpFAI.Editor.exe'
+        return "$fileName.exe"
     }
-    return "SharpFAI.Editor-$runtime-$version"
+    return $fileName
 }
 
 function Publish-SingleFile([string]$project, [string]$name, [string]$runtime) {
@@ -107,12 +106,7 @@ try {
         $publishedFiles.Add((Move-PublishedFile $stagedExe (Get-EditorFileName $targetRuntime) $targetRuntime))
     }
 
-    if ($Runtime -contains $assetRuntime) {
-        $stagedExe = Publish-SingleFile $assetProject 'PrepareGameAssets' $assetRuntime
-        $publishedFiles.Add((Move-PublishedFile $stagedExe 'PrepareGameAssets.exe' $assetRuntime))
-    }
-
-    $zipPath = Join-Path $publishDirectory "SharpFAI.Editor-universal-$version.zip"
+    $zipPath = Join-Path $publishDirectory "SharpFAI.Editor-MultiPlatforms-$version.zip"
     $fontLicense = Join-Path $PSScriptRoot 'SharpFAI.Player/Resources/Fonts/NotoSansCJK-LICENSE.txt'
     Add-Type -AssemblyName System.IO.Compression
     $zipStream = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
