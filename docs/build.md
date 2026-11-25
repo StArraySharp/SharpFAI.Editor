@@ -14,7 +14,7 @@ git clone --recurse-submodules https://github.com/StArraySharp/SharpFAI.Editor.g
 cd SharpFAI.Editor
 ```
 
-如果已经克隆，可在仓库根目录执行 `git submodule update --init --recursive` 补齐 SharpFAI 和 Thrust。
+如果已经克隆，可在仓库根目录执行 `git submodule update --init --recursive` 补齐子模块。
 
 ## 2. 准备原版滤镜资源
 

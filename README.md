@@ -11,7 +11,7 @@ SharpFAI.Editor 是《冰与火之舞》（A Dance of Fire and Ice，ADOFAI）�
 
 ## 从源码运行
 
-使用 Windows x64、支持 OpenGL 4.1 的显卡驱动，以及 Git 和 .NET 10 SDK。克隆时一并获取 SharpFAI 和 Thrust 子模块。
+使用 Windows x64、支持 OpenGL 4.1 的显卡驱动，以及 Git 和 .NET 10 SDK。克隆时一并获取子模块。
 
 ```powershell
 git clone --recurse-submodules https://github.com/StArraySharp/SharpFAI.Editor.git

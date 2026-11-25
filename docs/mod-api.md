@@ -37,7 +37,7 @@ flowchart LR
 | 播放器适配层 | 在 `PlaybackEventBinder` 之后编译扩展时间线，经 `LevelRenderer` 的会话与渲染阶段应用输出 |
 | 导出适配层 | 通过独立的 `Export` 会话复用播放器能力，固定谱面、Mod 版本和有效配置 |
 
-公开 API 使用不可变记录与只读视图。砖块、事件和渲染资源以值或宿主管理的句柄暴露。ImGui、OpenTK、Thrust、Newtonsoft `JObject`、OpenGL 对象 ID 和真实设备句柄属于实现细节。设置面板通过宿主提供的控件描述构建，统一处理键盘、输入法、语言与 Web Mirror。
+公开 API 使用不可变记录与只读视图。砖块、事件和渲染资源以值或宿主管理的句柄暴露。ImGui、OpenTK、Newtonsoft `JObject`、OpenGL 对象 ID 和真实设备句柄属于实现细节。设置面板通过宿主提供的控件描述构建，统一处理键盘、输入法、语言与 Web Mirror。
 
 现有接入点包括 [编辑事务](../SharpFAI.Editor/EditorDocument.cs)、[事件定义](../SharpFAI.Editor/EditorCatalog.cs)、[编辑预览修订](../SharpFAI.Player/Engine/LevelRenderer.EditorRevision.cs)、[事件绑定](../SharpFAI.Player/Engine/Events/PlaybackEventBinder.cs)、[渲染流程](../SharpFAI.Player/Engine/LevelRenderer.Rendering.cs) 和 [视频导出](../SharpFAI.Player/VideoExporter.cs)。
 
