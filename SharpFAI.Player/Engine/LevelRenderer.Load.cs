@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using SharpFAI.Player.Engine.Events;
@@ -180,7 +181,7 @@ public sealed unsafe partial class LevelRenderer
         phaseClock.Restart();
 
         Level level = readLevel();
-        Level playbackLevel = PlaybackEventBinder.ForPlayback(level);
+        Level playbackLevel = editorSnapshot ? PlaybackEventBinder.ForEditorFloorTiming(level) : PlaybackEventBinder.ForPlayback(level);
         LevelPlaybackSettings settings = LevelPlaybackSettings.Read(level) with { SkipAudio = skipAudio };
         string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
 
@@ -190,7 +191,7 @@ public sealed unsafe partial class LevelRenderer
         List<Floor> floors = CreatePlaybackFloors(playbackLevel, settings);
         token.ThrowIfCancellationRequested();
         MarkPhase("计算时间轴");
-        PlaybackEvent[] events = editorSnapshot ? PlaybackEventBinder.BindForEditor(playbackLevel, level)
+        PlaybackEvent[] events = editorSnapshot ? PlaybackEventBinder.BindForEditor(level, token)
             : PlaybackEventBinder.BindForPlayback(playbackLevel);
         PlaybackTimeline timeline = BuildTimeline(playbackLevel, floors, events);
         var (floorPositionRemainders, trackStates, runtimeStates) = PlacePlaybackFloors(level, settings, events, floors, timeline, token);
@@ -222,14 +223,9 @@ public sealed unsafe partial class LevelRenderer
         MarkPhase("构建装饰与背景");
         var decorations = decorationsTask.GetAwaiter().GetResult();
         var backdrop = BackdropTimeline.Build(settings, events, floors, timeline.EntryTimes, timeline.FloorBpms,
-            directory, warnings);
+            directory, warnings, token: token);
         decorations?.BindTimedEffects(floors, timeline.FloorBpms, filters, backgroundFilters,
             cameraTimeline, backdrop, sceneEffects, trackRuntime);
-        if (!string.IsNullOrWhiteSpace(settings.BackgroundVideo))
-        {
-            warnings.Add("当前播放器暂不播放关卡背景视频");
-        }
-
         token.ThrowIfCancellationRequested();
         MarkPhase(floors.Count >= VisibleFloorIndex.MinimumResidentFloorCount ? "构建可见砖块索引" : "烘焙网格");
         var (materialOptions, visibility, geometry, guides) = BuildTrackGeometry(floors, trackStates, trackRuntime,
@@ -286,7 +282,25 @@ public sealed unsafe partial class LevelRenderer
 
     private static List<Floor> CreatePlaybackFloors(Level level, LevelPlaybackSettings settings)
     {
+        if (level.angles.Count == 0)
+            return [new Floor(0, -180, default) { angle = 180, bpm = ReadSetting(level, "bpm", 120.0), isCW = true }];
+
+        bool leadingMidspin = level.angles[0] == 999;
+        if (leadingMidspin)
+        {
+            // Existing charts may already contain a leading midspin. Geometry needs a
+            // finite heading at the origin; the original token still drives the chart clock.
+            var angles = (JArray)level.angleData.DeepClone();
+            angles[0] = 180;
+            level = new Level(new Dictionary<string, object>
+            {
+                ["angleData"] = angles,
+                ["settings"] = level.root["settings"]!,
+                ["actions"] = level.actions,
+            });
+        }
         var floors = level.CreateFloors(default, usePositionTrack: false, calculateLegacyEntryTimes: false);
+        if (leadingMidspin) floors[0].isMidspin = true;
         if (floors.Count < VisibleFloorIndex.MinimumFloorCount && settings.TileLength != 1f)
             foreach (var floor in floors) floor.position *= settings.TileLength;
         return floors;
@@ -415,9 +429,7 @@ public sealed unsafe partial class LevelRenderer
         _settings = result.Settings;
         _loadedDecorationTexturePercent = result.DecorationTexturePercent;
         _warnings.AddRange(result.Warnings);
-        _backdrop = result.Backdrop;
-        if (_backdrop.NeedsBackgroundRenderer)
-            _background = new BackgroundRenderer();
+        SetBackdrop(result.Backdrop);
         FloorCount = result.Floors.Count;
 
         // The GPU upload counts too: it runs on the main thread and is exactly the hitch the user feels
@@ -823,12 +835,13 @@ public sealed unsafe partial class LevelRenderer
     {
         CancelEditorRevision();
         ClearFloorChunks();
+        ClearEditorInsertedTrack();
         _officialRenderer?.ClearLevel();
         _trackGuideRenderer?.Dispose();
         _trackGuideRenderer = null;
         _background?.Dispose();
         _background = null;
-        _backdrop = null;
+        SetBackdrop(null);
         _uploadedBackdrop = null;
         _colorHistory?.Dispose();
         _colorHistory = null;

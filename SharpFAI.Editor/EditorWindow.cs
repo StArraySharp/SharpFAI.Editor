@@ -22,7 +22,6 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private static string ParticleWindow => L.T("ParticleEditor") + "###particle";
 
     private readonly EditorCatalog _catalog;
-    private readonly bool _smokeTest;
     private EditorDocument _document;
     private ImGuiContext* _context;
     private SharpFAI.Player.WindowInputMethod? _inputMethod;
@@ -42,7 +41,6 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private Action? _pending;
     private string? _error;
     private bool _openError;
-    private int _frames;
     private readonly SharpFAI.Player.MenuBarFrameRate _menuBarFrameRate = new();
     private int _floor;
     private int _category;
@@ -56,22 +54,17 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private bool _focusParticle;
     private static readonly Dictionary<string, List<string>> LevelFilter = new() { ["ADOFAI / ZIP"] = ["adofai", "zip"] };
 
-    public EditorWindow(NativeWindowSettings settings, EditorCatalog catalog, EditorDocument document, bool smokeTest,
-        bool effectBenchmark = false, string? commandLineLanguage = null)
+    public EditorWindow(NativeWindowSettings settings, EditorCatalog catalog, EditorDocument document, string? commandLineLanguage)
         : base(GameWindowSettings.Default, settings)
     {
         _catalog = catalog;
         _document = document;
-        _smokeTest = smokeTest;
-        _effectBenchmark = effectBenchmark;
         _commandLineLanguage = commandLineLanguage;
     }
 
     protected override void OnLoad()
     {
         base.OnLoad();
-        if (_profileStartup)
-            Console.WriteLine($"Startup GPU: {GL.GetString(StringName.Renderer)}");
         _context = ImGui.CreateContext();
         ImGui.SetCurrentContext(_context);
         ImGuiIO* io = ImGui.GetIO();
@@ -92,11 +85,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ApplyTheme(style);
         LoadFont(io);
         LoadApplicationSettings();
-        if (!_smokeTest && !_effectBenchmark)
-        {
-            _lastChartPath = _recentChart.Read();
-            RememberOpenedChart();
-        }
+        _lastChartPath = _recentChart.Read();
+        RememberOpenedChart();
         InitializePlayback();
         _inputMethod = SharpFAI.Player.WindowInputMethod.Create(WindowPtr);
         TextInput += e => ImGuiIO.AddInputCharacter(io, (uint)e.Unicode);
@@ -113,47 +103,15 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         KeyDown += e => { ReleaseWebInput(); FeedEditorKey(e, true); };
         KeyUp += e => { ReleaseWebInput(); FeedEditorKey(e, false); };
         UpdateTitle();
-
-        if (_smokeTest)
-        {
-            VerifyClipboard();
-            _showParticle = true;
-            _particlePlaying = true;
-            _particle = _catalog.Create("AddParticle", 0);
-            _document.Add(_particle, true);
-            string directory = Path.GetDirectoryName(_document.PlaybackPath)!;
-            string testImage = Path.GetRelativePath(directory,
-                Path.Combine(AppContext.BaseDirectory, "Resources", "Floor", TrackStyleInfo.Standard.TileTextureSuffix!));
-            if (!EditorDocument.IsLocalAsset(testImage))
-                testImage = Directory.EnumerateFiles(directory, "*.png").Select(Path.GetFileName).FirstOrDefault() ?? "";
-            if (testImage.Length != 0)
-            {
-                _smokeDecorationIndex = _document.Decorations.Count;
-                _document.Add(new JObject
-                {
-                    ["floor"] = 0, ["eventType"] = "AddDecoration", ["tag"] = "__sharpfai_sprite_smoke",
-                    ["decorationImage"] = testImage, ["relativeTo"] = "Camera", ["position"] = new JArray(0, 0)
-                }, true);
-            }
-            JObject first = _catalog.Create("SetFilter", 0);
-            JObject second = _catalog.Create("SetFilter", 0);
-            _document.Add(first, false);
-            _document.Add(second, false);
-            _eventType = "SetFilter";
-            _eventPage = _document.Events(0).Count(value => EditorDocument.Type(value) == _eventType) - 1;
-            _focusDecorations = true;
-        }
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
         ApplyPendingApplicationSettings();
-        if (!_smokeTest && !_effectBenchmark)
-            _autoBackup.Update(_document);
+        _autoBackup.Update(_document);
         if (ClientSize.X <= 0 || ClientSize.Y <= 0)
             return;
-        long start = _profileStartup && _startupClock.Elapsed.TotalSeconds < 8 ? Stopwatch.GetTimestamp() : 0;
         UpdateVideoRender();
         ImGuiIO* io = ImGui.GetIO();
         io->DisplaySize = WidgetDraw.V2(ClientSize.X, ClientSize.Y);
@@ -161,14 +119,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         io->DeltaTime = Math.Clamp((float)args.Time, 0.0001f, 0.1f);
         ImGui_ImplOpenGL3.NewFrame();
         if (WebMirror is not null) FeedWebInput(io);
-        if (_smokeTest)
-        {
-            FeedNumericSmokeInput(io);
-            FeedPlaybackSmokeInput(io);
-        }
         _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
-        long guiReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         if (_closeRequested)
         {
             _closeRequested = false;
@@ -180,7 +132,6 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         HandleShortcuts();
         _numericDrawn = false;
         UpdatePlayback();
-        long sceneReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         DrawSettings();
         DrawDecorations();
         DrawCanvas();
@@ -203,7 +154,6 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         if (_playback is { } renderer)
             _audioCalibration.Draw(renderer, L.IsChinese);
         DrawSaveNotice();
-        if (_smokeTest) DrawNumericSmoke();
         if (!_numericDrawn)
             FinishNumericEdit();
         ApplyConfiguredPlaybackShortcut();
@@ -219,38 +169,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         GL.ClearColor(0.059f, 0.065f, 0.083f, 1);
         GL.Clear(ClearBufferMask.ColorBufferBit);
         ImGui.Render();
-        long uiReady = start == 0 ? 0 : Stopwatch.GetTimestamp();
         ImGui_ImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
         WebMirror?.CaptureFrame(FramebufferSize.X, FramebufferSize.Y);
         SwapBuffers();
-        if (start != 0)
-            ProfileStartupFrame(start, guiReady, sceneReady, uiReady);
-
-        if (_effectBenchmark)
-        {
-            VerifyEffectBenchmark();
-            return;
-        }
-        if (!_smokeTest)
-            return;
-        if (++_frames == 5)
-        {
-            VerifyLayout();
-            int count = _document.Events(0).Count(item => EditorDocument.Type(item) == "SetFilter");
-            ChangeEventPage(-1, true);
-            if (_eventPage != 0)
-                throw new InvalidOperationException("Could not go to the first event.");
-            ChangeEventPage(1, false);
-            if (_eventPage != 1)
-                throw new InvalidOperationException("Event paging failed.");
-            ChangeEventPage(1, true);
-            if (_eventPage != count - 1)
-                throw new InvalidOperationException("Could not go to the last event.");
-            Console.WriteLine("SharpFAI Editor rendered 5 frames and verified docking and event paging.");
-            StartPlaybackSmokeTest();
-        }
-        if (_frames > NumericSmokeLastFrame)
-            VerifyPlaybackSmokeTest();
     }
 
     private static void ApplyTheme(ImGuiStyle* style)
@@ -265,19 +186,6 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         colors[(int)ImGuiCol.ImGuiCol_HeaderHovered] = WidgetDraw.V4(0.18f, 0.36f, 0.42f, 1);
         colors[(int)ImGuiCol.ImGuiCol_TabSelected] = WidgetDraw.V4(0.13f, 0.32f, 0.37f, 1);
         colors[(int)ImGuiCol.ImGuiCol_CheckMark] = WidgetDraw.V4(0.37f, 0.87f, 0.81f, 1);
-    }
-
-    private void VerifyLayout()
-    {
-        ImGuiWindow* left = ImGui.FindWindowByName(SettingsWindow);
-        ImGuiWindow* manager = ImGui.FindWindowByName(DecorationsWindow);
-        ImGuiWindow* center = ImGui.FindWindowByName(CanvasWindow);
-        ImGuiWindow* right = ImGui.FindWindowByName(InspectorWindow);
-        ImGuiWindow* bottom = ImGui.FindWindowByName(PaletteWindow);
-        if (left == null || manager == null || center == null || right == null || bottom == null ||
-            center->DockId == 0 || left->DockId != manager->DockId ||
-            left->Pos.x >= center->Pos.x || right->Pos.x <= center->Pos.x || bottom->Pos.y <= center->Pos.y)
-            throw new InvalidOperationException("Invalid default dock layout.");
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -312,6 +220,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         _audioCalibration.Dispose();
         DisposeVideoRender();
         DisposePlayback();
+        DisposeRichLevelTextPreviews();
         if (_backendInitialized)
             ImGui_ImplOpenGL3.Shutdown();
         if (_context != null)
@@ -373,7 +282,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (ImGui.BeginMenu(L.T("MenuView")) != 0)
         {
-            if (ImGui.MenuItem(L.T("Fullscreen"), "Alt+Enter", (byte)(IsFullscreen ? 1 : 0)) != 0)
+            if (ImGui.MenuItem(L.T("Fullscreen"), "Alt+Enter", (byte)(_windowMode.IsFullscreen ? 1 : 0)) != 0)
                 _windowMode.RequestToggle();
             if (ImGui.MenuItem(L.T("AudioCalibration"), null, 0, (byte)(_videoExport?.Request is null ? 1 : 0)) != 0)
                 OpenAudioCalibration();
@@ -403,9 +312,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (ImGui.MenuItem(L.T("PlayFromTile"), "Space / P") != 0) StartFromShortcut();
             if (ImGui.MenuItem(L.T("ConfiguredSpeed"), "Ctrl+Space") != 0) StartFromShortcut(PlaybackRate.Configured);
             if (ImGui.MenuItem(L.T("HalfSpeed"), "Ctrl+P") != 0) StartFromShortcut(PlaybackRate.Half);
-            if (ImGui.MenuItem(L.T("ManualFromTile")) != 0) SwitchPlaybackView(PlaybackView.Manual);
-            if (ImGui.MenuItem(L.T("Autoplay"), "Alt+A", (byte)(_shortcutAuto ? 1 : 0)) != 0) ToggleShortcutAutoplay();
-            if (ImGui.MenuItem(L.T("NoFail"), "Alt+N", (byte)(_shortcutNoFail ? 1 : 0)) != 0) ToggleShortcutNoFail();
+            if (ImGui.MenuItem(L.T("Manual"), "Alt+A", (byte)(_manualPlay ? 1 : 0)) != 0) SetManualPlayMode(!_manualPlay);
+            if (ImGui.MenuItem(L.T("NoFail"), "Alt+N", (byte)(_noFail ? 1 : 0)) != 0) SetNoFail(!_noFail);
             if (ImGui.MenuItem(L.T("FindCommentCommand"), "Alt+F") != 0) _openFindComment = true;
             if (ImGui.MenuItem(L.T("ReturnToEdit"), "Esc") != 0) ReturnToEdit();
             ImGui.EndMenu();

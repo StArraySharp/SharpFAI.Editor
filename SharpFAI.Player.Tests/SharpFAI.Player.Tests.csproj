@@ -24,6 +24,7 @@
 
     <ItemGroup>
         <Using Include="NUnit.Framework"/>
+        <EmbeddedResource Include="Fixtures/Audio/*.mp3" />
     </ItemGroup>
 
     <ItemGroup>

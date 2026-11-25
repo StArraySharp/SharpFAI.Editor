@@ -11,14 +11,6 @@ public static class Program
 {
     private static void Main(string[] args)
     {
-        if (args.Length == 1 && args[0] == "--filter-report")
-        {
-            Console.WriteLine("Component\tConversion\tResources\tGL\tVisual\tDetail");
-            foreach (string row in Engine.Filters.GeneratedFilterRegistry.Coverage)
-                Console.WriteLine(row);
-            return;
-        }
-
         // A long-running player benefits from SustainedLowLatency: fewer disruptive Gen2 pauses
         GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
 
@@ -150,23 +142,6 @@ public static class Program
                          System.Globalization.CultureInfo.InvariantCulture, out double captureTime))
             {
                 window.CaptureTime = captureTime;
-                i++;
-            }
-            else if (args[i] is "--convert-shaders")
-            {
-                // 需要 GL 上下文，所以延后到窗口 Run 之后由 PlayerWindow 执行
-                // Needs a GL context, so PlayerWindow runs it once the window is current
-                if (i + 2 < args.Length)
-                {
-                    window.PendingShaderConversion = (args[i + 1], args[i + 2]);
-                    i += 2;
-                }
-            }
-            else if (args[i] is "--verify-shaders")
-            {
-                // 校验某个目录下所有 .vert/.frag 对能否被引擎编译
-                // Verify every .vert/.frag pair under a directory compiles
-                window.PendingShaderVerification = args[i + 1];
                 i++;
             }
         }

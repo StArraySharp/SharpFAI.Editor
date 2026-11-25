@@ -351,7 +351,7 @@ public sealed unsafe partial class LevelRenderer
         ImageDecorationRenderer? syncedSprites = tilesOnly ? null : PrepareAndDrawBackDecorations();
 
         EnsureVisibleFloors();
-        if (_activeFloorChunks is null && _officialRenderer is not { HasGeometry: true })
+        if (_activeFloorChunks is null && _officialRenderer is not { HasGeometry: true } && EditorInsertedFloorCount == 0)
         {
             if (!tilesOnly)
                 DrawFlash(foreground: true);
@@ -379,10 +379,12 @@ public sealed unsafe partial class LevelRenderer
                 _chunkDrawCalls += DrawFloorsWithDecorations(chunks[i].Renderer, chunks[i].Floors[0]);
             }
         }
-        else
+        else if (_officialRenderer is not null)
         {
-            _chunkDrawCalls = DrawFloorsWithDecorations(_officialRenderer!, 0);
+            _chunkDrawCalls = DrawFloorsWithDecorations(_officialRenderer, 0);
         }
+        if (_editorInsertedTrack is { HasGeometry: true } inserted)
+            _chunkDrawCalls += DrawFloors(inserted, 0, int.MaxValue);
         while (syncedSprites is not null && nextSynced < syncedSprites.SyncedCount)
             DrawCalls += syncedSprites.DrawSyncedFloor(_imageDecorations!, _camera, ref nextSynced);
 
@@ -445,6 +447,8 @@ public sealed unsafe partial class LevelRenderer
     {
         if (_background is null || _backdrop is not { } backdrop)
             return true;
+        if (_backgroundVideo is not null && backdrop.Video is { } video && BackgroundVideoTime(video) >= 0)
+            return false;
         var state = backdrop.BackgroundAt(_playTime);
         return state.Pixels is null && !state.ShowsDefaultPattern &&
             (!_visualSettings.ScreenFlash || backdrop.FlashAt(_playTime, foreground: false).W <= 0f);
@@ -454,6 +458,7 @@ public sealed unsafe partial class LevelRenderer
     {
         if (_background is { } background && _backdrop is { } backdrop)
         {
+            bool videoVisible = DrawBackgroundVideo(background);
             var state = backdrop.BackgroundAt(_playTime);
             var settings = state.Settings;
             if (_uploadedBackdrop != state)
@@ -461,7 +466,7 @@ public sealed unsafe partial class LevelRenderer
                 background.SetImage(state.Pixels, settings.ImageSmoothing, IsBackgroundRepeated(settings));
                 _uploadedBackdrop = state;
             }
-            if (state.Pixels is not null || state.ShowsDefaultPattern)
+            if (state.Pixels is not null || state.ShowsDefaultPattern && !videoVisible)
             {
                 DrawCalls += background.Draw(settings, _camera, _cameraOrigin, state.Pixels is null ? null : DecorationShader());
             }

@@ -1,18 +1,25 @@
-using Newtonsoft.Json.Linq;
+using System.Diagnostics;
 
 namespace SharpFAI.Editor;
 
 internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider clock)
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan CaptureBudget = TimeSpan.FromMilliseconds(2);
     private sealed record Target(EditorDocument Document, string? OriginalPath, string FileName);
     private sealed record Result(Target Target, int Version, string Destination);
+    private sealed record Capture(int Version, IEnumerator<(string Text, bool Last)> Chunks) : IDisposable
+    {
+        public List<string> Data { get; } = [];
+        public void Dispose() => Chunks.Dispose();
+    }
 
     private Target? _target;
     private long _lastCheck;
     private int _backedUpVersion = -1;
     private string? _destination;
     private Task<Result?>? _write;
+    private Capture? _capture;
 
     public void Update(EditorDocument document)
     {
@@ -21,6 +28,7 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
         Target? target = _target;
         if (target is null || target.Document != document || target.OriginalPath != document.Path)
         {
+            DiscardCapture();
             string name = Path.GetFileNameWithoutExtension(document.Path) ?? "untitled";
             if (name.Length > 100)
                 name = name[..(char.IsHighSurrogate(name[99]) ? 99 : 100)];
@@ -30,20 +38,31 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
             _destination = null;
         }
 
-        if (_write is not null || clock.GetElapsedTime(_lastCheck, now) < Interval)
+        if (_write is not null)
             return;
-        _lastCheck = now;
-        if (!document.Modified || document.ChangeVersion == _backedUpVersion)
-            return;
-
-        string? previous = _destination;
-        int version = document.ChangeVersion;
-        JObject snapshot = document.CaptureBackup();
-        _write = Task.Run(() => Write(target, version, snapshot, previous));
+        if (_capture is { } capture && capture.Version != document.ChangeVersion)
+            DiscardCapture();
+        if (_capture is null)
+        {
+            if (clock.GetElapsedTime(_lastCheck, now) < Interval) return;
+            if (document.ChangeVersion == _backedUpVersion || !document.HasChangesToBackUp())
+            {
+                _lastCheck = now;
+                return;
+            }
+            _capture = new(document.ChangeVersion, document.BackupChunks().GetEnumerator());
+        }
+        CaptureSnapshot(target, CaptureBudget);
     }
 
     internal void CompleteWrite(bool wait)
     {
+        if (wait && _capture is { } capture && _target is { } target)
+        {
+            if (target.Document.ChangeVersion == capture.Version && target.Document.Path == target.OriginalPath)
+                CaptureSnapshot(target, TimeSpan.MaxValue);
+            else DiscardCapture();
+        }
         if (_write is null || !wait && !_write.IsCompleted)
             return;
         var result = _write.GetAwaiter().GetResult();
@@ -55,7 +74,31 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
         }
     }
 
-    private Result? Write(Target target, int version, JObject snapshot, string? previous)
+    private void CaptureSnapshot(Target target, TimeSpan budget)
+    {
+        var capture = _capture!;
+        long started = Stopwatch.GetTimestamp();
+        while (capture.Chunks.MoveNext())
+        {
+            var (text, last) = capture.Chunks.Current;
+            capture.Data.Add(text);
+            if (last) break;
+            if (Stopwatch.GetElapsedTime(started) >= budget) return;
+        }
+
+        DiscardCapture();
+        _lastCheck = clock.GetTimestamp();
+        string? previous = _destination;
+        _write = Task.Run(() => Write(target, capture.Version, capture.Data, previous));
+    }
+
+    private void DiscardCapture()
+    {
+        _capture?.Dispose();
+        _capture = null;
+    }
+
+    private Result? Write(Target target, int version, IReadOnlyList<string> snapshot, string? previous)
     {
         string fallback = Path.Combine(fallbackDirectory, target.FileName);
         string? destination = previous ?? (target.OriginalPath is { } original
@@ -64,7 +107,7 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
         {
             try
             {
-                EditorFileStorage.WriteChart(destination, snapshot, overwrite: destination == previous);
+                Save(destination);
                 return new Result(target, version, destination);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -76,7 +119,7 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
         try
         {
             Directory.CreateDirectory(fallbackDirectory);
-            EditorFileStorage.WriteChart(fallback, snapshot, overwrite: fallback == previous);
+            Save(fallback);
             return new Result(target, version, fallback);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -84,5 +127,10 @@ internal sealed class EditorAutoBackup(string fallbackDirectory, TimeProvider cl
             Console.Error.WriteLine($"[Editor] Could not write an automatic backup: {error.Message}");
             return null;
         }
+
+        void Save(string path) => EditorFileStorage.WriteAtomically(path, writer =>
+        {
+            foreach (string chunk in snapshot) writer.Write(chunk);
+        }, overwrite: path == previous);
     }
 }

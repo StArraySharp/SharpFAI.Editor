@@ -25,6 +25,14 @@ internal abstract class PlaybackEvent
 
     public bool IsActive => Active != false;
 
+    internal PlaybackEvent WithFloor(int floor)
+    {
+        if (Floor == floor) return this;
+        var copy = (PlaybackEvent)MemberwiseClone();
+        copy.Floor = floor;
+        return copy;
+    }
+
     public T Enabled<T>(string property, T value) => Disabled?.TryGetValue(property, out bool disabled) == true && disabled
         ? default! : value;
 }

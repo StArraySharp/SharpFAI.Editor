@@ -61,18 +61,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     public string? FireColorFromCommandLine { get; set; }
     public string? IceColorFromCommandLine { get; set; }
 
-    /// <summary>
-    /// Command-line shader conversion request: (game shader root, output directory). Runs once a GL
-    /// context is current, then closes the window.
-    /// </summary>
-    public (string ShaderRoot, string OutputDirectory)? PendingShaderConversion { get; set; }
-
-    /// <summary>
-    /// Command-line shader verification request: a directory of <c>.vert</c>/<c>.frag</c> pairs.
-    /// Runs once a GL context is current, then closes the window.
-    /// </summary>
-    public string? PendingShaderVerification { get; set; }
-
     /// <summary>Frames still to render before the capture fires; -1 means "not armed yet".</summary>
     private int _captureCountdown = -1;
 
@@ -326,21 +314,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
             OpenLevel(PendingLevelPath);
             PendingLevelPath = null;
         }
-
-        // 着色器转换需要当前 GL 上下文，所以放在 OnLoad 末尾；完成后直接关闭窗口
-        // Shader conversion needs a current GL context, so it runs last in OnLoad and then closes
-        if (PendingShaderConversion is { } conversion)
-        {
-            PendingShaderConversion = null;
-            RunShaderConversion(conversion.ShaderRoot, conversion.OutputDirectory);
-            return;
-        }
-
-        if (PendingShaderVerification is { } verification)
-        {
-            PendingShaderVerification = null;
-            RunShaderVerification(verification);
-        }
     }
 
     private void InitializeImGui()
@@ -362,72 +335,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         MouseMove += _ => FeedMouse();
         MouseDown += _ => FeedMouse();
         MouseUp += _ => FeedMouse();
-    }
-
-    /// <summary>
-    /// 校验目录下所有着色器对能否被引擎编译，结果打印到标准输出，然后退出。
-    /// Verifies every shader pair under a directory compiles, prints the report, then exits.
-    /// </summary>
-    private void RunShaderVerification(string shaderDirectory)
-    {
-        try
-        {
-            ConversionReport report = ShaderConverter.VerifyDirectory(shaderDirectory);
-
-            Console.Out.WriteLine(
-                $"verify: {report.SuccessCount} compiled, {report.FailureCount} failed, " +
-                $"{report.Entries.Count} total");
-
-            foreach (ConversionEntry entry in report.Entries)
-            {
-                if (entry.Compiled)
-                {
-                    continue;
-                }
-
-                Console.Out.WriteLine($"FAIL {entry.File}");
-                Console.Out.WriteLine("  " + (entry.Error ?? "unknown").Replace("\n", "\n  "));
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"shader verification failed: {ex.Message}");
-        }
-
-        Close();
-    }
-
-    /// <summary>
-    /// 批量转换游戏 shader 并校验编译，结果打印到标准输出，然后退出。
-    /// Converts the game's shaders, verifies each pair compiles, prints the report, then exits.
-    /// </summary>
-    private void RunShaderConversion(string shaderRoot, string outputDirectory)
-    {
-        try
-        {
-            ConversionReport report = ShaderConverter.ConvertGameShaders(shaderRoot, outputDirectory);
-
-            Console.Out.WriteLine(
-                $"shaders: {report.SuccessCount} compiled, {report.FailureCount} failed, " +
-                $"{report.Entries.Count} total");
-
-            foreach (ConversionEntry entry in report.Entries)
-            {
-                if (entry.Compiled)
-                {
-                    continue;
-                }
-
-                Console.Out.WriteLine($"FAIL {entry.File}");
-                Console.Out.WriteLine("  " + (entry.Error ?? "unknown").Replace("\n", "\n  "));
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"shader conversion failed: {ex.Message}");
-        }
-
-        Close();
     }
 
     protected override void OnUnload()
@@ -543,7 +450,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
 
         ImGui_ImplOpenGL3.RenderDrawData(drawData);
-        UpdateCapture(drawData);
+        UpdateCapture();
         SwapBuffers();
     }
 
@@ -585,7 +492,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     /// Drive the command-line capture: wait for the load to finish, give the renderer a few frames to
     /// settle, apply the requested zoom, then write the PNG and close the window.
     /// </summary>
-    private void UpdateCapture(ImDrawData* drawData)
+    private void UpdateCapture()
     {
         if (CapturePath is null || _captureDone)
         {
@@ -646,15 +553,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         {
             FrameCapture.Save(CapturePath, FramebufferSize.X, FramebufferSize.Y);
             Console.Out.WriteLine($"captured {FramebufferSize.X}x{FramebufferSize.Y} -> {CapturePath}");
-            foreach ((string phase, double milliseconds) in _renderer.LoadTimings)
-            {
-                Console.Out.WriteLine(FormattableString.Invariant($"load {phase} {milliseconds:F1}ms"));
-            }
-            int uiCommands = CountOverlayDrawCommands(drawData);
-            Console.Out.WriteLine(
-                $"floors={_renderer.FloorCount} floorBatches={_renderer.FloorBatchCount} " +
-                $"floorDrawCalls={_renderer.FloorDrawCalls} sceneDrawCalls={_renderer.DrawCalls} " +
-                $"uiDrawCommands={uiCommands}");
         }
         catch (Exception ex)
         {
@@ -662,25 +560,6 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
 
         Close();
-    }
-
-    private static int CountOverlayDrawCommands(ImDrawData* drawData)
-    {
-        int count = 0;
-        for (int i = 0; i < drawData->CmdListsCount; i++)
-        {
-            ImDrawList* list = (ImDrawList*)drawData->CmdLists.Data[i];
-            for (int j = 0; j < list->CmdBuffer.Size; j++)
-            {
-                ImDrawCmd* command = &list->CmdBuffer.Data[j];
-                if (command->ElemCount != 0 && command->UserCallback == null)
-                {
-                    count++;
-                }
-            }
-        }
-
-        return count;
     }
 
     private float DrawMenuBar(bool rendering)
@@ -717,7 +596,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
 
         if (ImGui.BeginMenu("视图") != 0)
         {
-            if (ImGui.MenuItem("全屏", "Alt+Enter", (byte)(IsFullscreen ? 1 : 0)) != 0)
+            if (ImGui.MenuItem("全屏", "Alt+Enter", (byte)(_windowMode.IsFullscreen ? 1 : 0)) != 0)
                 _windowMode.RequestToggle();
 
             if (rendering)

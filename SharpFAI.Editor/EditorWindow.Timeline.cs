@@ -98,13 +98,6 @@ internal sealed unsafe partial class EditorWindow
                 renderer.IsPlaying, _lastTimelinePosition, out int floor))
             SeekTimeline(renderer, _chartTimeline.Playhead, editing, floor);
         _lastTimelinePosition = _chartTimeline.Playhead;
-        if (_smokeTest && _smokePlaybackStage == 49 && _smokeTimelineFloor >= 0)
-        {
-            ImVec2 min = ImGui.GetItemRectMin(), max = ImGui.GetItemRectMax();
-            double fraction = (timing.EntryTimes[_smokeTimelineFloor] - _chartTimeline.ViewStart) / _chartTimeline.ViewLength;
-            _smokeTimelineMarker = WidgetDraw.V2(min.x + (max.x - min.x) * (float)fraction,
-                min.y + _chartTimeline.RulerHeight + _chartTimeline.TrackHeight * .5f);
-        }
     }
 
     private void DrawTimeSignaturePopup(EditorBeatClock clock, EditorTimeSignatures meters)

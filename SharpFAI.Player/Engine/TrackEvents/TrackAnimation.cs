@@ -48,7 +48,10 @@ internal readonly record struct TrackAnimationWindow(
             Noise(i, 2) * MathHelper.DegreesToRadians(75f));
     }
 
-    public void Apply(double time, bool hidePassed, ref FloorRenderTransform transform, ref float opacity)
+    public bool FadeReplacesOpacity(double opacityStart) =>
+        Appear == TrackAnimation.Fade && AppearStart > opacityStart;
+
+    public void Apply(double time, bool hidePassed, double opacityStart, ref FloorRenderTransform transform, ref float opacity)
     {
         if (hidePassed && time >= NextEntry)
         {
@@ -56,7 +59,12 @@ internal readonly record struct TrackAnimationWindow(
             return;
         }
 
-        if (Appear != TrackAnimation.None && time < AppearStart + AppearDuration)
+        if (FadeReplacesOpacity(opacityStart))
+        {
+            // FloorSetup sets the opacity to zero, then the appear effect tweens it to one.
+            opacity = Progress(time, AppearStart, AppearDuration);
+        }
+        else if (Appear is not (TrackAnimation.None or TrackAnimation.Fade) && time < AppearStart + AppearDuration)
         {
             float elapsed = Progress(time, AppearStart, AppearDuration);
             float remaining = 1f - MathF.Sin(elapsed * MathF.PI * 0.5f);
@@ -71,10 +79,6 @@ internal readonly record struct TrackAnimationWindow(
                 TrackAnimation.Rise => Fall(transform, elapsed, -1f),
                 _ => transform,
             };
-            if (Appear == TrackAnimation.Fade)
-            {
-                opacity *= elapsed;
-            }
         }
 
         if (Disappear == TrackAnimation.None || time < DisappearStart || double.IsPositiveInfinity(DisappearStart))

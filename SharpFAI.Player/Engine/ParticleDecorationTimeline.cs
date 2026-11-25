@@ -95,8 +95,11 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
             float progress = elapsed / lifetime;
             float angle = Next(ref state) * MathHelper.DegreesToRadians(settings.Arc);
             float radial = MathF.Sqrt(Next(ref state)) * settings.Radius;
-            Vector2 position = settings.Rectangle ? new(Next(ref state) - .5f, Next(ref state) - .5f) :
-                new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radial;
+            // SetScale writes the rectangle's authored scale in Unity units. Only
+            // the circle radius and velocity are expressed relative to a track tile.
+            Vector2 position = settings.Rectangle
+                ? new Vector2(Next(ref state) - .5f, Next(ref state) - .5f) * 100f
+                : new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * (radial * tileSize);
             Vector2 velocity = new(Mix(settings.VelocityMin.X, settings.VelocityMax.X, Next(ref state)),
                 Mix(settings.VelocityMin.Y, settings.VelocityMax.Y, Next(ref state)));
             // Circle emits radially at the prefab's 5 Unity units/s; Rectangle emits along Z.

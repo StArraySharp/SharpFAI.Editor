@@ -259,7 +259,8 @@ internal sealed class RuntimeTrackTimeline
     {
         ref readonly FloorTrackState basis = ref _baseline[floor];
         FloorRenderTransform transform = basis.Transform;
-        float opacity = basis.Hidden ? 0f : basis.Opacity;
+        float opacity = basis.Opacity;
+        double opacityStart = double.NegativeInfinity;
         ref readonly Motion motion = ref CollectionsMarshal.GetValueRefOrNullRef(_motion, floor);
         if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(in motion))
         {
@@ -267,11 +268,14 @@ internal sealed class RuntimeTrackTimeline
                 new Vector2(motion.X?.At(time) ?? transform.Offset.X, motion.Y?.At(time) ?? transform.Offset.Y),
                 new Vector2(motion.ScaleX?.At(time) ?? transform.Scale.X, motion.ScaleY?.At(time) ?? transform.Scale.Y),
                 motion.Rotation?.At(time) ?? transform.Rotation);
-            if (!basis.Hidden)
-                opacity = motion.Opacity?.At(time) ?? opacity;
+            if (motion.Opacity is { } tween)
+            {
+                opacity = tween.At(time);
+                opacityStart = tween.Timing.Start;
+            }
         }
-        _animation[floor].Apply(time, hidePassed, ref transform, ref opacity);
-        return (transform, opacity);
+        _animation[floor].Apply(time, hidePassed, opacityStart, ref transform, ref opacity);
+        return (transform, basis.Hidden ? 0f : opacity);
     }
 
     public (Vector2 Offset, float Rotation) PlanetMotionAt(int floor, double time)
@@ -342,9 +346,14 @@ internal sealed class RuntimeTrackTimeline
             Change(ref motion.Rotation, basis.Transform.Rotation, angle, timing);
         }
 
-        if (opacity is float alpha)
+        if (opacity is float alpha && float.IsFinite(alpha))
         {
-            Change(ref motion.Opacity, basis.Opacity, alpha, timing);
+            ref readonly TrackAnimationWindow animation = ref _animation[floor];
+            bool followsFade = timing.Start >= animation.AppearStart &&
+                animation.FadeReplacesOpacity(motion.Opacity?.Timing.Start ?? double.NegativeInfinity);
+            // An opacity event completes the previous tween, including a fade-in, before replacing it.
+            float from = followsFade ? 1f : motion.Opacity?.To ?? basis.Opacity;
+            motion.Opacity = new Tween(from, alpha, timing);
         }
     }
 

@@ -22,9 +22,9 @@
   <ItemGroup>
     <PackageReference Include="ImGui4NET" Version="1.93.0.6" />
     <PackageReference Include="ImGui4NET.Backend.OpenGL3" Version="1.93.0.6" />
-    <PackageReference Include="MethodTimer.Fody" Version="3.2.3" PrivateAssets="All" />
     <PackageReference Include="NativeFileDialog" Version="1.0.0" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="SharpMP4" Version="0.4.0" />
 
     <!--
       UGLSLAdapter 用 ANTLR4 的 GLSL 语法做结构化改写，运行时依赖这个包。

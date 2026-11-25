@@ -11,7 +11,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void RememberOpenedChart()
     {
-        if (!_smokeTest && !_effectBenchmark && _document.Path is { } path)
+        if (_document.Path is { } path)
         {
             _lastChartPath = path;
             _recentChart.Remember(path);

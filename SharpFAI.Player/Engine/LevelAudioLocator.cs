@@ -26,12 +26,12 @@ public static class LevelAudioLocator
 {
     /// <summary>可作为音乐读取的扩展名 / Extensions that may be treated as music.</summary>
     /// <remarks>
-    /// 包含解码器不支持的 <c>.mp3</c>/<c>.m4a</c>/<c>.flac</c>：实时播放会失败并给出警告，但视频导出
-    /// 仍可以把源文件交给 ffmpeg，所以路径是有效的。
-    /// Includes `.mp3`/`.m4a`/`.flac` even though the decoder cannot read them: live playback reports a
-    /// warning, but export can still hand the source to ffmpeg, so the path is meaningful.
+    /// 包含解码器不支持的 <c>.m4a</c>/<c>.flac</c>：实时播放会失败并给出警告，但视频导出
+    /// 仍可以用 ffmpeg 解码后混音，所以路径是有效的。
+    /// Includes `.m4a`/`.flac` even though the decoder cannot read them: live playback reports a
+    /// warning, but export can use ffmpeg to decode the source for mixing.
     /// </remarks>
-    public static readonly string[] AudioExtensions = [".wav", ".ogg", ".mp3", ".m4a", ".flac"];
+    public static readonly string[] AudioExtensions = [.. AudioDecoder.SupportedExtensions, ".m4a", ".flac"];
 
     /// <summary>视频扩展名：绝不能被当成音频 / Video extensions, which must never be read as audio.</summary>
     public static readonly string[] VideoExtensions = LevelAssetPaths.VideoExtensions;
@@ -70,7 +70,7 @@ public static class LevelAudioLocator
 
         try
         {
-            declared = level.GetAudioPath();
+            declared = level.GetSetting<string>("songFilename");
         }
         catch (Exception)
         {
@@ -87,9 +87,9 @@ public static class LevelAudioLocator
         // 声明的是相对文件名时，按关卡目录解析，避免依赖进程工作目录
         // The declared name is usually relative; resolve it against the level folder so the process
         // working directory can never change the answer
-        string full = Path.IsPathRooted(declared)
-            ? declared
-            : Path.Combine(directory, declared);
+        string full;
+        try { full = Path.GetFullPath(declared, directory); }
+        catch (ArgumentException) { return null; }
 
         if (File.Exists(full) && IsAudioFile(full))
         {
@@ -98,11 +98,9 @@ public static class LevelAudioLocator
 
         // 同一主文件名换一个音频扩展名（声明 song.mp3、实际给了 song.ogg）
         // Same stem with another audio extension (song.mp3 declared, song.ogg shipped)
-        string stem = Path.Combine(directory, Path.GetFileNameWithoutExtension(declared));
-
         foreach (string extension in AudioExtensions)
         {
-            string candidate = stem + extension;
+            string candidate = Path.ChangeExtension(full, extension);
 
             if (string.Equals(candidate, full, StringComparison.OrdinalIgnoreCase))
             {

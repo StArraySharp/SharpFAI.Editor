@@ -393,17 +393,16 @@ internal sealed unsafe partial class EditorWindow
                 if (_playbackView == PlaybackView.Preview) ReturnToEdit();
                 else SwitchPlaybackView(PlaybackView.Preview);
             }
-            string play = L.T(_playbackView == PlaybackView.Auto ? "Pause" : "Play");
+            string play = L.T(PlaybackCanPause ? "Pause" : "Play");
             ContinueToolbar(ButtonWidth(play));
             if (ImGui.Button(play, default) != 0)
             {
-                if (_playbackView == PlaybackView.Auto) PauseToPreview();
-                else SwitchPlaybackView(PlaybackView.Auto, HeldPlaybackRate);
+                if (PlaybackCanPause) PauseToPreview();
+                else if (_playbackView == PlaybackView.Manual && HasCurrentPlayback) _playback!.Play();
+                else SwitchPlaybackView(SelectedPlaybackMode, HeldPlaybackRate);
             }
             WidgetDraw.ItemTooltip(L.T("PlayTooltip"));
-            ContinueToolbar(ButtonWidth(L.T("Manual")));
-            if (ImGui.Button(L.T("Manual"), default) != 0) SwitchPlaybackView(PlaybackView.Manual, HeldPlaybackRate);
-            WidgetDraw.ItemTooltip(L.T("ManualTooltip"));
+            DrawPlaybackModeCheckboxes();
             ContinueToolbar(76 * _uiScale);
             DrawPlaybackSpeed();
             if (_showPalette)
@@ -413,6 +412,17 @@ internal sealed unsafe partial class EditorWindow
         ImGui.End();
         if (!open)
             _showPalette = _showTimeline = false;
+    }
+
+    private void DrawPlaybackModeCheckboxes()
+    {
+        bool manual = _manualPlay;
+        if (ToolbarCheckbox("Manual", ref manual)) SetManualPlayMode(manual);
+        WidgetDraw.ItemTooltip(L.T("ManualTooltip"));
+
+        bool noFail = _noFail;
+        if (ToolbarCheckbox("NoFail", ref noFail)) SetNoFail(noFail);
+        WidgetDraw.ItemTooltip("Alt+N");
     }
 
     private static float EventButtonSide => MathF.Ceiling(3 * ImGui.GetTextLineHeight() +
@@ -588,6 +598,7 @@ internal sealed unsafe partial class EditorWindow
         ImGui.SetNextItemWidth(-1);
         ImGui.BeginDisabled((byte)(field.Optional && !enabled ? 1 : 0));
         JToken? updated = null;
+        bool richText = InspectorFields.UsesRichLevelText(owner, key);
         string[]? choices = EditorCatalog.Options(field);
         if (owner == "PlaySound" && key == "hitsound")
             updated = DrawSoundChoice(field, value, choices ?? []);
@@ -626,13 +637,15 @@ internal sealed unsafe partial class EditorWindow
         else if (field.Type == "FilterProperties" || key == "filterProperties" && EditorDocument.Type(target) == "SetFilterAdvanced")
             DrawAdvancedFilter(target);
         else if (InspectorFields.IsMultiline(field) && value?.Type is null or JTokenType.Null or JTokenType.String)
-            updated = DrawMultilineField(target, field, value);
+            updated = DrawMultilineField(target, field, value, richText);
         else if (InspectorFields.AssetType(field) is { } assetType)
             updated = DrawAssetField(field, value, assetType);
         else if (field.Type == "String" && value?.Type is null or JTokenType.Null or JTokenType.String)
         {
             if (InspectorFields.TagSource(owner, key) is { } tagSource)
                 updated = DrawTagField(field, value, tagSource);
+            else if (richText)
+                updated = DrawRichLevelTextField(field, value);
             else if (EditText("##value", field.Unit ?? "", value?.Value<string>() ?? "", false) is { } text)
                 updated = new JValue(text);
         }

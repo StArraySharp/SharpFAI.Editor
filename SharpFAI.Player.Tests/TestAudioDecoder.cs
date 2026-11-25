@@ -51,6 +51,109 @@ public sealed class TestAudioDecoder
         Assert.That(DecodeWav(3, 2, null, writer => writer.Write(0.5f)), Is.Null);
     }
 
+    [TestCase("mono", 1, 32_000, 5_120)]
+    [TestCase("stereo", 2, 44_100, 7_056)]
+    public void Mp3PreservesChannelsAndTrimsTaggedEncoderPadding(string fixture, int channels, int rate, int frames)
+    {
+        using Stream input = typeof(TestAudioDecoder).Assembly.GetManifestResourceStream(
+            $"SharpFAI.Player.Tests.Fixtures.Audio.{fixture}.mp3")!;
+        using var bytes = new MemoryStream();
+        input.CopyTo(bytes);
+        byte[] source = bytes.ToArray();
+        var audio = AudioDecoder.Decode(source, Guid.NewGuid().ToString("N"), ".mp3");
+        Assert.That(audio, Is.Not.Null);
+        short[] pcm = ReadPcm(audio!);
+        Assert.Multiple(() =>
+        {
+            Assert.That(audio!.Channels, Is.EqualTo(channels));
+            Assert.That(audio.SampleRate, Is.EqualTo(rate));
+            Assert.That(pcm, Has.Length.EqualTo(frames * channels));
+            Assert.That(pcm.Take(64 * channels).Any(sample => Math.Abs((int)sample) > 1000), Is.True,
+                "The tone begins with the first decoded samples.");
+            if (channels == 2)
+                Assert.That(Enumerable.Range(0, frames).Any(i => pcm[2 * i] != pcm[2 * i + 1]), Is.True);
+        });
+
+        string path = Path.Combine(Path.GetTempPath(), $"sharpfai-decode-{Guid.NewGuid():N}.MP3");
+        try
+        {
+            File.WriteAllBytes(path, source);
+            Assert.That(AudioDecoder.Decode(path)?.Pcm, Is.EqualTo(audio!.Pcm));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestCase(".aif")]
+    [TestCase(".aiff")]
+    public void BigEndianAiffHonorsChannelOrderAndSoundOffset(string extension)
+    {
+        byte[] samples = [0x40, 0, 1, 0xc0, 0, 2, 0x7f, 0xff, 0xff, 0x80, 0, 0];
+        var audio = DecodeAiff(extension, null, 2, 2, 24, samples);
+        Assert.That(audio, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(audio!.SampleRate, Is.EqualTo(48_000));
+            Assert.That(audio.Channels, Is.EqualTo(2));
+            Assert.That(ReadPcm(audio), Is.EqualTo(new short[] { 16384, -16384, 32767, -32768 }));
+        });
+    }
+
+    [Test]
+    public void AiffSupportsSignedEightBitAndLittleEndianAifc()
+    {
+        var signed = DecodeAiff(".aif", null, 1, 3, 8, [0x80, 0, 0x7f]);
+        Assert.That(ReadPcm(signed!), Is.EqualTo(new short[] { -32768, 0, 32512 }));
+        var swapped = DecodeAiff(".aifc", "sowt", 1, 2, 16, [0x34, 0x12, 0, 0xc0]);
+        Assert.That(ReadPcm(swapped!), Is.EqualTo(new short[] { 0x1234, -16384 }));
+    }
+
+    [Test]
+    public void AiffConvertsFloatingPointAndRejectsInvalidOrCompressedSamples()
+    {
+        var audio = DecodeAiff(".aif", "fl32", 1, 2, 32, [0x3f, 0, 0, 0, 0xbf, 0x80, 0, 0]);
+        Assert.That(ReadPcm(audio!), Is.EqualTo(new short[] { 16384, -32768 }));
+        Assert.That(DecodeAiff(".aif", null, 2, 1, 16, [0, 0]), Is.Null);
+        Assert.That(DecodeAiff(".aifc", "ulaw", 1, 1, 8, [0]), Is.Null);
+    }
+
+    private static DecodedAudio? DecodeAiff(string extension, string? format, ushort channels, uint frames,
+        ushort bits, byte[] samples)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write("FORM"u8);
+        writer.Write(0);
+        writer.Write(format is null ? "AIFF"u8 : "AIFC"u8);
+        writer.Write("ANNO"u8);
+        writer.Write(BinaryPrimitives.ReverseEndianness(1));
+        writer.Write((ushort)0);
+        writer.Write("COMM"u8);
+        writer.Write(BinaryPrimitives.ReverseEndianness(format is null ? 18 : 24));
+        writer.Write(BinaryPrimitives.ReverseEndianness(channels));
+        writer.Write(BinaryPrimitives.ReverseEndianness(frames));
+        writer.Write(BinaryPrimitives.ReverseEndianness(bits));
+        writer.Write(Convert.FromHexString("400EBB80000000000000")); // Extended float, 48,000 Hz.
+        if (format is not null)
+        {
+            writer.Write(System.Text.Encoding.ASCII.GetBytes(format));
+            writer.Write((ushort)0);
+        }
+        writer.Write("SSND"u8);
+        int soundSize = 9 + samples.Length;
+        writer.Write(BinaryPrimitives.ReverseEndianness(soundSize));
+        writer.Write(BinaryPrimitives.ReverseEndianness(1)); // Offset before the first sample.
+        writer.Write(0); // No disk block alignment.
+        writer.Write((byte)0xff);
+        writer.Write(samples);
+        if ((soundSize & 1) != 0) writer.Write((byte)0);
+        var bytes = stream.ToArray();
+        BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(4), (uint)(bytes.Length - 8));
+        return AudioDecoder.Decode(bytes, Guid.NewGuid().ToString("N"), extension);
+    }
+
     private static short[] ReadPcm(DecodedAudio audio) => Enumerable.Range(0, audio.Pcm.Length / 2)
         .Select(i => BinaryPrimitives.ReadInt16LittleEndian(audio.Pcm.AsSpan(i * 2))).ToArray();
 

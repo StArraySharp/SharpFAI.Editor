@@ -9,8 +9,6 @@ internal sealed unsafe partial class EditorWindow
 {
     private int? _rangeAnchor;
     private bool _hasFloorSelection = true;
-    private bool _shortcutAuto = true;
-    private bool _shortcutNoFail;
     private PlaybackRate? _queuedRateShortcut;
     private KeyModifiers? _spacePressModifiers;
     private float _uiScale = 1;
@@ -83,8 +81,8 @@ internal sealed unsafe partial class EditorWindow
             if (Pressed(ImGuiKey.ImGuiKey_B)) ToggleBookmark();
             if (Pressed(ImGuiKey.ImGuiKey_LeftArrow)) JumpToBookmark(previous: true);
             if (Pressed(ImGuiKey.ImGuiKey_RightArrow)) JumpToBookmark(previous: false);
-            if (Pressed(ImGuiKey.ImGuiKey_A)) ToggleShortcutAutoplay();
-            if (Pressed(ImGuiKey.ImGuiKey_N)) ToggleShortcutNoFail();
+            if (Pressed(ImGuiKey.ImGuiKey_A)) SetManualPlayMode(!_manualPlay);
+            if (Pressed(ImGuiKey.ImGuiKey_N)) SetNoFail(!_noFail);
             return;
         }
 
@@ -263,7 +261,7 @@ internal sealed unsafe partial class EditorWindow
             _document.PasteEvents(_floor, _eventClipboard, decoration: false);
             return;
         }
-        if (_pathLocked || _tileClipboard is not { Angles.Length: > 0 } clipboard)
+        if (_pathLocked || _tileClipboard is not { } clipboard || !_document.CanInsertTiles(_floor, clipboard.Angles))
             return;
         _pendingTiles.Clear();
         _document.PasteTiles(_floor, clipboard, includeDecorations);
@@ -390,26 +388,31 @@ internal sealed unsafe partial class EditorWindow
 
     private void StartFromShortcut(PlaybackRate rate = PlaybackRate.Normal)
     {
-        if (_playbackView == PlaybackView.Auto)
+        if (PlaybackCanPause)
             PauseToPreview();
         else
         {
             bool fromStart = (!_hasFloorSelection && !_inspectDecoration) || _rangeAnchor is not null;
-            SwitchPlaybackView(_shortcutAuto ? PlaybackView.Auto : PlaybackView.Manual, rate, fromStart ? 0 : null);
+            SwitchPlaybackView(SelectedPlaybackMode, rate, fromStart ? 0 : null);
         }
     }
 
-    private void ToggleShortcutAutoplay()
+    private void SetManualPlayMode(bool enabled)
     {
-        _shortcutAuto = !_shortcutAuto;
+        _manualPlay = enabled;
         if (_playbackView is PlaybackView.Auto or PlaybackView.Manual)
-            SwitchPlaybackView(_shortcutAuto ? PlaybackView.Auto : PlaybackView.Manual, _playbackRate);
+        {
+            if (_startPlayback || _playback?.IsPlaying == true)
+                SwitchPlaybackView(SelectedPlaybackMode, _playbackRate);
+            else
+                PauseToPreview();
+        }
     }
 
-    private void ToggleShortcutNoFail()
+    private void SetNoFail(bool enabled)
     {
-        _shortcutNoFail = !_shortcutNoFail;
+        _noFail = enabled;
         if (_playback is { } renderer)
-            renderer.PlaySession.NoFail = _shortcutNoFail;
+            renderer.PlaySession.NoFail = enabled;
     }
 }

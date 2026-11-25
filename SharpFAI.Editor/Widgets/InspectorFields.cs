@@ -73,6 +73,9 @@ internal static class InspectorFields
     public static bool IsMultiline(EditorField field) => field.Type is "Text" or "LongText" or "LongString" ||
         field.Type == "String" && field.Key is "comment" or "decText" or "levelDesc" or "levelTitleText" or "congratsText" or "perfectText";
 
+    public static bool UsesRichLevelText(string owner, string key) =>
+        owner == "LevelSettings" && key is "artist" or "song" or "levelDesc";
+
     public static string? AssetType(EditorField field) => field.FileType ?? (field.Key switch
     {
         "songFilename" or "hitsound" => "Audio",

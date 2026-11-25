@@ -716,17 +716,20 @@ public sealed class TestImageDecorationSize
     }
 
     [Test]
-    public void TextRasterKeepsAuthoredNewlinesAndStripsRichTags()
+    public void TextRasterKeepsAuthoredNewlinesAndRendersRichTags()
     {
         var oneLine = TextDecorationImage.Rasterize("hello", "Default");
         var twoLines = TextDecorationImage.Rasterize("hello\nworld", "Default");
-        var tagged = TextDecorationImage.Rasterize("<b>hello</b>", "Default");
+        var tagged = TextDecorationImage.Rasterize("<color=red><size=160><b>hello</b></size></color>", "Default");
         var untagged = TextDecorationImage.Rasterize("hello", "Default");
         Assert.Multiple(() =>
         {
             Assert.That(twoLines.Height, Is.GreaterThan(oneLine.Height), "newlines must add height");
-            Assert.That(tagged.Width, Is.EqualTo(untagged.Width));
-            Assert.That(tagged.Height, Is.EqualTo(untagged.Height));
+            Assert.That(tagged.Width, Is.GreaterThan(untagged.Width));
+            Assert.That(tagged.Height, Is.GreaterThan(untagged.Height));
+            Assert.That(Enumerable.Range(0, tagged.Pixels.Length / 4).Any(pixel =>
+                tagged.Pixels[pixel * 4 + 3] > 200 && tagged.Pixels[pixel * 4] > 200 &&
+                tagged.Pixels[pixel * 4 + 1] == 0), Is.True);
         });
     }
 
@@ -919,6 +922,23 @@ public sealed class TestImageDecorationSize
         List<ParticleDecorationTimeline.Sample> samples = [];
         timeline.Items.Single().Particles!.Collect(.5, samples);
         Assert.That(samples.Single().Travel.Length * 150f, Is.EqualTo(speed * .5f).Within(.001f));
+    }
+
+    [Test]
+    public void RectangleParticleEmissionDoesNotScaleWithTileLength()
+    {
+        var source = new AddParticleDecoration
+        {
+            ParticleFields = new() { ["shapeType"] = "Rectangle", ["emissionRate"] = new JArray(32, 32) },
+        };
+        List<ParticleDecorationTimeline.Sample> standard = [];
+        List<ParticleDecorationTimeline.Sample> shortTiles = [];
+        new ParticleDecorationTimeline(source, 0, 150f).Collect(.5, standard);
+        new ParticleDecorationTimeline(source, 0, 100f).Collect(.5, shortTiles);
+        Assert.That(standard, Is.Not.Empty);
+        Assert.That(standard.Select(sample => sample.ShapeOffset), Is.EqualTo(shortTiles.Select(sample => sample.ShapeOffset)));
+        Assert.That(standard.All(sample => MathF.Abs(sample.ShapeOffset.X) <= 50f &&
+            MathF.Abs(sample.ShapeOffset.Y) <= 50f), Is.True);
     }
 
     [TestCase("\"ff0000\"")]

@@ -469,7 +469,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     Matrix4 origin = particle.World ? ModelFor(pixels, item, anchor, camera, tileSize, authoredZoom, floor, planet) : model;
                     Matrix4 basis = particle.World ? ModelFor(Vector2.One, item, anchor with { Scale = Vector2.One }, camera,
                         tileSize, authoredZoom, floor, planet) : axes;
-                    Vector2 offset = (particle.ShapeOffset * anchor.Scale + particle.Travel) * tileSize;
+                    Vector2 offset = particle.ShapeOffset * anchor.Scale + particle.Travel * tileSize;
                     Vector4 center = origin.Row3 + basis.Row0 * offset.X + basis.Row1 * offset.Y;
                     basis.Row3 = center;
                     // Authored size in percent of one Unity unit already equals the diameter in player units.

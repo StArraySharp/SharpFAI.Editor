@@ -1,3 +1,4 @@
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SharpFAI.Player.Engine;
 using SharpFAI.Player.Engine.Events;
@@ -17,8 +18,17 @@ internal sealed class EditorDocument
     private int _savedRevision;
     private const string TimeSignatureKey = "sharpFaiTimeSignatures";
     private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null,
-        object? Group = null, bool SettingsOnly = false, bool EditorOnly = false);
+        object? Group = null, bool SettingsOnly = false, bool EditorOnly = false,
+        Action<JObject>? PlaybackPatch = null, ValueChange? Value = null, TileInsertion? Insertion = null);
+    private sealed record ValueChange(JObject Target, string Name, JToken? Before, JToken? After);
+    private sealed record TileInsertion(int Floor, double[] Angles);
+    private readonly record struct PlaybackChange(int Version, Action<JObject>? Apply, TileInsertion? Insertion);
     private int _lastChartChange;
+    private int _lastNonInsertionChange;
+    private int _lastUnpatchableChange;
+    private readonly List<PlaybackChange> _playbackPatches = [];
+    private Dictionary<int, List<JValue>>? _floorNumbers;
+    private List<(JObject Owner, string Key)>? _tileReferences;
     private readonly Dictionary<JObject, int> _effectChanges = new(ReferenceEqualityComparer.Instance);
     private int _lastFullPlaybackChange;
 
@@ -40,6 +50,8 @@ internal sealed class EditorDocument
                 action["filterProperties"] = properties;
         }
         IndexEvents();
+        _floorNumbers = IndexFloorNumbers();
+        _tileReferences = ReadTileReferences(_actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())).ToList();
     }
 
     public string? Path { get; private set; }
@@ -52,6 +64,7 @@ internal sealed class EditorDocument
     public EditorTimeSignatures TimeSignatures { get; private set; }
     public JArray Decorations => _decorations;
     public int LastFloor => _angles.Count;
+    public bool IsLargeChart => LastFloor >= 10_000 || _actions.Count + _decorations.Count >= 10_000;
     public double IncomingAngle(int floor)
     {
         if (_angles.Count == 0)
@@ -102,17 +115,24 @@ internal sealed class EditorDocument
         bool isEffect = name is not ("floor" or "eventType") &&
             (ReferenceEquals(target.Parent, _actions) || ReferenceEquals(target.Parent, _decorations)) &&
             LevelRenderer.SupportsEditorEffect(Type(target));
-        Apply(new(() => Write(value), () => Write(before), name == "floor" && ReferenceEquals(target.Parent, _actions),
-            isEffect ? target : null, group, SettingsOnly: ReferenceEquals(target, Settings)));
+        JToken? after = value?.DeepClone();
+        Apply(new(() => Write(after), () => Write(before), name == "floor" && ReferenceEquals(target.Parent, _actions),
+            isEffect ? target : null, group, SettingsOnly: ReferenceEquals(target, Settings),
+            Value: new(target, name, before, after)));
 
         void Write(JToken? token)
         {
+            if (name is "startTile" or "endTile" || name == "relativeTo" && Type(target) == "PositionTrack" || name == "eventType")
+                _tileReferences = null;
             if (token is null)
                 target.Remove(name);
             else
                 target[name] = token.DeepClone();
         }
     }
+
+    public bool CanInsertTiles(int floor, ReadOnlySpan<double> angles) =>
+        floor >= 0 && floor <= LastFloor && !angles.IsEmpty && (floor != 0 || angles[0] != 999);
 
     public void InsertTiles(int floor, double[] angles) => InsertTiles(floor, angles, [], []);
 
@@ -140,17 +160,15 @@ internal sealed class EditorDocument
     public void PasteTiles(int after, TileClipboard clipboard, bool includeDecorations)
     {
         // A whole-tile paste copies the source's events as-is onto newly inserted floors.
-        if (clipboard.Angles.Length > 0)
-            InsertTiles(after, clipboard.Angles, clipboard.Actions, includeDecorations ? clipboard.Decorations : [], clipboard);
+        InsertTiles(after, clipboard.Angles, clipboard.Actions, includeDecorations ? clipboard.Decorations : [], clipboard);
     }
 
     private void InsertTiles(int floor, double[] angles, JObject[] actions, JObject[] decorations, TileClipboard? clipboard = null)
     {
-        if (floor < 0 || floor > LastFloor || angles.Length == 0) return;
+        if (!CanInsertTiles(floor, angles)) return;
         int oldLast = LastFloor;
         var references = ReferenceChanges(oldLast, oldLast + angles.Length,
             target => target > floor ? target + angles.Length : target);
-        var moved = AnchorsAfter(floor);
         JValue[] values = angles.Select(angle => new JValue(angle)).ToArray();
         var events = actions.Select(AtDestination).ToArray();
         var objects = decorations.Select(AtDestination).ToArray();
@@ -158,27 +176,27 @@ internal sealed class EditorDocument
             () =>
             {
                 for (int i = 0; i < values.Length; i++) _angles.Insert(floor + i, values[i]);
-                MoveAnchors(moved, values.Length);
+                ShiftFloorAnchors(floor, values.Length);
                 WriteReferences(references, true);
-                foreach (var item in events) _actions.Add(item);
+                foreach (var item in events) AddAction(item);
                 foreach (var item in objects) _decorations.Add(item);
             },
             () =>
             {
                 for (int i = values.Length - 1; i >= 0; i--) _angles.RemoveAt(floor + i);
-                foreach (var item in events) item.Remove();
+                foreach (var item in events) RemoveAction(item);
                 foreach (var item in objects) item.Remove();
-                MoveAnchors(moved, 0);
+                ShiftFloorAnchors(floor + values.Length, -values.Length);
                 WriteReferences(references, false);
             },
-            true));
+            false, Insertion: clipboard is null ? new(floor, (double[])angles.Clone()) : null));
 
         JObject AtDestination(JObject item)
         {
             JObject copy = (JObject)item.DeepClone();
             copy["floor"] = floor + 1 + Floor(item);
             if (clipboard is not null)
-                foreach (string key in new[] { "startTile", "endTile" })
+                foreach (string key in TileReferenceKeys(copy))
                     if (copy[key] is JArray reference && reference.Count >= 2 &&
                         reference[1]!.Value<string>() is "Start" or "End")
                     {
@@ -311,8 +329,33 @@ internal sealed class EditorDocument
     {
         if (!decoration && !CanAddEvent(Floor(value), Type(value)))
             return false;
+        if (value.Parent is not null)
+            value = (JObject)value.DeepClone();
         JArray list = decoration ? _decorations : _actions;
-        Apply(new(() => list.Add(value), value.Remove, !decoration));
+        JObject playbackCopy = (JObject)value.DeepClone();
+        Apply(new(
+            () =>
+            {
+                if (decoration) list.Add(value);
+                else AddAction(value);
+                if (_floorNumbers is { } numbers) IndexFloorNumber(numbers, value, Floor(value));
+                if (_tileReferences is { } references) references.AddRange(ReadTileReferences([value]));
+            },
+            () =>
+            {
+                if (decoration) value.Remove();
+                else RemoveAction(value);
+                if (_floorNumbers is { } numbers && value["floor"] is JValue number &&
+                    numbers.TryGetValue(Floor(value), out var group))
+                {
+                    int index = group.FindLastIndex(candidate => ReferenceEquals(candidate, number));
+                    if (index >= 0) group.RemoveAt(index);
+                    if (group.Count == 0) numbers.Remove(Floor(value));
+                }
+                _tileReferences?.RemoveAll(reference => ReferenceEquals(reference.Owner, value));
+            },
+            false, PlaybackPatch: root =>
+                ((JArray)root[decoration ? "decorations" : "actions"]!).Add(playbackCopy.DeepClone())));
         return true;
     }
 
@@ -382,7 +425,7 @@ internal sealed class EditorDocument
             return;
         Edit edit = _edits[--_revision];
         edit.Undo();
-        Refresh(edit);
+        Refresh(edit, undo: true);
     }
 
     public void Redo()
@@ -397,18 +440,115 @@ internal sealed class EditorDocument
     public void Save(string path)
     {
         string destination = System.IO.Path.GetFullPath(path);
-        EditorFileStorage.WriteChart(destination, _level.root, overwrite: true);
+        string sourceDirectory = System.IO.Path.GetDirectoryName(PlaybackPath)!;
+        string destinationDirectory = System.IO.Path.GetDirectoryName(destination)!;
+        if (string.Equals(sourceDirectory, destinationDirectory, OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            EditorFileStorage.WriteChart(destination, _level.root, overwrite: true);
+        else
+            EditorFileStorage.SaveChartWithAssets(destination, _level, sourceDirectory);
         Path = destination;
         _savedRevision = _revision;
     }
 
-    public JObject CaptureBackup() => (JObject)_level.root.DeepClone();
+    internal IEnumerable<(string Text, bool Last)> BackupChunks()
+    {
+        const int ChunkSize = 32 * 1024;
+        using var text = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        using var json = new JsonTextWriter(text);
+        var buffer = text.GetStringBuilder();
+        json.WriteStartObject();
+        foreach (var property in _level.root.Properties())
+        {
+            json.WritePropertyName(property.Name);
+            if (property.Value is JArray items)
+            {
+                json.WriteStartArray();
+                foreach (JToken item in items)
+                {
+                    item.WriteTo(json);
+                    if (buffer.Length >= ChunkSize) yield return (TakeChunk(), false);
+                }
+                json.WriteEndArray();
+            }
+            else property.Value.WriteTo(json);
+            if (buffer.Length >= ChunkSize) yield return (TakeChunk(), false);
+        }
+        json.WriteEndObject();
+        yield return (TakeChunk(), true);
+
+        string TakeChunk()
+        {
+            string result = buffer.ToString();
+            buffer.Clear();
+            return result;
+        }
+    }
+
+    internal bool HasChangesToBackUp()
+    {
+        if (!Modified) return false;
+        if (_savedRevision < 0) return true;
+        var values = new Dictionary<(JObject Target, string Name), (JToken? Before, JToken? After)>();
+        for (int i = Math.Min(_revision, _savedRevision); i < Math.Max(_revision, _savedRevision); i++)
+        {
+            if (_edits[i].Value is not { } change) return true;
+            var key = (change.Target, change.Name);
+            values[key] = values.TryGetValue(key, out var existing)
+                ? (existing.Before, change.After) : (change.Before, change.After);
+        }
+        return values.Values.Any(value => !JToken.DeepEquals(value.Before, value.After));
+    }
 
     public string PlaybackPath => Path ?? System.IO.Path.Combine(Environment.CurrentDirectory, "untitled.adofai");
     public Level SnapshotForPlayback() => _level.CreateSnapshot(PlaybackPath);
 
     public bool HasOnlyEffectChangesSince(int version) => version >= _lastFullPlaybackChange;
     public bool CanReusePlaybackChart(int version) => version >= _lastChartChange;
+
+    public bool HasOnlyTileInsertionsSince(int version) =>
+        version >= _lastNonInsertionChange && version < _lastChartChange;
+
+    public Action<JObject>? PlaybackPatchSince(int version)
+    {
+        if (version < _lastUnpatchableChange || CanReusePlaybackChart(version)) return null;
+        var patches = _playbackPatches.Where(patch => patch.Version > version).ToArray();
+        if (patches.Length == 0) return null;
+        return root =>
+        {
+            for (int index = 0; index < patches.Length; index++)
+            {
+                var patch = patches[index];
+                if (patch.Insertion is not { } insert)
+                {
+                    patch.Apply!(root);
+                    continue;
+                }
+                // Sequential inputs extend the same run of tiles. Relocate the chart once for that run.
+                var angles = new List<double>(insert.Angles);
+                while (index + 1 < patches.Length && patches[index + 1].Insertion is { } next &&
+                       next.Floor == insert.Floor + angles.Count)
+                {
+                    angles.AddRange(next.Angles);
+                    index++;
+                }
+                ApplyTileInsertion(root, insert.Floor, angles);
+            }
+        };
+    }
+
+    private static void ApplyTileInsertion(JObject root, int floor, List<double> angles)
+    {
+        var path = (JArray)root["angleData"]!;
+        var actions = (JArray)root["actions"]!;
+        var decorations = (JArray)root["decorations"]!;
+        var references = ReadTileReferences(actions.OfType<JObject>().Concat(decorations.OfType<JObject>()));
+        WriteReferences(ReferenceChanges(references, path.Count, path.Count + angles.Count,
+            target => target > floor ? target + angles.Count : target), true);
+        MoveAnchors(AnchorsAfter(actions, floor), angles.Count);
+        MoveAnchors(AnchorsAfter(decorations, floor), angles.Count);
+        for (int i = 0; i < angles.Count; i++) path.Insert(floor + i, new JValue(angles[i]));
+    }
 
     public LevelRenderer.EditorEffectPatch[] EffectChangesSince(int version)
     {
@@ -424,6 +564,7 @@ internal sealed class EditorDocument
 
     public void ForgetEffectChangesThrough(int version)
     {
+        _playbackPatches.RemoveAll(patch => patch.Version <= version);
         if (version == PlaybackVersion)
             _effectChanges.Clear();
         else
@@ -487,7 +628,10 @@ internal sealed class EditorDocument
         {
             var previous = _edits[_revision - 1];
             _edits[_revision - 1] = edit with { Undo = previous.Undo, Events = previous.Events || edit.Events,
-                SettingsOnly = previous.SettingsOnly && edit.SettingsOnly };
+                SettingsOnly = previous.SettingsOnly && edit.SettingsOnly,
+                Value = previous.Value is { } first && edit.Value is { } last &&
+                    ReferenceEquals(first.Target, last.Target) && first.Name == last.Name
+                    ? last with { Before = first.Before } : null };
             Refresh(edit);
             return;
         }
@@ -502,12 +646,24 @@ internal sealed class EditorDocument
         Refresh(edit);
     }
 
-    private void Refresh(Edit edit)
+    private void Refresh(Edit edit, bool undo = false)
     {
         ChangeVersion++;
         if (edit.EditorOnly) return;
         PlaybackVersion = ChangeVersion;
-        if (!edit.SettingsOnly) _lastChartChange = ChangeVersion;
+        if (!edit.SettingsOnly)
+        {
+            _lastChartChange = ChangeVersion;
+            if (undo || edit.Insertion is null)
+                _lastNonInsertionChange = ChangeVersion;
+            if (!undo && (edit.PlaybackPatch is not null || edit.Insertion is not null))
+                _playbackPatches.Add(new(ChangeVersion, edit.PlaybackPatch, edit.Insertion));
+            else
+            {
+                _lastUnpatchableChange = ChangeVersion;
+                _playbackPatches.Clear();
+            }
+        }
         if (edit.Effect is { } effect)
             _effectChanges[effect] = ChangeVersion;
         else
@@ -517,24 +673,57 @@ internal sealed class EditorDocument
         }
         if (edit.Events)
             IndexEvents();
+        if (edit.Value is null && edit.PlaybackPatch is null && edit.Insertion is null)
+        {
+            _tileReferences = null;
+            _floorNumbers = null;
+        }
+        else if (edit.Value?.Name == "floor")
+            _floorNumbers = null;
     }
 
-    private readonly record struct TileReference(JArray Value, int Before, int After);
+    private readonly record struct TileReference(JObject Owner, string Key, int Before, int After);
 
     private TileReference[] ReferenceChanges(int oldLast, int newLast, Func<int, int> relocate) =>
-        _actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())
-            .SelectMany(item => new[] { item["startTile"], item["endTile"] }).OfType<JArray>()
-            .Where(value => value.Count >= 2 && value[1]!.Value<string>() is "Start" or "End")
-            .Select(value =>
-            {
-                int before = value[0]!.Value<int>();
-                bool end = value[1]!.Value<string>() == "End";
-                return new TileReference(value, before, relocate(before + (end ? oldLast : 0)) - (end ? newLast : 0));
-            }).ToArray();
+        ReferenceChanges(_tileReferences ??= ReadTileReferences(
+            _actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())).ToList(),
+            oldLast, newLast, relocate);
+
+    private static IEnumerable<(JObject Owner, string Key)> ReadTileReferences(IEnumerable<JObject> actions)
+    {
+        foreach (JObject item in actions)
+        {
+            if (IsAbsoluteReference(item["startTile"])) yield return (item, "startTile");
+            if (IsAbsoluteReference(item["endTile"])) yield return (item, "endTile");
+            if (IsAbsoluteReference(item["relativeTo"]) && Type(item) == "PositionTrack") yield return (item, "relativeTo");
+        }
+    }
+
+    private static string[] TileReferenceKeys(JObject item) => Type(item) == "PositionTrack"
+        ? ["startTile", "endTile", "relativeTo"] : ["startTile", "endTile"];
+
+    private static bool IsAbsoluteReference(JToken? token) =>
+        token is JArray { Count: >= 2 } value && value[1] is JValue { Value: "Start" or "End" };
+
+    private static TileReference[] ReferenceChanges(IEnumerable<(JObject Owner, string Key)> references,
+        int oldLast, int newLast, Func<int, int> relocate)
+    {
+        var result = new List<TileReference>();
+        foreach (var (owner, key) in references)
+        {
+            var value = (JArray)owner[key]!;
+            int before = value[0]!.Value<int>();
+            bool fromEnd = value[1]!.Value<string>() == "End";
+            int after = relocate(before + (fromEnd ? oldLast : 0)) - (fromEnd ? newLast : 0);
+            if (before != after) result.Add(new(owner, key, before, after));
+        }
+        return result.ToArray();
+    }
 
     private static void WriteReferences(TileReference[] references, bool redo)
     {
-        foreach (var item in references) item.Value[0] = redo ? item.After : item.Before;
+        foreach (var item in references)
+            ((JArray)item.Owner[item.Key]!)[0] = redo ? item.After : item.Before;
     }
 
     public void PositionTiles(int first, int last, double x, double y)
@@ -584,7 +773,8 @@ internal sealed class EditorDocument
         }
     }
 
-    public bool CanRotateExit(int floor) => floor >= 0 && floor < LastFloor && _angles[floor]!.Value<double>() != 999;
+    public bool CanRotateExit(int floor) => floor >= 0 && floor < LastFloor && !IsMidspinAt(floor);
+    public bool IsMidspinAt(int floor) => floor >= 0 && floor < LastFloor && _angles[floor]!.Value<double>() == 999;
 
     public void RotateExit(int floor, double angle)
     {
@@ -596,22 +786,93 @@ internal sealed class EditorDocument
         .Concat(_decorations.OfType<JObject>()).Select(item => (Item: item, Floor: Floor(item)))
         .Where(item => item.Floor > floor).ToArray();
 
-    private static void MoveAnchors((JObject Item, int Floor)[] anchors, int offset)
+    private static IEnumerable<(JObject Item, int Floor)> AnchorsAfter(JArray items, int floor) =>
+        items.OfType<JObject>().Select(item => (Item: item, Floor: Floor(item))).Where(item => item.Floor > floor);
+
+    private static void MoveAnchors(IEnumerable<(JObject Item, int Floor)> anchors, int offset)
     {
         foreach (var (item, floor) in anchors)
-            item["floor"] = floor + offset;
+            if (item["floor"] is JValue { Type: JTokenType.Integer } number)
+                number.Value = floor + offset;
+            else
+                item["floor"] = floor + offset;
+    }
+
+    private Dictionary<int, List<JValue>> IndexFloorNumbers()
+    {
+        var numbers = new Dictionary<int, List<JValue>>();
+        foreach (var (floor, items) in _eventsByFloor)
+            foreach (var item in items)
+                IndexFloorNumber(numbers, item, floor);
+        foreach (var item in _decorations.OfType<JObject>())
+            IndexFloorNumber(numbers, item, Floor(item));
+        return numbers;
+    }
+
+    private static void IndexFloorNumber(Dictionary<int, List<JValue>> index, JObject item, int floor)
+    {
+        if (item["floor"] is not JValue number)
+            return;
+        if (!index.TryGetValue(floor, out var group))
+            index.Add(floor, group = []);
+        group.Add(number);
+    }
+
+    private void ShiftFloorAnchors(int after, int offset)
+    {
+        ShiftFloorBuckets(_floorNumbers ??= IndexFloorNumbers(), after, offset, static (floor, numbers) =>
+        {
+            // Every token on this floor can reuse one boxed integer.
+            object value = floor;
+            foreach (var number in numbers) number.Value = value;
+        });
+        ShiftFloorBuckets(_eventsByFloor, after, offset);
+    }
+
+    private static void ShiftFloorBuckets<T>(Dictionary<int, List<T>> index, int after, int offset,
+        Action<int, List<T>>? relocate = null)
+    {
+        var moved = new List<KeyValuePair<int, List<T>>>();
+        foreach (var bucket in index)
+            if (bucket.Key > after)
+                moved.Add(bucket);
+        foreach (var bucket in moved) index.Remove(bucket.Key);
+        foreach (var (floor, group) in moved)
+        {
+            int shifted = floor + offset;
+            relocate?.Invoke(shifted, group);
+            index.Add(shifted, group);
+        }
+    }
+
+    private void AddAction(JObject item)
+    {
+        _actions.Add(item);
+        IndexAction(item);
+    }
+
+    private void RemoveAction(JObject item)
+    {
+        item.Remove();
+        int floor = Floor(item);
+        var events = _eventsByFloor[floor];
+        events.Remove(item);
+        if (events.Count == 0) _eventsByFloor.Remove(floor);
+    }
+
+    private void IndexAction(JObject item)
+    {
+        int floor = Floor(item);
+        if (!_eventsByFloor.TryGetValue(floor, out List<JObject>? events))
+            _eventsByFloor[floor] = events = [];
+        events.Add(item);
     }
 
     private void IndexEvents()
     {
         _eventsByFloor.Clear();
         foreach (JObject item in _actions.OfType<JObject>())
-        {
-            int floor = Floor(item);
-            if (!_eventsByFloor.TryGetValue(floor, out List<JObject>? events))
-                _eventsByFloor[floor] = events = [];
-            events.Add(item);
-        }
+            IndexAction(item);
     }
 
 }

@@ -5,7 +5,7 @@
 - Windows x64 和支持 OpenGL 4.1 的显卡驱动。
 - Git 与能构建 `net10.0` 项目的 .NET SDK，例如 .NET 10 SDK。
 - 准备原版滤镜资源时，需要本机安装的《冰与火之舞》（ADOFAI）和游戏的 `*_Data` 目录。
-- 导出 MP4 时需要 FFmpeg。将含有 `ffmpeg.exe` 的目录加入 `PATH`，重新打开终端后可用 `ffmpeg -version` 检查。
+- 导出 MP4 和播放背景视频需要 `ffmpeg`。SharpMP4 随程序构建，负责 MP4 系列容器的解析和导出封装。`ffprobe` 用于其他容器，以及 SharpMP4 无法读取的文件。可将 FFmpeg 工具放在程序旁边或加入 `PATH`。
 
 ## 1. 获取源码
 

@@ -17,9 +17,6 @@ internal sealed unsafe partial class EditorWindow
 
     private void LoadApplicationSettings()
     {
-        if (_smokeTest || _effectBenchmark)
-            return;
-
         _applicationSettings = _settingsStore.Load();
         if (_commandLineLanguage is not null)
             _applicationSettings = _applicationSettings with { Language = L.IsChinese ? "zh-Hans" : "en" };
@@ -51,11 +48,9 @@ internal sealed unsafe partial class EditorWindow
         if (mode is { } current)
         {
             _applicationSettings = _applicationSettings with { WindowMode = current };
-            if (!_smokeTest && !_effectBenchmark)
-                _settingsStore.TrySave(_applicationSettings);
+            _settingsStore.TrySave(_applicationSettings);
         }
-        if (!_smokeTest && !_effectBenchmark)
-            _displayFrameLimit.Update(this, _applicationSettings, settingsChanged || mode.HasValue);
+        _displayFrameLimit.Update(this, _applicationSettings, settingsChanged || mode.HasValue);
     }
 
     private void ApplyPreviewSettings(Player.Engine.LevelRenderer renderer)

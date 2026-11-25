@@ -198,6 +198,30 @@ public class TestTrackEvents
         Assert.That(timeline.TransformAt(4, 1.5, false).Transform.Offset, Is.EqualTo(Vector2.Zero));
     }
 
+    [TestCase(0)]
+    [TestCase(40)]
+    public void TrackFadeInRestoresOpacityBeforeLaterMoveTrack(int initialOpacity)
+    {
+        Level level = Chart(
+            $$"""{"floor":2,"eventType":"PositionTrack","opacity":{{initialOpacity}},"justThisTile":true}""",
+            """{"floor":2,"eventType":"AnimateTrack","trackAnimation":"Fade","beatsAhead":0,"justThisTile":true}""",
+            """{"floor":3,"eventType":"MoveTrack","startTile":[-1,"ThisTile"],"endTile":[-1,"ThisTile"],"opacity":0,"duration":1}""");
+        RuntimeTrackTimeline timeline = Runtime(level, 5);
+
+        float OpacityAt(double time)
+        {
+            timeline.Advance(time);
+            return timeline.TransformAt(2, time, false).Opacity;
+        }
+
+        Assert.That(OpacityAt(.9), Is.Zero);
+        Assert.That(OpacityAt(1.125), Is.EqualTo(.5f));
+        Assert.That(OpacityAt(1.3), Is.EqualTo(1f));
+        Assert.That(OpacityAt(1.75), Is.EqualTo(.5f));
+        Assert.That(OpacityAt(2), Is.Zero);
+        Assert.That(OpacityAt(1.125), Is.EqualTo(.5f), "Seeking backwards restores the fade.");
+    }
+
     [Test]
     public void AnimationWindowsUseChartStartAndKeepSignedExitDelay()
     {

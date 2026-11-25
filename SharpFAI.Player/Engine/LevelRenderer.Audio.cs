@@ -156,9 +156,9 @@ public sealed unsafe partial class LevelRenderer
         {
             null => "未找到音乐文件 / No music file found",
             _ when musicLoaded => null,
-            // Unsupported formats still export by path via ffmpeg.
+            // Offline export decodes additional formats through ffmpeg before mixing.
             string path when LevelAudioLocator.IsDecodable(path) => $"音乐加载失败 / Music failed to load: {path}",
-            string path => $"音乐格式不受支持（导出仍可混入）/ Unsupported music format, export still muxes it: {path}",
+            string path => $"实时播放不支持此音乐格式（导出仍可混入）/ Music format requires ffmpeg for export: {path}",
         };
         SetAudioWarning(ref _musicLoadWarning, warning);
         _audioAvailable = musicLoaded || hitsoundLoaded;

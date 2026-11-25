@@ -4,6 +4,7 @@ using NativeFileDialog;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SharpFAI.Editor.Widgets;
+using SharpFAI.Player.Engine;
 
 namespace SharpFAI.Editor;
 
@@ -57,7 +58,7 @@ internal sealed unsafe partial class EditorWindow
                 List<string> extensions = assetType switch
                 {
                     "Image" => ["png", "jpg", "jpeg", "bmp", "gif", "tga", "webp"],
-                    "Audio" => ["ogg", "wav", "mp3", "flac", "aif", "aiff"],
+                    "Audio" => LevelAudioLocator.AudioExtensions.Select(extension => extension[1..]).ToList(),
                     "Video" => ["mp4", "mov", "webm", "m4v", "avi", "ogv"],
                     _ => []
                 };
@@ -91,7 +92,7 @@ internal sealed unsafe partial class EditorWindow
         catch (JsonReaderException error) { ShowError(error); return null; }
     }
 
-    private JToken? DrawMultilineField(JObject target, EditorField field, JToken? value)
+    private JToken? DrawMultilineField(JObject target, EditorField field, JToken? value, bool richText)
     {
         const string popupId = "###property-multiline";
         string title = L.T("PropertyTextEdit");
@@ -108,9 +109,13 @@ internal sealed unsafe partial class EditorWindow
         if (text.Length != 0)
         {
             string line = text.Split(['\r', '\n'], 2)[0];
-            ImGui.PushTextWrapPos();
-            WidgetDraw.TextDisabled(line.Length > 96 ? line[..96] + "…" : line.Length < text.Length ? line + "…" : line);
-            ImGui.PopTextWrapPos();
+            if (!richText || !DrawRichLevelTextPreview(field.Key, line.Length < text.Length ? line + "…" : line,
+                    ImGui.GetCursorPosX(), ImGui.GetContentRegionAvail().x, ImGui.GetFrameHeight(), styledOnly: true))
+            {
+                ImGui.PushTextWrapPos();
+                WidgetDraw.TextDisabled(line.Length > 96 ? line[..96] + "…" : line.Length < text.Length ? line + "…" : line);
+                ImGui.PopTextWrapPos();
+            }
         }
         if (ImGui.BeginPopupModal(title + popupId, (int)ImGuiWindowFlags.ImGuiWindowFlags_AlwaysAutoResize) == 0)
             return null;
@@ -128,6 +133,12 @@ internal sealed unsafe partial class EditorWindow
             float height = Math.Clamp(io->DisplaySize.y - 140, ImGui.GetFrameHeight(), 154 * _uiScale);
             if (ImGui.IsWindowAppearing() != 0) ImGui.SetKeyboardFocusHere();
             _multilineText = EditMultiline(_multilineText, width, height) ?? _multilineText;
+            if (richText && _multilineText.Length > 0)
+            {
+                ImGui.TextUnformatted(L.T("Preview"));
+                DrawRichLevelTextPreview("description-draft", _multilineText, ImGui.GetCursorPosX(),
+                    width, height, styledOnly: false);
+            }
             if (ImGui.Button(L.T("PropertyApply"), default) != 0)
             {
                 if (_multilineText != text) updated = new JValue(_multilineText);

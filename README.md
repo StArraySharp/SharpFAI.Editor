@@ -6,7 +6,8 @@ SharpFAI.Editor 是《冰与火之舞》（A Dance of Fire and Ice，ADOFAI）�
 
 - 编辑轨道、事件和装饰，支持打开 `.adofai` 文件和导入 `.zip` 谱面包。
 - 在编辑器内预览或播放谱面，也可以用独立播放器查看效果。
-- 按指定分辨率和帧率导出视频。导出 MP4 需要 FFmpeg，缺少 FFmpeg 时可输出 PNG 帧序列。
+- 按指定分辨率和帧率导出视频。FFmpeg 编码 H.264 和 AAC，SharpMP4 封装最终文件。缺少 FFmpeg 时可输出 PNG 帧序列。
+- 播放和导出铺面指定的背景视频。SharpMP4 读取 MP4、M4V 和 MOV 的视频信息，FFmpeg 解码画面。其他容器需要 `ffprobe` 读取视频信息。
 
 ## 从源码运行
 

@@ -368,6 +368,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public Dictionary<int, double>? PauseLocks { get; init; }
         public double LevelDuration { get; init; }
         public double OffsetSeconds { get; init; }
+        public double SeparateCountdownLead { get; init; }
 
         public int CountdownTicks { get; init; } = 4;
 
@@ -471,6 +472,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         _music.Dispose();
         _hitsound.Dispose();
         ClearFloorChunks();
+        _editorInsertedTrack?.Dispose();
         _officialRenderer?.Dispose();
         _officialRenderer = null;
         _circleRenderer?.Dispose();

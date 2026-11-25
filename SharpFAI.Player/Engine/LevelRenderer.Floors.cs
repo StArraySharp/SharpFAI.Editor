@@ -112,7 +112,7 @@ public sealed unsafe partial class LevelRenderer
         TrackStyleInfo? styleOverride = _level is { } level && style == ReadTrackStyle(level) ? null : style;
         try
         {
-            string? path = _level?.pathToLevel;
+            string? path = LevelPath ?? _level?.pathToLevel;
             string? directory = path is null ? null : Path.GetDirectoryName(Path.GetFullPath(path));
             if (_visibleFloorIndex is not null)
             {
@@ -190,7 +190,7 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
-        string? directory = _level?.pathToLevel is { } path ? Path.GetDirectoryName(Path.GetFullPath(path)) : null;
+        string? directory = (LevelPath ?? _level?.pathToLevel) is { } path ? Path.GetDirectoryName(Path.GetFullPath(path)) : null;
         SetResidentGeometry(visibility, ResidentCoverage(), _styleOverride, directory);
     }
 

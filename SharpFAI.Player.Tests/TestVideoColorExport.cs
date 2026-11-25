@@ -44,6 +44,17 @@ public class TestVideoColorExport
                 encoder.Finish(publish: true);
             }
             TestContext.Out.WriteLine(string.Join(Environment.NewLine, log));
+            var video = Mp4Container.ReadVideo(output);
+            Assert.That(video, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(video!.Value.Width, Is.EqualTo(Width));
+                Assert.That(video.Value.Height, Is.EqualTo(Height));
+                Assert.That(video.Value.Duration, Is.EqualTo(0.3).Within(0.001));
+                Assert.That(video.Value.Start, Is.Zero);
+                Assert.That(video.Value.FrameRate, Is.EqualTo(10));
+                Assert.That(Directory.EnumerateFiles(directory, ".sharpfai-*"), Is.Empty);
+            });
             using var metadata = JsonDocument.Parse(Run("ffprobe", "-v", "error", "-select_streams", "v:0",
                 "-show_entries", "stream=color_space,color_range", "-of", "json", output));
             var stream = metadata.RootElement.GetProperty("streams")[0];

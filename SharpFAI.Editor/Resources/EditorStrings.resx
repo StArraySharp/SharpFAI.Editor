@@ -43,7 +43,6 @@
   <data name="LastChartMissing" xml:space="preserve"><value>The last opened chart could not be found at {0}.</value></data>
   <data name="ChooseArchiveLevel" xml:space="preserve"><value>Choose a level from the ZIP</value></data>
   <data name="NoArchiveLevels" xml:space="preserve"><value>The ZIP contains no .adofai levels other than backup.adofai.</value></data>
-  <data name="ArchiveNeedsSingleLevel" xml:space="preserve"><value>This mode needs one level. Choose an extracted file from {0}.</value></data>
   <data name="Save" xml:space="preserve"><value>Save</value></data>
   <data name="SaveLevel" xml:space="preserve"><value>Save Level...</value></data>
   <data name="ChartSaved" xml:space="preserve"><value>Chart saved</value></data>
@@ -66,11 +65,9 @@
   <data name="GoToEnd" xml:space="preserve"><value>Select last tile</value></data>
   <data name="ChartPreview" xml:space="preserve"><value>Scene preview</value></data>
   <data name="PlayFromTile" xml:space="preserve"><value>Play from selected tile</value></data>
-  <data name="ManualFromTile" xml:space="preserve"><value>Play manually from selected tile</value></data>
-  <data name="ManualTooltip" xml:space="preserve"><value>Play manually from selected tile</value></data>
+  <data name="ManualTooltip" xml:space="preserve"><value>Alt+A · Toggle Manual Play</value></data>
   <data name="ConfiguredSpeed" xml:space="preserve"><value>Play at configured speed</value></data>
   <data name="HalfSpeed" xml:space="preserve"><value>Play at half the configured speed</value></data>
-  <data name="Autoplay" xml:space="preserve"><value>Autoplay</value></data>
   <data name="NoFail" xml:space="preserve"><value>No Fail</value></data>
   <data name="ReturnToEdit" xml:space="preserve"><value>Back to editor</value></data>
   <data name="Preview" xml:space="preserve"><value>Preview</value></data>
@@ -78,7 +75,7 @@
   <data name="Pause" xml:space="preserve"><value>Pause</value></data>
   <data name="Stop" xml:space="preserve"><value>Stop</value></data>
   <data name="Reset" xml:space="preserve"><value>Reset</value></data>
-  <data name="Manual" xml:space="preserve"><value>Play manually</value></data>
+  <data name="Manual" xml:space="preserve"><value>Manual Play</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Close" xml:space="preserve"><value>Close</value></data>
   <data name="Ok" xml:space="preserve"><value>OK</value></data>
@@ -133,7 +130,7 @@
   <data name="HelpEventPages" xml:space="preserve"><value>[ / ] page through events of the same type · Shift jumps to either end</value></data>
   <data name="HelpPalette" xml:space="preserve"><value>1–0 add events · Ctrl+number switches categories</value></data>
   <data name="HelpCamera" xml:space="preserve"><value>Wheel or - / = to zoom · left-drag to pan</value></data>
-  <data name="HelpPlay" xml:space="preserve"><value>Ctrl+wheel adjusts speed · Ctrl+Space plays at set speed · Ctrl+P half speed · Alt+A autoplay · Alt+N No Fail</value></data>
+  <data name="HelpPlay" xml:space="preserve"><value>Ctrl+wheel adjusts speed · Ctrl+Space plays at set speed · Ctrl+P half speed · Alt+A Manual Play · Alt+N No Fail</value></data>
   <data name="HelpReturn" xml:space="preserve"><value>Esc centers the playback tile · Shift+Esc also selects it</value></data>
   <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B toggles bookmark · Alt+← / → jumps between bookmarks</value></data>
   <data name="HelpLocate" xml:space="preserve"><value>Alt+; find tile · Alt+F find comment</value></data>

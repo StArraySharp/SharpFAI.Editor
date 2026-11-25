@@ -62,7 +62,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void InsertTiles(double[] angles)
     {
-        if (_pathLocked)
+        if (_pathLocked || !_document.CanInsertTiles(_floor, angles))
             return;
         if (_pendingTiles.Count > 0 && _pendingTiles[^1].Floor != _floor)
             _pendingTiles.Clear();
@@ -115,11 +115,11 @@ internal sealed unsafe partial class EditorWindow
             ImGui.SameLine();
     }
 
-    private void EditViewCheckbox(string key, ref bool value)
+    private static bool ToolbarCheckbox(string key, ref bool value)
     {
         string label = L.T(key);
         ContinueToolbar(ImGui.CalcTextSize(label).x + ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x);
-        Toggle(label, ref value);
+        return Toggle(label, ref value);
     }
 
     private bool DrawArbitraryAngleInput()
@@ -149,20 +149,18 @@ internal sealed unsafe partial class EditorWindow
                 SelectFloor(_floor, false);
         }
         WidgetDraw.ItemTooltip(L.T("EditSceneModeHelp"));
-        EditViewCheckbox("DirectionGuide", ref _directionGuide);
-        EditViewCheckbox("LockPath", ref _pathLocked);
-        EditViewCheckbox("Angle", ref _showArbitraryAngle);
+        ToolbarCheckbox("DirectionGuide", ref _directionGuide);
+        ToolbarCheckbox("LockPath", ref _pathLocked);
+        ToolbarCheckbox("Angle", ref _showArbitraryAngle);
         if (_showArbitraryAngle)
         {
             ContinueToolbar(80 * _uiScale);
             ImGui.SetNextItemWidth(80 * _uiScale);
             bool submitted = DrawArbitraryAngleInput();
-            if (_smokeTest && _frames == AngleSmokeStart) _angleSmokeInput = SmokeItemCenter();
             if (_hasFloorSelection)
             {
                 ContinueToolbar(ButtonWidth(L.T("AddTile")));
                 bool add = ImGui.Button(L.T("AddTile"), default) != 0;
-                if (_smokeTest && _frames == AngleSmokeStart) _angleSmokeButton = SmokeItemCenter();
                 if (add || submitted)
                     InsertArbitraryAngle();
             }
@@ -193,6 +191,18 @@ internal sealed unsafe partial class EditorWindow
         var pending = canUseScene ? PendingTileCenters(renderer!) : [];
         if (canUseScene && renderer is not null)
         {
+            if (pending.Count <= 1) renderer.ClearEditorInsertedTrack();
+            else if (renderer.EditorInsertedTrackNeedsUpdate(_document.ChangeVersion, _tilesOnly))
+            {
+                var inserted = new LevelRenderer.EditorInsertedFloor[_pendingTiles.Count];
+                for (int i = 0; i < inserted.Length; i++)
+                {
+                    var tile = _pendingTiles[i];
+                    inserted[i] = new(pending[i + 1], tile.Direction, _document.IncomingAngle(tile.Floor + 1),
+                        _document.IsMidspinAt(tile.Floor));
+                }
+                renderer.SetEditorInsertedTrack(_document.ChangeVersion, _pendingTiles[0].Floor - 1, inserted, _tilesOnly);
+            }
             if (_centerEditDecoration is { } item)
             {
                 CenterEditCamera(renderer, DecorationPosition(renderer, item));

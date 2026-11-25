@@ -54,34 +54,106 @@ internal static class PlaybackEventBinder
 
     public static PlaybackEvent[] BindForPlayback(Level level) => Bind(level, includeDecorations: true, playbackOnly: true);
 
-    public static PlaybackEvent[] BindForEditor(Level playbackLevel, Level document) =>
-        Bind(playbackLevel, includeDecorations: true, playbackOnly: true, document);
+    internal static PlaybackEvent[] BindForEditor(Level document, CancellationToken token = default)
+    {
+        JsonSerializer serializer = JsonSerializer.Create(EventJsonConverter.GetJsonSettings());
+        List<PlaybackEvent> result = [];
+        var settings = document.root["settings"] as JObject;
+        for (int index = 0; index < document.actions.Count; index++)
+        {
+            if ((index & 1023) == 0) token.ThrowIfCancellationRequested();
+            if (document.actions[index] is not JObject action || RemovesFromPlayback(action)) continue;
+            // These actions are fully represented by MoveImageDecoration. A generic Unknown
+            // object would keep a second copy of all their extension data for the editor's lifetime.
+            BaseEvent? source = (string?)action["eventType"] switch
+            {
+                "MoveDecorations" => new BaseEvent { EventType = EventType.MoveDecorations, Floor = action.Value<int?>("floor") ?? 0 },
+                "PlanetRadius" => new BaseEvent { EventType = EventType.ScaleRadius, Floor = action.Value<int?>("floor") ?? 0 },
+                _ => ReadSource(action, serializer),
+            };
+            if (source is null) continue;
+            Type type = ResolveType(source.EventType);
+            if (type == typeof(ParsedPreviewEvent) || type == typeof(ParsedRuntimeEvent)) continue;
+            var item = Bind(action, source, type, serializer, settings);
+            item.SourceIndex = index;
+            result.Add(item);
+        }
+        BindDecorations(document, playbackOnly: true, serializer, settings, result);
+        return result.ToArray();
+    }
 
-    private static PlaybackEvent[] Bind(Level level, bool includeDecorations, bool playbackOnly, Level? document = null)
+    internal static PlaybackEvent[] RelocateEditorEvents(Level before, Level after, PlaybackEvent[] previous,
+        CancellationToken token)
+    {
+        JObject settings = (JObject)after.root["settings"]!;
+        var oldDecorations = (JArray?)before.root["decorations"];
+        var newDecorations = (JArray?)after.root["decorations"];
+        var relocated = new PlaybackEvent[previous.Length];
+        JsonSerializer serializer = JsonSerializer.Create(EventJsonConverter.GetJsonSettings());
+        for (int i = 0; i < previous.Length; i++)
+        {
+            if ((i & 1023) == 0) token.ThrowIfCancellationRequested();
+            var item = previous[i];
+            bool decoration = item is AddImageDecoration { DecorationIndex: >= 0 };
+            var old = (JObject)(decoration ? oldDecorations! : before.actions)[item.SourceIndex];
+            var updated = (JObject)(decoration ? newDecorations! : after.actions)[item.SourceIndex];
+            bool changedReference = item is TrackRangeEvent &&
+                (!JToken.DeepEquals(old["startTile"], updated["startTile"]) ||
+                 !JToken.DeepEquals(old["endTile"], updated["endTile"])) ||
+                item is PositionTrack && !JToken.DeepEquals(old["relativeTo"], updated["relativeTo"]);
+            relocated[i] = changedReference
+                ? Rebind(updated, item, settings, serializer)
+                : item.WithFloor(updated.Value<int?>("floor") ?? 0);
+        }
+        return relocated;
+    }
+
+    // Floor construction and timing use the core events. The remaining events are consumed
+    // by the separately bound playback layers, which retain their original source indices.
+    internal static Level ForEditorFloorTiming(Level level)
+    {
+        JArray actions = new();
+        foreach (JObject action in level.actions.OfType<JObject>())
+            if ((string?)action["eventType"] is { } name &&
+                Enum.TryParse<EventType>(name, out var type) &&
+                type is (EventType.SetSpeed or EventType.Twirl or EventType.Hold or EventType.MultiPlanet or
+                         EventType.Pause or EventType.FreeRoam) && !RemovesFromPlayback(action))
+                actions.Add(action);
+
+        return new Level(new Dictionary<string, object>
+        {
+            ["angleData"] = level.angleData,
+            ["settings"] = level.root["settings"]!,
+            ["actions"] = actions,
+        });
+    }
+
+    private static PlaybackEvent[] Bind(Level level, bool includeDecorations, bool playbackOnly)
     {
         IReadOnlyList<BaseEvent> parsed = level.DeserializeEvents();
         JsonSerializer serializer = JsonSerializer.Create(EventJsonConverter.GetJsonSettings());
         List<PlaybackEvent> result = new(playbackOnly ? Math.Min(parsed.Count, 4096) : parsed.Count);
         JObject? settings = level.root["settings"] as JObject;
         int index = 0;
-        int sourceIndex = -1;
         foreach (JObject action in level.actions.OfType<JObject>())
         {
-            if (document is not null)
-                do { sourceIndex++; }
-                while (document.actions[sourceIndex] is not JObject raw || RemovesFromPlayback(raw));
             BaseEvent source = parsed[index++];
             Type type = ResolveType(source.EventType);
             if (playbackOnly && (type == typeof(ParsedPreviewEvent) || type == typeof(ParsedRuntimeEvent)))
                 continue;
 
-            var item = Bind(action, source, type, serializer, settings);
-            item.SourceIndex = sourceIndex;
-            result.Add(item);
+            result.Add(Bind(action, source, type, serializer, settings));
         }
 
+        if (includeDecorations) BindDecorations(level, playbackOnly, serializer, settings, result);
+        return result.ToArray();
+    }
+
+    private static void BindDecorations(Level level, bool playbackOnly, JsonSerializer serializer, JObject? settings,
+        List<PlaybackEvent> result)
+    {
         // The game reads a separate decorations array whenever present, regardless of the settings version.
-        if (includeDecorations && (level.decorations ?? level.root["decorations"] as JArray) is { } decorations)
+        if ((level.decorations ?? level.root["decorations"] as JArray) is { } decorations)
         {
             for (int decorationIndex = 0; decorationIndex < decorations.Count; decorationIndex++)
             {
@@ -89,8 +161,7 @@ internal static class PlaybackEventBinder
                     continue;
                 if (playbackOnly && (string?)decoration["eventType"] is not ("AddDecoration" or "AddText" or "AddObject" or "AddParticle"))
                     continue;
-                using JsonReader reader = decoration.CreateReader();
-                if (serializer.Deserialize<BaseEvent>(reader) is { } source)
+                if (ReadSource(decoration, serializer) is { } source)
                 {
                     PlaybackEvent item = Bind(decoration, source, ResolveType(source.EventType), serializer, settings);
                     item.SourceIndex = decorationIndex;
@@ -101,7 +172,12 @@ internal static class PlaybackEventBinder
             }
         }
 
-        return result.ToArray();
+    }
+
+    private static BaseEvent? ReadSource(JObject action, JsonSerializer serializer)
+    {
+        using JsonReader reader = action.CreateReader();
+        return serializer.Deserialize<BaseEvent>(reader);
     }
 
     private static bool RemovesFromPlayback(JObject action) =>
@@ -109,10 +185,13 @@ internal static class PlaybackEventBinder
         (string.Equals((string?)action["active"], "false", StringComparison.OrdinalIgnoreCase) ||
          string.Equals((string?)action["active"], "disabled", StringComparison.OrdinalIgnoreCase));
 
-    internal static PlaybackEvent Rebind(JObject replacement, PlaybackEvent previous, JObject? settings)
+    internal static PlaybackEvent Rebind(JObject replacement, PlaybackEvent previous, JObject? settings) =>
+        Rebind(replacement, previous, settings, JsonSerializer.Create(EventJsonConverter.GetJsonSettings()));
+
+    private static PlaybackEvent Rebind(JObject replacement, PlaybackEvent previous, JObject? settings,
+        JsonSerializer serializer)
     {
-        var result = Bind(replacement, previous.Source!, previous.GetType(),
-            JsonSerializer.Create(EventJsonConverter.GetJsonSettings()), settings);
+        var result = Bind(replacement, previous.Source!, previous.GetType(), serializer, settings);
         result.SourceIndex = previous.SourceIndex;
         if (previous is AddImageDecoration old && result is AddImageDecoration image)
             image.DecorationIndex = old.DecorationIndex;

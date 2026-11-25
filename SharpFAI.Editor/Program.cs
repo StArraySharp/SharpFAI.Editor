@@ -12,8 +12,6 @@ internal static class Program
     {
         string? levelPath = null;
         string? propertiesPath = null;
-        bool smokeTest = false;
-        bool effectBenchmark = false;
         string? language = null;
         bool webUi = false;
         for (int i = 0; i < args.Length; i++)
@@ -22,17 +20,13 @@ internal static class Program
                 propertiesPath = args[++i];
             else if (args[i] == "--language" && i + 1 < args.Length)
                 language = args[++i];
-            else if (args[i] == "--smoke-test")
-                smokeTest = true;
-            else if (args[i] == "--effect-benchmark")
-                effectBenchmark = true;
             else if (args[i] == "--web-ui")
                 webUi = true;
             else if (!args[i].StartsWith('-') && levelPath is null)
                 levelPath = args[i];
             else
             {
-                Console.Error.WriteLine("SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--smoke-test] [--effect-benchmark] [--web-ui]");
+                Console.Error.WriteLine("SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--web-ui]");
                 return 2;
             }
         }
@@ -51,11 +45,6 @@ internal static class Program
                 LevelArchive archive = LevelArchive.Extract(levelPath);
                 if (archive.Levels.Count == 1)
                     levelPath = Path.Combine(archive.DirectoryPath, archive.Levels[0]);
-                else if (smokeTest || effectBenchmark)
-                {
-                    Console.Error.WriteLine(L.F("ArchiveNeedsSingleLevel", archive.DirectoryPath));
-                    return 1;
-                }
                 else
                 {
                     archiveChoices = archive;
@@ -72,8 +61,7 @@ internal static class Program
                 APIVersion = new Version(4, 1),
                 Profile = ContextProfile.Core,
                 Vsync = VSyncMode.On,
-                StartVisible = !(smokeTest || effectBenchmark)
-            }, catalog, document, smokeTest, effectBenchmark, language);
+            }, catalog, document, language);
             if (archiveChoices is not null)
                 window.ChooseArchiveLevel(archiveChoices);
             using EditorWebMirror? mirror = webUi ? EditorWebMirror.Start() : null;

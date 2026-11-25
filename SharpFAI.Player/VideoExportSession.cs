@@ -33,7 +33,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
     private int _exportWidth;
     private int _exportHeight;
     private int _exportFps;
-    private bool _exportWaitingLogged;
 
     /// <summary>
     /// 推进至多 <paramref name="budget"/> 帧。渲染与编码都在这里完成，调用方负责绘制 UI。
@@ -47,15 +46,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         {
             if (!_renderer.IsLoading)
                 throw new InvalidOperationException(_renderer.LoadError ?? _renderer.Status);
-
-            // 只在状态变化时打日志，避免刷屏
-            // Log only on state change so the console does not flood
-            if (!_exportWaitingLogged)
-            {
-                _exportWaitingLogged = true;
-                Console.Out.WriteLine(
-                    $"export waiting: loading={_renderer.IsLoading} level={(_renderer.Level is null ? "null" : "ready")}");
-            }
 
             return;
         }
@@ -90,16 +80,12 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             // Picture and audio share one clock: frame n is exactly n / fps seconds
             double time = _exportFrame / (double)_exportFps * _renderer.PlaybackRate;
 
-            long start = Stopwatch.GetTimestamp();
             RenderToOffscreen(_exportWidth, _exportHeight, time);
-            _exportDrawTicks += Stopwatch.GetTimestamp() - start;
 
-            start = Stopwatch.GetTimestamp();
             _videoColorConverter?.Pack(_exportColor);
             readback.Submit();
-            _exportReadbackTicks += Stopwatch.GetTimestamp() - start;
             if (readback.Full)
-                QueueVideoFrame(readback, writer);
+                writer.Enqueue(readback.Take());
 
             _exportFrame++;
 
@@ -123,58 +109,36 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
     private VideoColorConverter? _videoColorConverter;
     private VideoFrameWriter? _videoWriter;
     private string? _encoderAudioPath;
-    private long _exportDrawTicks;
-    private long _exportReadbackTicks;
-    private long _exportQueueTicks;
-
-    private void QueueVideoFrame(VideoReadback readback, VideoFrameWriter writer)
-    {
-        long start = Stopwatch.GetTimestamp();
-        byte[] pixels = readback.Take();
-        _exportReadbackTicks += Stopwatch.GetTimestamp() - start;
-
-        start = Stopwatch.GetTimestamp();
-        writer.Enqueue(pixels);
-        _exportQueueTicks += Stopwatch.GetTimestamp() - start;
-    }
 
     /// <summary>
     /// 把音乐与打击音混成一个临时 WAV，作为 ffmpeg 的第二路输入。
     /// Mix the music and hitsound into a temp WAV for ffmpeg's second input.
     /// </summary>
     /// <returns>WAV 路径；没有音频时返回 null。</returns>
-    private string? WriteExportAudio()
+    private string? WriteExportAudio(string ffmpeg)
     {
         (string? musicPath, Thrust.Audio.DecodedAudio? music, Thrust.Audio.DecodedAudio? hitsound) =
             _renderer.AudioSources;
 
-        string path = Path.Combine(Path.GetTempPath(), $"sharpfai_audio_{Environment.ProcessId}.wav");
+        double seconds = _exportFrameCount / (double)_exportFps;
+        if (music is null && musicPath is not null && File.Exists(musicPath) && !VideoExporter.IsVideoPath(musicPath))
+            music = VideoExporter.DecodeExportAudio(ffmpeg, musicPath, seconds * _renderer.PlaybackRate);
 
         if (music is not null || hitsound is not null)
         {
+            string path = Path.Combine(Path.GetTempPath(), $"sharpfai-audio-{Guid.NewGuid():N}.wav");
             _encoderAudioPath = path;
             VideoExporter.WriteMixedWav(
                 music,
                 hitsound,
                 _renderer.MusicVolumeExport,
                 _renderer.HitsoundVolumeExport,
-                _exportFrameCount / (double)_exportFps,
+                seconds,
                 path,
                 _renderer.PlaybackRate,
                 hitsoundRate: 1.0);
 
-            Console.Out.WriteLine($"audio mixed -> {path}");
             return path;
-        }
-
-        // 解码结果缺失时退回源文件，仍由 ffmpeg 处理。但视频绝不能被当作音频输入：
-        // 关卡目录里的 mp4（常见为背景视频）带着音轨，ffmpeg 会把它混进来。
-        // Fall back to the source file when decoding was skipped; ffmpeg handles it. A video must
-        // never be the audio input though: mp4 files in a level folder (usually the background
-        // video) carry a track that ffmpeg would happily mix in.
-        if (musicPath is not null && File.Exists(musicPath) && !VideoExporter.IsVideoPath(musicPath))
-        {
-            return musicPath;
         }
 
         return null;
@@ -249,7 +213,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         _exportFboWidth = width;
         _exportFboHeight = height;
 
-        Console.Out.WriteLine($"offscreen target {width}x{height}");
     }
 
     /// <summary>释放离屏 FBO 资源 / Release the offscreen FBO resources.</summary>
@@ -328,7 +291,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         _exportFrameCount = 0;
         _exportStartedAt = 0.0;
         _exportArmed = false;
-        _exportWaitingLogged = false;
         _lastExportError = null;
         _cancelled = false;
         _exportOutputPath = request.OutputPath;
@@ -387,7 +349,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
 
         _exportSettleFrames = 3;
         _exportStartedAt = _clock.Elapsed.TotalSeconds;
-        _exportDrawTicks = _exportReadbackTicks = _exportQueueTicks = 0;
         string? ffmpeg = VideoExporter.FindFfmpeg();
         VideoExporter.EncoderSession? encoder = null;
         if (ffmpeg is null)
@@ -404,7 +365,7 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
                 try { _videoColorConverter = new VideoColorConverter(_exportWidth, _exportHeight); }
                 catch (InvalidOperationException ex) { Console.Error.WriteLine($"GPU NV12 unavailable: {ex.Message}"); }
             }
-            encoder = VideoExporter.StartEncoder(request, _exportWidth, _exportHeight, WriteExportAudio(), ffmpeg,
+            encoder = VideoExporter.StartEncoder(request, _exportWidth, _exportHeight, WriteExportAudio(ffmpeg), ffmpeg,
                 _videoColorConverter is not null, Console.Out.WriteLine);
         }
         try
@@ -434,7 +395,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
 
         Console.Out.WriteLine(
             $"export start {_exportWidth}x{_exportHeight} @{_exportFps}fps, {_exportFrameCount} frames");
-        Console.Out.WriteLine($"export GPU: {GL.GetString(StringName.Renderer)}");
     }
 
     /// <summary>导出结束：混音、编码、清理。</summary>
@@ -449,13 +409,12 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             else if (_videoWriter is { } writer && _videoReadback is { } readback)
             {
                 while (readback.Pending > 0 && !writer.Failed)
-                    QueueVideoFrame(readback, writer);
+                    writer.Enqueue(readback.Take());
                 writer.Finish();
 
                 double elapsed = _clock.Elapsed.TotalSeconds - _exportStartedAt;
-                double msPerTick = 1000.0 / (Stopwatch.Frequency * (double)_exportFrame);
                 Console.Out.WriteLine(FormattableString.Invariant(
-                    $"exported {_exportFrame} frames in {elapsed:F2}s ({_exportFrame / elapsed:F1} frames/s) · draw {_exportDrawTicks * msPerTick:F2} ms · readback {_exportReadbackTicks * msPerTick:F2} ms · encoder queue {_exportQueueTicks * msPerTick:F2} ms per frame"));
+                    $"exported {_exportFrame} frames in {elapsed:F2}s ({_exportFrame / elapsed:F1} frames/s)"));
                 Console.Out.WriteLine($"video -> {_exportOutputPath ?? request.OutputPath}");
                 _lastExportError = null;
             }

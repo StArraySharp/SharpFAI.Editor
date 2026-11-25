@@ -16,8 +16,7 @@ public sealed class TestEditorEffectUpdates
         var level = Chart();
         level.actions.Insert(0, JObject.Parse("""{"floor":0,"eventType":"Hold","active":false}"""));
         level.actions.Insert(1, JObject.Parse("""{"floor":0,"eventType":"AddDecoration","tag":"action"}"""));
-        var playback = PlaybackEventBinder.ForPlayback(level);
-        var events = PlaybackEventBinder.BindForEditor(playback, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var slots = LevelRenderer.BuildSlots(events);
         Assert.Multiple(() =>
         {
@@ -35,7 +34,7 @@ public sealed class TestEditorEffectUpdates
     public void MotionPatchAndUndoMatchFullRebuild(string field, string json)
     {
         var level = Chart();
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var timeline = Build(events);
         var before = events.OfType<MoveImageDecoration>().First();
         var raw = (JObject)level.actions[before.SourceIndex]!;
@@ -44,12 +43,12 @@ public sealed class TestEditorEffectUpdates
         var after = (MoveImageDecoration)PlaybackEventBinder.Rebind(raw, before, null);
         Assert.That(timeline.CanEditMotion(before, after), Is.True);
         timeline.EditMotions(new Dictionary<int, MoveImageDecoration> { [after.SourceIndex] = after });
-        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
         Assert.That(timeline.ChangedItems, Does.Contain(timeline.Items[0]));
         var undo = (MoveImageDecoration)PlaybackEventBinder.Rebind(original, after, null);
         timeline.EditMotions(new Dictionary<int, MoveImageDecoration> { [undo.SourceIndex] = undo });
         level.actions[before.SourceIndex] = original;
-        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
     }
 
     [Test]
@@ -63,7 +62,7 @@ public sealed class TestEditorEffectUpdates
         level.actions.Add(JObject.Parse("""
             {"floor":1,"eventType":"SetObject","tag":"object","trackAngle":180,"duration":2,"ease":"Linear"}
             """));
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var timeline = Build(events);
         var obj = events.OfType<AddObjectDecoration>().Single();
         var raw = (JObject)decorations[obj.DecorationIndex]!;
@@ -79,7 +78,7 @@ public sealed class TestEditorEffectUpdates
         Assert.That(floor.At(0).Tint, Is.EqualTo(new Vector4(1, 0, 1, 1)));
         Assert.That(floor.At(1).ObjectFloor!.Angle, Is.EqualTo(120f));
         Assert.That(floor.At(1).ObjectFloor!.Style, Is.EqualTo(TrackStyleInfo.Minimal));
-        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
     }
 
     [Test]
@@ -92,7 +91,7 @@ public sealed class TestEditorEffectUpdates
         level.actions.Clear();
         level.actions.Add(JObject.Parse("""{"floor":1,"eventType":"SetObject","tag":"target","duration":2,"ease":"InQuad","trackOpacity":0,"trackColor":"000000","planetColor":"0000ff"}"""));
         level.actions.Add(JObject.Parse("""{"floor":1,"eventType":"MoveDecorations","tag":"target","opacity":100}"""));
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var timeline = Build(events);
         var floor = timeline.Items[1];
         var planet = timeline.Items[2];
@@ -115,7 +114,7 @@ public sealed class TestEditorEffectUpdates
         timeline.EditMotions(new Dictionary<int, MoveImageDecoration> { [after.SourceIndex] = after });
         Assert.That(floor.At(2).Opacity, Is.EqualTo(.4f));
         Assert.That(timeline.ChangedItems, Does.Not.Contain(timeline.Items[0]));
-        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
     }
 
     [Test]
@@ -126,7 +125,7 @@ public sealed class TestEditorEffectUpdates
         level.actions.Add(JObject.Parse("""{"floor":2,"eventType":"MoveDecorations","tag":"target","relativeTo":"LastPosition","positionOffset":[3,4],"duration":1}"""));
         level.actions.Add(JObject.Parse("""{"floor":3,"eventType":"MoveDecorations","tag":"target","opacity":100,"duration":0}"""));
         level.actions.Add(JObject.Parse("""{"floor":3,"eventType":"MoveDecorations","tag":"target","rotationOffset":120}"""));
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var timeline = Build(events);
         var before = events.OfType<MoveImageDecoration>().First();
         var raw = (JObject)level.actions[before.SourceIndex]!;
@@ -135,7 +134,7 @@ public sealed class TestEditorEffectUpdates
             raw[field] = JToken.Parse(value);
             var after = (MoveImageDecoration)PlaybackEventBinder.Rebind(raw, before, null);
             timeline.EditMotions(new Dictionary<int, MoveImageDecoration> { [after.SourceIndex] = after });
-            AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+            AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
             before = after;
         }
     }
@@ -149,7 +148,7 @@ public sealed class TestEditorEffectUpdates
     public void InitialDecorationPatchReevaluatesItsMotionsWithoutReplacingTheItem(string field, string json)
     {
         var level = Chart();
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var timeline = Build(events);
         var item = timeline.Items[0];
         _ = item.At(.75);
@@ -162,7 +161,7 @@ public sealed class TestEditorEffectUpdates
         timeline.EditInitial(after, decoration: true);
         Assert.That(timeline.Items[0], Is.SameAs(item));
         Assert.That(timeline.ChangedItems, Does.Contain(item));
-        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level, level)));
+        AssertEquivalent(timeline, Build(PlaybackEventBinder.BindForEditor(level)));
     }
 
     [TestCase("tag", "\"different\"")]
@@ -195,7 +194,7 @@ public sealed class TestEditorEffectUpdates
             """{"floor":2,"eventType":"MoveCamera","position":[9,10],"zoom":100,"duration":0}""",
             """{"floor":3,"eventType":"MoveCamera","rotation":45}""",
         }) level.actions.Add(JObject.Parse(action));
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var floors = Enumerable.Range(0, 4).Select(_ => new Floor(0, 180, default)).ToArray();
         var timing = new LevelRenderer.PlaybackTimeline { EntryTimes = [0, .5, 1, 1.5], FloorBpms = [120, 120, 120, 120] };
         var settings = new LevelPlaybackSettings();
@@ -206,7 +205,7 @@ public sealed class TestEditorEffectUpdates
         var after = (MoveCameraEvent)PlaybackEventBinder.Rebind(raw, before, null);
         var patched = original.Edit(new Dictionary<int, MoveCameraEvent> { [after.SourceIndex] = after }, floors, timing, settings, 150);
         Assert.That(patched, Is.Not.Null);
-        var rebuilt = CameraTimeline.Build(PlaybackEventBinder.BindForEditor(level, level), floors, timing, settings, 150)!;
+        var rebuilt = CameraTimeline.Build(PlaybackEventBinder.BindForEditor(level), floors, timing, settings, 150)!;
         foreach (double time in new[] { 0, .5, .6, .75, 1, 1.25, 1.5, 3, .6 })
             Assert.That(patched!.Evaluate(time, new Vector2(20, 30), 100),
                 Is.EqualTo(rebuilt.Evaluate(time, new Vector2(20, 30), 100)), $"at {time}");
@@ -230,7 +229,7 @@ public sealed class TestEditorEffectUpdates
             """{"floor":1,"eventType":"Flash","startColor":"ff0000","endColor":"0000ff","startOpacity":100,"duration":1,"eventTag":"repeat"}""",
             """{"floor":1,"eventType":"RepeatEvents","repetitions":2,"interval":0.5,"tag":"repeat"}""",
         }) level.actions.Add(JObject.Parse(action));
-        var events = PlaybackEventBinder.BindForEditor(level, level);
+        var events = PlaybackEventBinder.BindForEditor(level);
         var floors = Enumerable.Range(0, 4).Select(_ => new Floor(0, 180, default)).ToArray();
         double[] times = [0, .5, 1, 1.5], bpms = [120, 120, 120, 120];
         var settings = new LevelPlaybackSettings();
@@ -241,7 +240,7 @@ public sealed class TestEditorEffectUpdates
         var after = (BackdropEvent)PlaybackEventBinder.Rebind(raw, before, null);
         var patched = original.EditFlashes(new Dictionary<int, BackdropEvent> { [after.SourceIndex] = after }, floors, bpms);
         Assert.That(patched, Is.Not.Null);
-        var rebuilt = BackdropTimeline.Build(settings, PlaybackEventBinder.BindForEditor(level, level), floors, times, bpms, null, []);
+        var rebuilt = BackdropTimeline.Build(settings, PlaybackEventBinder.BindForEditor(level), floors, times, bpms, null, []);
         foreach (double time in new[] { 0, .5, .6, .75, 1, 1.25, 1.5, 3, .6 })
         {
             Assert.That(patched!.BackgroundAt(time), Is.EqualTo(rebuilt.BackgroundAt(time)));

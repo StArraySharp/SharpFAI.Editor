@@ -7,6 +7,16 @@ namespace SharpFAI.Editor.Tests;
 
 public sealed class PropertyControlRegressionTests
 {
+    [TestCase("bpm", 0.001)]
+    [TestCase("volume", 1)]
+    [TestCase("hitsoundVolume", 1)]
+    [TestCase("pitch", 1)]
+    public void SongNumberEditorsRejectZeroAndClampDragging(string property, double minimum)
+    {
+        EditorField field = new EditorCatalog(null).SettingsFor("SongSettings").Single(item => item.Key == property);
+        Assert.That(EditorPropertyEdit.TryNumber(field, "0", out _), Is.False);
+        Assert.That(EditorPropertyEdit.ClampNumericDrag(field, 0), Is.EqualTo(minimum));
+    }
     [Test]
     public void OtherFieldsExcludeMetadataAndOnlyListUnrecognizedProperties()
     {

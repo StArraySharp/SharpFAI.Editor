@@ -62,11 +62,6 @@ internal sealed unsafe partial class EditorWindow
         bool popup = ImGui.BeginPopup(pickerId, 0) != 0;
         if (popup)
         {
-            if (_smokeTest && _frames == 42 && field.Key == ColorSmokeKey)
-            {
-                ImVec2 origin = ImGui.GetCursorScreenPos();
-                _colorSmokePicker = WidgetDraw.V2(origin.x + 35, origin.y + 35);
-            }
             ImGui.SetNextItemWidth(220 * _uiScale);
             changed = ImGui.ColorPicker4("##picker", color,
                 alphaBar | (int)ImGuiColorEditFlags.ImGuiColorEditFlags_NoInputs, null) != 0;

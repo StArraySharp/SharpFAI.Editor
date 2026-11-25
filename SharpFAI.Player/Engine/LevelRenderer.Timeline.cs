@@ -195,6 +195,7 @@ public sealed unsafe partial class LevelRenderer
             PauseLocks = pauseLocks,
             LevelDuration = Math.Max(entryTimes[^1], 0.0),
             OffsetSeconds = offsetSeconds,
+            SeparateCountdownLead = audioLead,
             CountdownTicks = countdownTicks,
             Pitch = pitch,
             SnapBpm = bpm,
@@ -216,6 +217,7 @@ public sealed unsafe partial class LevelRenderer
         _pauseAngles = timeline.PauseAngles;
         _levelDuration = timeline.LevelDuration;
         _offsetSeconds = timeline.OffsetSeconds;
+        _videoCountdownLead = timeline.SeparateCountdownLead;
         _pitch = timeline.Pitch;
     }
 

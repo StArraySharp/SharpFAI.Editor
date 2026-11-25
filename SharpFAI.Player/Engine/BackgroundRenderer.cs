@@ -14,6 +14,7 @@ internal sealed class BackgroundRenderer : IDisposable
     private int _image;
     private Vector2 _imageSize;
     private int _white;
+    private int _videoTexture;
     private readonly Dictionary<(byte[] Pixels, bool Smoothing, bool Repeat), int> _textures = [];
 
     public void SetImage(ImageDecoder.RgbaImage? image, bool smoothing, bool repeat = false)
@@ -73,15 +74,51 @@ internal sealed class BackgroundRenderer : IDisposable
         float angle, bool repeat)
     {
         int texture = _image != 0 ? _image : _tutorialTile ??= LoadTutorialTile();
+        DrawPlane(texture, settings.ImageTint, settings.PatternColor, viewport, size, movement, angle,
+            _image != 0, _image == 0 && texture != 0, repeat);
+    }
+
+    public void UploadVideo(VideoBackgroundSource video, byte[] pixels)
+    {
+        GL.ActiveTexture(TextureUnit.Texture0);
+        if (_videoTexture == 0)
+        {
+            _videoTexture = ImageDecoder.Upload(pixels, video.Width, video.Height, generateMipmaps: false, repeat: false);
+            return;
+        }
+        GL.BindTexture(TextureTarget.Texture2D, _videoTexture);
+        GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, video.Width, video.Height, PixelFormat.Rgba,
+            PixelType.UnsignedByte, pixels);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    public void DrawVideo(Camera2D camera, double aspect)
+    {
+        Vector2 viewport = new(camera.ViewportWidth, camera.ViewportHeight);
+        // The original camera fits the video to the frame width. The decoder provides top-down rows.
+        DrawPlane(_videoTexture, Vector4.One, Vector4.Zero, viewport, new(viewport.X, -viewport.X / (float)aspect),
+            Vector2.Zero, 0f, hasImage: true, hasTutorialTile: false, repeat: false);
+    }
+
+    public void ClearVideo()
+    {
+        if (_videoTexture == 0) return;
+        GL.DeleteTexture(_videoTexture);
+        _videoTexture = 0;
+    }
+
+    private void DrawPlane(int texture, Vector4 tint, Vector4 pattern, Vector2 viewport, Vector2 size, Vector2 movement,
+        float angle, bool hasImage, bool hasTutorialTile, bool repeat)
+    {
         GL.UseProgram(_program);
         GL.Uniform2(GL.GetUniformLocation(_program, "uViewport"), viewport);
         GL.Uniform2(GL.GetUniformLocation(_program, "uSize"), size);
         GL.Uniform2(GL.GetUniformLocation(_program, "uMovement"), movement);
-        GL.Uniform4(GL.GetUniformLocation(_program, "uTint"), settings.ImageTint);
-        GL.Uniform4(GL.GetUniformLocation(_program, "uPattern"), settings.PatternColor);
+        GL.Uniform4(GL.GetUniformLocation(_program, "uTint"), tint);
+        GL.Uniform4(GL.GetUniformLocation(_program, "uPattern"), pattern);
         GL.Uniform1(GL.GetUniformLocation(_program, "uAngle"), angle);
-        GL.Uniform1(GL.GetUniformLocation(_program, "uHasImage"), _image != 0 ? 1 : 0);
-        GL.Uniform1(GL.GetUniformLocation(_program, "uHasTutorialTile"), _image == 0 && texture != 0 ? 1 : 0);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uHasImage"), hasImage ? 1 : 0);
+        GL.Uniform1(GL.GetUniformLocation(_program, "uHasTutorialTile"), hasTutorialTile ? 1 : 0);
         GL.Uniform1(GL.GetUniformLocation(_program, "uRepeat"), repeat ? 1 : 0);
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, texture);
@@ -167,6 +204,7 @@ internal sealed class BackgroundRenderer : IDisposable
 
     public void Dispose()
     {
+        ClearVideo();
         foreach (int texture in _textures.Values)
             GL.DeleteTexture(texture);
         if (_white != 0)

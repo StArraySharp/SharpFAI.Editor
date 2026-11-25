@@ -11,7 +11,7 @@ public static class LevelAssetPaths
 {
     /// <summary>视频扩展名 / Video extensions.</summary>
     public static readonly string[] VideoExtensions =
-        [".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg"];
+        [".mp4", ".fmp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg"];
 
     /// <summary>
     /// 是否为视频文件。视频带着音轨，既不能当音乐播放，也不能当 ffmpeg 的音频输入。

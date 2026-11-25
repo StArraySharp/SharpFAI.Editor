@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SharpFAI.Player.Engine.Events;
@@ -49,12 +48,7 @@ public sealed unsafe partial class LevelRenderer
     private Task<EffectUpdate>? _editorEffectTask;
     private EffectUpdate? _editorEffectReady;
     private CancellationTokenSource? _editorEffectCancellation;
-    private long _editorEffectStarted;
     private Dictionary<EffectLayer, int[]>? _editorLayerSlots;
-    internal string LastEditorEffectLayers { get; private set; } = "";
-    internal double LastEditorEffectMilliseconds { get; private set; }
-    internal double LastEditorEffectMainThreadMilliseconds { get; private set; }
-    internal string LastEditorEffectTimings { get; private set; } = "";
 
     internal static bool SupportsEditorEffect(string type) => type is
         "AddDecoration" or "AddText" or "AddObject" or "AddParticle" or "MoveDecorations" or "SetText" or "SetObject" or
@@ -69,7 +63,6 @@ public sealed unsafe partial class LevelRenderer
             _editorEffectTask is not null || _editorEffectReady is not null)
             return false;
 
-        _editorEffectStarted = Stopwatch.GetTimestamp();
         _editorEventSlots ??= BuildSlots(previous);
         var next = (PlaybackEvent[])previous.Clone();
         EffectLayer layers = EffectLayer.None;
@@ -137,7 +130,6 @@ public sealed unsafe partial class LevelRenderer
             return false;
         }
 
-        LastEditorEffectLayers = layers.ToString();
         var update = new EffectUpdate(layers, next, patches, motions);
         update.Initials.AddRange(initials);
         var floors = _floors;
@@ -145,7 +137,6 @@ public sealed unsafe partial class LevelRenderer
         bool legacyMasks = oldDecorations?.LegacyMasks ?? ((int?)rawSettings?["version"] ?? 0) < 15 ||
             (bool?)rawSettings?["disableV15Features"] == true;
         float tileSize = TileSpacing;
-        double bindingMs = Stopwatch.GetElapsedTime(_editorEffectStarted).TotalMilliseconds;
         var layerSlots = _editorLayerSlots ??= BuildLayerSlots(previous);
         PlaybackEvent[] LayerEvents(EffectLayer layer) => layerSlots[layer].Select(index => next[index]).ToArray();
         if (layers.HasFlag(EffectLayer.Decoration) || needsNewBackdropAsset)
@@ -156,8 +147,6 @@ public sealed unsafe partial class LevelRenderer
         }
         else
             _editorEffectReady = Prepare(CancellationToken.None);
-        LastEditorEffectMainThreadMilliseconds = Stopwatch.GetElapsedTime(_editorEffectStarted).TotalMilliseconds;
-        LastEditorEffectTimings = $"bind={bindingMs:F3}, prepare={LastEditorEffectMainThreadMilliseconds:F3}";
         return true;
 
         EffectUpdate Prepare(CancellationToken token)
@@ -190,7 +179,7 @@ public sealed unsafe partial class LevelRenderer
                     .OfType<BackdropEvent>().ToDictionary(item => item.SourceIndex);
                 update.Backdrop = oldBackdrop?.EditFlashes(replacements, floors, timeline.FloorBpms) ??
                     BackdropTimeline.Build(settings, LayerEvents(EffectLayer.Backdrop), floors, timeline.EntryTimes, timeline.FloorBpms,
-                        directory, update.Warnings, oldBackdrop?.Images);
+                        directory, update.Warnings, oldBackdrop?.Images, oldBackdrop?.Video, token);
             }
             if (layers.HasFlag(EffectLayer.Decoration))
                 update.Decorations = ImageDecorationTimeline.Build(next, floors, timeline.EntryTimes, timeline.FloorBpms,
@@ -202,7 +191,6 @@ public sealed unsafe partial class LevelRenderer
 
     internal EditorEffectStatus FinishEditorEffectUpdate(bool apply = true)
     {
-        long started = Stopwatch.GetTimestamp();
         var update = _editorEffectReady;
         _editorEffectReady = null;
         if (_editorEffectTask is { } task)
@@ -245,12 +233,7 @@ public sealed unsafe partial class LevelRenderer
         }
         if ((layers & (EffectLayer.Filter | EffectLayer.Scene)) != 0)
             BeginShaderPrewarm();
-        if (layers.HasFlag(EffectLayer.Backdrop))
-        {
-            _backdrop = update.Backdrop;
-            if (_backdrop?.NeedsBackgroundRenderer == true)
-                _background ??= new BackgroundRenderer();
-        }
+        if (layers.HasFlag(EffectLayer.Backdrop)) SetBackdrop(update.Backdrop);
         if (layers.HasFlag(EffectLayer.Decoration))
         {
             _imageDecorations = update.Decorations;
@@ -259,7 +242,6 @@ public sealed unsafe partial class LevelRenderer
         {
             if (!rebindTriggers)
                 ResetDecorationTriggers();
-            LastEditorEffectTimings += $", reset={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}";
             foreach (var (item, decoration) in update.Initials)
                 _imageDecorations?.EditInitial(item, decoration);
             if (layers.HasFlag(EffectLayer.Move))
@@ -267,8 +249,6 @@ public sealed unsafe partial class LevelRenderer
         }
         if (rebindTriggers)
             BindDecorationEffects(_editorTimeline?.FloorBpms);
-        LastEditorEffectTimings += $", apply={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}";
-        long patchStarted = Stopwatch.GetTimestamp();
         foreach (var patch in update.Patches)
         {
             var target = patch.Decoration ? (JArray)level.root["decorations"]! : level.actions;
@@ -278,12 +258,7 @@ public sealed unsafe partial class LevelRenderer
         _warnings.AddRange(update.Warnings.Where(warning => !_warnings.Contains(warning)));
         _colorHistory?.Reset();
         _lastFilterTime = double.NaN;
-        LastEditorEffectTimings += $", patch={Stopwatch.GetElapsedTime(patchStarted).TotalMilliseconds:F3}";
-        long sampleStarted = Stopwatch.GetTimestamp();
         ApplyTimeline(previewCameraEvents: !_cameraFree, automaticConditions: _isPlaying || _playTime > 0);
-        LastEditorEffectTimings += $", sample={Stopwatch.GetElapsedTime(sampleStarted).TotalMilliseconds:F3}";
-        LastEditorEffectMilliseconds = Stopwatch.GetElapsedTime(_editorEffectStarted).TotalMilliseconds;
-        LastEditorEffectMainThreadMilliseconds += Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         return EditorEffectStatus.Applied;
     }
 

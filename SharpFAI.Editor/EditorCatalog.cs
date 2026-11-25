@@ -120,7 +120,7 @@ internal sealed class EditorCatalog
             LoadSchema(JObject.Parse(File.ReadAllText(source)));
 
         void AddSettings(string owner, params string[] keys) =>
-            _settings[owner] = keys.Select(key => Infer(key, defaults[key]!, owner)).ToArray();
+            _settings[owner] = keys.Select(key => ApplyNumericBounds(owner, Infer(key, defaults[key]!, owner))).ToArray();
     }
 
     internal static EditorCatalog FromSchema(JObject schema)
@@ -205,7 +205,7 @@ internal sealed class EditorCatalog
                     ("ScaleRadius", "scale") => metadata with { Unit = "%", Minimum = -10000, Maximum = 10000 },
                     _ => metadata,
                 };
-                return metadata with { Optional = optional.Contains(field.Name), StartEnabled = false };
+                return ApplyNumericBounds(type, metadata with { Optional = optional.Contains(field.Name), StartEnabled = false });
             }).ToArray()
         };
     }
@@ -282,9 +282,31 @@ internal sealed class EditorCatalog
                     : Options(metadata);
                 if (field["except"] is JArray exceptions && options is not null)
                     options = options.Except(exceptions.Values<string>().OfType<string>(), StringComparer.Ordinal).ToArray();
-                return metadata with { Options = options };
+                return ApplyNumericBounds(owner, metadata with { Options = options });
             })
             .ToArray();
+    }
+
+    private static EditorField ApplyNumericBounds(string? owner, EditorField field)
+    {
+        (double? Min, double? Max) bounds = (owner, field.Key) switch
+        {
+            ("SongSettings", "bpm") or ("SetSpeed", "beatsPerMinute") => (0.001, 10000),
+            ("SetSpeed", "bpmMultiplier") => (1e-7, 128),
+            ("SongSettings", "volume" or "hitsoundVolume") => (1, 100),
+            ("SongSettings", "pitch") => (1, 1000),
+            ("SongSettings", "offset") => (-10000, 300000),
+            ("SongSettings", "countdownTicks") => (2, 12),
+            _ => (null, null),
+        };
+        if (bounds.Min is null) return field;
+        return field with
+        {
+            Type = (owner, field.Key) == ("SongSettings", "bpm") ? "Float" : field.Type,
+            Minimum = field.Minimum is { } lower && bounds.Min is { } required
+                ? Math.Max(lower, required) : field.Minimum ?? bounds.Min,
+            Maximum = field.Maximum ?? bounds.Max,
+        };
     }
 
     private static double? ReadBound(JToken? token)

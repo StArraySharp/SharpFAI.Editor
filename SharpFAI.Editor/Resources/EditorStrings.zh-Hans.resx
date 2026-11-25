@@ -43,7 +43,6 @@
   <data name="LastChartMissing" xml:space="preserve"><value>找不到上次打开的谱面。路径为 {0}。</value></data>
   <data name="ChooseArchiveLevel" xml:space="preserve"><value>从 ZIP 中选择关卡</value></data>
   <data name="NoArchiveLevels" xml:space="preserve"><value>ZIP 中没有 backup.adofai 之外的 .adofai 关卡。</value></data>
-  <data name="ArchiveNeedsSingleLevel" xml:space="preserve"><value>此模式需要一个关卡，请从 {0} 选择一个已解包的关卡文件。</value></data>
   <data name="Save" xml:space="preserve"><value>保存</value></data>
   <data name="SaveLevel" xml:space="preserve"><value>保存关卡……</value></data>
   <data name="ChartSaved" xml:space="preserve"><value>谱面已保存</value></data>
@@ -66,19 +65,17 @@
   <data name="GoToEnd" xml:space="preserve"><value>选择最后一个方块</value></data>
   <data name="ChartPreview" xml:space="preserve"><value>画面预览</value></data>
   <data name="PlayFromTile" xml:space="preserve"><value>从当前砖块播放</value></data>
-  <data name="ManualFromTile" xml:space="preserve"><value>从当前砖块游玩</value></data>
-  <data name="ManualTooltip" xml:space="preserve"><value>从当前砖块手打</value></data>
+  <data name="ManualTooltip" xml:space="preserve"><value>Alt+A · 切换手打模式</value></data>
   <data name="ConfiguredSpeed" xml:space="preserve"><value>按设定倍率播放</value></data>
   <data name="HalfSpeed" xml:space="preserve"><value>按设定倍率的一半播放</value></data>
-  <data name="Autoplay" xml:space="preserve"><value>自动演奏</value></data>
-  <data name="NoFail" xml:space="preserve"><value>不会失败模式</value></data>
+  <data name="NoFail" xml:space="preserve"><value>不死模式</value></data>
   <data name="ReturnToEdit" xml:space="preserve"><value>返回编辑</value></data>
   <data name="Preview" xml:space="preserve"><value>预览</value></data>
   <data name="Play" xml:space="preserve"><value>开始</value></data>
   <data name="Pause" xml:space="preserve"><value>暂停</value></data>
   <data name="Stop" xml:space="preserve"><value>停止</value></data>
   <data name="Reset" xml:space="preserve"><value>重置</value></data>
-  <data name="Manual" xml:space="preserve"><value>游玩</value></data>
+  <data name="Manual" xml:space="preserve"><value>手打模式</value></data>
   <data name="Cancel" xml:space="preserve"><value>取消</value></data>
   <data name="Close" xml:space="preserve"><value>关闭</value></data>
   <data name="Ok" xml:space="preserve"><value>确认</value></data>
@@ -133,7 +130,7 @@
   <data name="HelpEventPages" xml:space="preserve"><value>[ / ] 同类事件翻页 · Shift 跳到首尾</value></data>
   <data name="HelpPalette" xml:space="preserve"><value>1–0 添加事件 · Ctrl+数字切换分类</value></data>
   <data name="HelpCamera" xml:space="preserve"><value>滚轮或 - / = 缩放 · 左键拖动画布</value></data>
-  <data name="HelpPlay" xml:space="preserve"><value>Ctrl+滚轮调速 · Ctrl+Space 按设定速度播放 · Ctrl+P 半速 · Alt+A 自动 · Alt+N 不死</value></data>
+  <data name="HelpPlay" xml:space="preserve"><value>Ctrl+滚轮调速 · Ctrl+Space 按设定速度播放 · Ctrl+P 半速 · Alt+A 手打 · Alt+N 不死</value></data>
   <data name="HelpReturn" xml:space="preserve"><value>Esc 将视角移到播放砖块 · Shift+Esc 同时选中该砖块</value></data>
   <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B 切换书签 · Alt+← / → 跳转书签</value></data>
   <data name="HelpLocate" xml:space="preserve"><value>Alt+; 查找砖块 · Alt+F 查找注释</value></data>

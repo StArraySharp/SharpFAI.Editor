@@ -42,6 +42,8 @@ internal sealed record LevelPlaybackSettings
     public bool MirrorPlanetEase { get; init; } = true;
     public float TileLength { get; init; } = 1f;
     public string? BackgroundVideo { get; init; }
+    public double VideoOffset { get; init; }
+    public bool LoopVideo { get; init; }
 
     public static LevelPlaybackSettings Read(Level level) => Read(level.root["settings"] as JObject);
 
@@ -87,6 +89,8 @@ internal sealed record LevelPlaybackSettings
             MirrorPlanetEase = Text("planetEasePartBehavior") != "Repeat",
             TileLength = Text("tileShape") == "Short" ? 2f / 3f : 1f,
             BackgroundVideo = Text("bgVideo"),
+            VideoOffset = Number("vidOffset", 0f) / 1000d,
+            LoopVideo = Flag("loopVideo"),
         };
     }
 

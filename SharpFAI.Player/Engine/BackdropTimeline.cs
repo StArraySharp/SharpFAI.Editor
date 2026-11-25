@@ -20,17 +20,19 @@ internal sealed class BackdropTimeline
     private readonly List<Flash> _frontFlash = [];
     private int _compiledRevision = -1;
 
-    private BackdropTimeline(ImageState initial, ScheduledEvent<BackdropEvent>[] schedule)
+    private BackdropTimeline(ImageState initial, ScheduledEvent<BackdropEvent>[] schedule, VideoBackgroundSource? video)
     {
         Initial = initial;
+        Video = video;
         Triggers = new(schedule);
         UsesHistory = schedule.Any(entry => entry.Event.EventType == EventType.HallOfMirrors);
-        NeedsBackgroundRenderer = initial.Pixels is not null || initial.ShowsDefaultPattern ||
+        NeedsBackgroundRenderer = video is not null || initial.Pixels is not null || initial.ShowsDefaultPattern ||
             schedule.Any(entry => entry.Event.EventType is EventType.CustomBackground or EventType.Flash);
     }
 
     internal TriggeredEventSchedule<BackdropEvent> Triggers { get; }
     public ImageState Initial { get; }
+    public VideoBackgroundSource? Video { get; }
     public IReadOnlyDictionary<string, ImageDecoder.RgbaImage?> Images { get; private init; } =
         new Dictionary<string, ImageDecoder.RgbaImage?>();
     public bool NeedsBackgroundRenderer { get; }
@@ -39,7 +41,8 @@ internal sealed class BackdropTimeline
 
     public static BackdropTimeline Build(LevelPlaybackSettings settings, IReadOnlyList<PlaybackEvent> events,
         IReadOnlyList<Floor> floors, double[] times, double[]? bpms, string? directory, List<string> warnings,
-        IReadOnlyDictionary<string, ImageDecoder.RgbaImage?>? cached = null)
+        IReadOnlyDictionary<string, ImageDecoder.RgbaImage?>? cached = null, VideoBackgroundSource? cachedVideo = null,
+        CancellationToken token = default)
     {
         var images = new Dictionary<string, ImageDecoder.RgbaImage?>(StringComparer.OrdinalIgnoreCase);
         var initial = new ImageState(settings, Load(settings.BackgroundImage));
@@ -48,7 +51,8 @@ internal sealed class BackdropTimeline
             if (entry.Event.EventType == EventType.CustomBackground)
                 Load(entry.Event.Enabled("bgImage", entry.Event.Image));
 
-        var timeline = new BackdropTimeline(initial, schedule) { Images = images };
+        var video = VideoBackgroundSource.Open(directory, settings.BackgroundVideo, cachedVideo, warnings, token);
+        var timeline = new BackdropTimeline(initial, schedule, video) { Images = images };
         timeline.Compile();
         return timeline;
 
@@ -135,7 +139,7 @@ internal sealed class BackdropTimeline
             !TimedEventSchedule.TryEdit(Triggers.Authored, replacements, floors, bpms, out var edited))
             return null;
         Compile();
-        var result = new BackdropTimeline(Initial, edited) { Images = Images, _compiledRevision = 0 };
+        var result = new BackdropTimeline(Initial, edited, Video) { Images = Images, _compiledRevision = 0 };
         result._backgrounds.AddRange(_backgrounds);
         result._history.AddRange(_history);
         foreach (var item in edited)

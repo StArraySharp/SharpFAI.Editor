@@ -129,14 +129,15 @@ internal static class VideoExporter
                 "-b:a", "192k",
                 "-map", "0:v:0",
                 "-map", "1:a:0",
+                "-af", "apad",
                 "-shortest",
             ]);
         }
 
         string output = Path.GetFullPath(request.OutputPath);
         string temporaryOutput = Path.Combine(Path.GetDirectoryName(output)!,
-            $".sharpfai-{Guid.NewGuid():N}{Path.GetExtension(output)}");
-        arguments.Add(temporaryOutput);
+            $".sharpfai-{Guid.NewGuid():N}.mp4");
+        arguments.AddRange(["-f", "mp4", temporaryOutput]);
 
         ProcessStartInfo info = new(ffmpegPath)
         {
@@ -150,8 +151,6 @@ internal static class VideoExporter
         {
             info.ArgumentList.Add(argument);
         }
-
-        log?.Invoke($"ffmpeg {string.Join(' ', info.ArgumentList)}");
 
         Process process = Process.Start(info)
             ?? throw new InvalidOperationException("无法启动 ffmpeg / Failed to start ffmpeg");
@@ -237,7 +236,6 @@ internal static class VideoExporter
         private readonly Stream _input;
         private readonly string _temporaryOutput;
         private readonly string _output;
-        private bool _published;
 
         internal EncoderSession(Process process, int width, int height, bool packedNv12,
             string temporaryOutput, string output)
@@ -326,8 +324,16 @@ internal static class VideoExporter
 
             if (publish)
             {
-                File.Move(_temporaryOutput, _output, overwrite: true);
-                _published = true;
+                string packagedOutput = _temporaryOutput + ".mux";
+                try
+                {
+                    Mp4Container.WriteExport(_temporaryOutput, packagedOutput);
+                    File.Move(packagedOutput, _output, overwrite: true);
+                }
+                finally
+                {
+                    TryDelete(packagedOutput);
+                }
             }
         }
 
@@ -343,12 +349,14 @@ internal static class VideoExporter
             }
 
             _process.Dispose();
-            if (!_published)
-            {
-                try { File.Delete(_temporaryOutput); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
+            TryDelete(_temporaryOutput);
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { File.Delete(path); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 
@@ -356,9 +364,14 @@ internal static class VideoExporter
     /// 在 PATH 或常见位置查找 ffmpeg。
     /// Locate ffmpeg on PATH or in the usual install locations.
     /// </summary>
-    public static string? FindFfmpeg()
+    public static string? FindFfmpeg() => FindMediaTool("ffmpeg");
+
+    internal static string? FindMediaTool(string name)
     {
-        string executable = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        string executable = OperatingSystem.IsWindows() ? name + ".exe" : name;
+
+        string bundled = Path.Combine(AppContext.BaseDirectory, executable);
+        if (File.Exists(bundled)) return bundled;
 
         string? pathVariable = Environment.GetEnvironmentVariable("PATH");
 
@@ -414,6 +427,31 @@ internal static class VideoExporter
     /// <param name="path">输出 WAV。</param>
     /// <param name="playbackRate">Music playback rate.</param>
     /// <param name="hitsoundRate">Hitsound playback rate; pass 1 for PCM already on the output clock.</param>
+    internal static DecodedAudio DecodeExportAudio(string ffmpeg, string path, double seconds)
+    {
+        const int rate = DecodedAudio.TargetSampleRate;
+        const int channels = 2;
+        var info = new ProcessStartInfo(ffmpeg)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        string[] arguments = ["-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-vn",
+            "-ar", rate.ToString(System.Globalization.CultureInfo.InvariantCulture), "-ac", "2",
+            "-t", FormattableString.Invariant($"{seconds:F6}"), "-f", "s16le", "pipe:1"];
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        using Process process = Process.Start(info) ?? throw new InvalidOperationException("Could not start ffmpeg.");
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        using var pcm = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(pcm);
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Could not decode music for export: {error.GetAwaiter().GetResult().Trim()}");
+        return new DecodedAudio { Pcm = pcm.ToArray(), Channels = channels, SampleRate = rate };
+    }
+
     public static void WriteMixedWav(
         DecodedAudio? music,
         DecodedAudio? hitsound,
