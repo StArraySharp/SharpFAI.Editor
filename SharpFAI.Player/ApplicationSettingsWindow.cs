@@ -13,34 +13,35 @@ public sealed unsafe class ApplicationSettingsWindow
     private static readonly int[] FrameLimits = [0, 30, 60, 120, 144, 240];
     private static readonly int[] TextureScales = [100, 75, 50, 25];
     private static readonly string?[] Languages = [null, "en", "zh-Hans"];
-    private static readonly ImVec4 Accent = Color(0.39f, 0.89f, 0.78f);
-    private static readonly ImVec4 Muted = Color(0.64f, 0.68f, 0.70f);
+    private static readonly ImVec4 Accent = Color(0.62f, 0.78f, 1f);
+    private static readonly ImVec4 Muted = Color(0.66f, 0.71f, 0.79f);
     private static readonly ImVec4 Amber = Color(1f, 0.75f, 0.42f);
     private static readonly (ImGuiCol Role, ImVec4 Value)[] Palette =
     [
-        (ImGuiCol_Text, Color(0.93f, 0.95f, 0.95f)),
+        (ImGuiCol_Text, Color(0.93f, 0.95f, 0.98f)),
         (ImGuiCol_TextDisabled, Muted),
-        (ImGuiCol_PopupBg, Color(0.075f, 0.087f, 0.090f)),
-        (ImGuiCol_ChildBg, Color(0.103f, 0.118f, 0.120f)),
-        (ImGuiCol_Border, Color(0.22f, 0.26f, 0.27f)),
-        (ImGuiCol_Separator, Color(0.21f, 0.25f, 0.26f)),
-        (ImGuiCol_ModalWindowDimBg, Color(0.025f, 0.032f, 0.035f, 0.79f)),
-        (ImGuiCol_FrameBg, Color(0.15f, 0.18f, 0.19f)),
-        (ImGuiCol_FrameBgHovered, Color(0.18f, 0.26f, 0.26f)),
-        (ImGuiCol_FrameBgActive, Color(0.19f, 0.32f, 0.30f)),
+        (ImGuiCol_PopupBg, Color(0.08f, 0.10f, 0.14f)),
+        (ImGuiCol_ChildBg, Color(0.105f, 0.13f, 0.18f)),
+        (ImGuiCol_Border, Color(0.23f, 0.27f, 0.35f)),
+        (ImGuiCol_Separator, Color(0.22f, 0.26f, 0.34f)),
+        (ImGuiCol_ModalWindowDimBg, Color(0.02f, 0.028f, 0.04f, 0.72f)),
+        (ImGuiCol_FrameBg, Color(0.15f, 0.19f, 0.26f)),
+        (ImGuiCol_FrameBgHovered, Color(0.20f, 0.27f, 0.38f)),
+        (ImGuiCol_FrameBgActive, Color(0.24f, 0.34f, 0.50f)),
         (ImGuiCol_CheckMark, Accent),
         (ImGuiCol_SliderGrab, Accent),
-        (ImGuiCol_SliderGrabActive, Color(0.63f, 0.99f, 0.91f)),
-        (ImGuiCol_Header, Color(0.13f, 0.29f, 0.27f)),
-        (ImGuiCol_HeaderHovered, Color(0.17f, 0.35f, 0.32f)),
-        (ImGuiCol_HeaderActive, Color(0.21f, 0.42f, 0.37f)),
-        (ImGuiCol_Button, Color(0.15f, 0.18f, 0.20f)),
-        (ImGuiCol_ButtonHovered, Color(0.19f, 0.28f, 0.29f)),
-        (ImGuiCol_ButtonActive, Color(0.23f, 0.36f, 0.36f)),
+        (ImGuiCol_SliderGrabActive, Color(0.80f, 0.90f, 1f)),
+        (ImGuiCol_Header, Color(0.20f, 0.30f, 0.46f)),
+        (ImGuiCol_HeaderHovered, Color(0.23f, 0.35f, 0.52f)),
+        (ImGuiCol_HeaderActive, Color(0.27f, 0.42f, 0.62f)),
+        (ImGuiCol_Button, Color(0.16f, 0.20f, 0.27f)),
+        (ImGuiCol_ButtonHovered, Color(0.22f, 0.29f, 0.41f)),
+        (ImGuiCol_ButtonActive, Color(0.26f, 0.37f, 0.53f)),
         (ImGuiCol_NavCursor, Accent),
     ];
 
-    private enum Page { Display, Audio, Interface }
+    private enum Page { Display, Graphics, Effects, Audio, Interface, Editing }
+    private static readonly Page[] Pages = Enum.GetValues<Page>();
 
     private ApplicationSettings _original = ApplicationSettings.PlayerDefaults;
     private ApplicationSettings _draft = ApplicationSettings.PlayerDefaults;
@@ -73,7 +74,6 @@ public sealed unsafe class ApplicationSettingsWindow
     public void Open(ApplicationSettings current)
     {
         _original = _draft = current;
-        _page = Page.Display;
         _saveFailed = false;
         _choiceOpen = false;
         _opening = true;
@@ -95,8 +95,8 @@ public sealed unsafe class ApplicationSettingsWindow
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(Vec(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
             viewport->WorkPos.y + viewport->WorkSize.y * 0.5f), 0, Vec(0.5f, 0.5f));
-        ImGui.SetNextWindowSize(Vec(Math.Clamp(viewport->WorkSize.x - 28f, 1f, 920f),
-            Math.Clamp(viewport->WorkSize.y - 28f, 1f, 580f)));
+        ImGui.SetNextWindowSize(Vec(Math.Clamp(viewport->WorkSize.x - 24f, 1f, 820f),
+            Math.Clamp(viewport->WorkSize.y - 24f, 1f, 530f)));
 
         PushStyle();
         if (ImGui.BeginPopupModal(Popup, (int)(ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -104,23 +104,30 @@ public sealed unsafe class ApplicationSettingsWindow
         {
             bool childHadKeyboard = _choiceOpen || ImGui.GetIO()->WantTextInput != 0;
             _choiceOpen = false;
-            DrawHeader(editor);
-            float footerHeight = ImGui.GetFrameHeight() + ImGui.GetTextLineHeightWithSpacing() + 20f;
-            float bodyHeight = Math.Max(40f, ImGui.GetContentRegionAvail().y - footerHeight);
+            bool close = DrawHeader(editor);
             float available = ImGui.GetContentRegionAvail().x;
+            bool statusAbove = available < 535f;
+            float footerHeight = ImGui.GetFrameHeight() + 2f * ImGui.GetStyle()->ItemSpacing.y + 2f;
+            if (statusAbove)
+                footerHeight += ImGui.GetTextLineHeightWithSpacing();
+            float bodyHeight = Math.Max(1f, ImGui.GetContentRegionAvail().y - footerHeight);
+            int pageCount = editor ? Pages.Length : Pages.Length - 1;
             if (available < 610f)
             {
-                float tabs = 24f + 2f * (ImGui.GetStyle()->WindowPadding.y + ImGui.GetStyle()->ChildBorderSize);
-                DrawNavigation(available, tabs, horizontal: true);
-                DrawPage(Math.Max(40f, bodyHeight - tabs - ImGui.GetStyle()->ItemSpacing.y), editor);
+                int columns = available >= 340f ? 3 : 2;
+                int rows = (pageCount + columns - 1) / columns;
+                float gap = ImGui.GetStyle()->ItemSpacing.y;
+                float tabs = rows * ImGui.GetFrameHeight() + (rows - 1) * gap + 2f * ImGui.GetStyle()->WindowPadding.y;
+                DrawNavigation(available, tabs, pageCount, columns);
+                DrawPage(Math.Max(1f, bodyHeight - tabs - gap), editor);
             }
             else
             {
-                DrawNavigation(190f, bodyHeight, horizontal: false);
+                DrawNavigation(166f, bodyHeight, pageCount, 1);
                 ImGui.SameLine();
                 DrawPage(bodyHeight, editor);
             }
-            DrawFooter(defaults, tryApply, childHadKeyboard);
+            DrawFooter(defaults, tryApply, childHadKeyboard, statusAbove, close);
             ImGui.EndPopup();
         }
         else if (ImGui.IsPopupOpen(Popup) == 0)
@@ -129,115 +136,156 @@ public sealed unsafe class ApplicationSettingsWindow
         ImGui.PopStyleColor(Palette.Length);
     }
 
-    private void DrawHeader(bool editor)
+    private bool DrawHeader(bool editor)
     {
-        ImGui.TextColored(Accent, editor ? "SHARPFAI  /  EDITOR" : "SHARPFAI  /  PLAYER");
-        ImGui.PushFont(null, 29f);
+        float right = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().x;
+        ImGui.PushFont(null, 25f);
         ImGui.TextUnformatted(Tr("设置", "Settings"));
         ImGui.PopFont();
+        ImGui.SameLine();
+        ImGui.TextDisabled(editor ? Tr("编辑器", "Editor") : Tr("播放器", "Player"));
+        ImGui.SameLine();
+        float size = ImGui.GetFrameHeight();
+        ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), right - size));
+        bool close = ImGui.Button("##settings-close", Vec(size, size)) != 0;
+        ImVec2 min = ImGui.GetItemRectMin(), max = ImGui.GetItemRectMax();
+        float x = (min.x + max.x) * .5f, y = (min.y + max.y) * .5f, radius = size * .15f;
+        ImDrawList* draw = ImGui.GetWindowDrawList();
+        uint color = ImGui.GetColorU32((int)ImGuiCol_Text, 1f);
+        ImDrawList.AddLine(draw, Vec(x - radius, y - radius), Vec(x + radius, y + radius), color, 1.5f);
+        ImDrawList.AddLine(draw, Vec(x + radius, y - radius), Vec(x - radius, y + radius), color, 1.5f);
+        if (ImGui.IsItemHovered() != 0)
+            ImGui.SetTooltip(Tr("关闭设置", "Close settings"));
         ImGui.Separator();
+        return close;
     }
 
-    private void DrawNavigation(float width, float height, bool horizontal)
+    private void DrawNavigation(float width, float height, int count, int columns)
     {
         if (ImGui.BeginChild("##settings-categories", Vec(width, height),
-                (int)(ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding)) != 0)
+                (int)(ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding),
+                (int)ImGuiWindowFlags_NoScrollbar) != 0)
         {
-            float buttonWidth = horizontal ? Math.Max(1, (ImGui.GetContentRegionAvail().x - 2f * ImGui.GetStyle()->ItemSpacing.x) / 3f) : 0;
-            Category(Page.Display, Tr("显示", "Display"), buttonWidth, horizontal);
-            Category(Page.Audio, Tr("音频", "Audio"), buttonWidth, horizontal);
-            Category(Page.Interface, Tr("界面", "Interface"), buttonWidth, horizontal);
+            float gap = ImGui.GetStyle()->ItemSpacing.x;
+            float buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().x - (columns - 1) * gap) / columns);
+            for (int index = 0; index < count; index++)
+            {
+                if (index % columns != 0)
+                    ImGui.SameLine();
+                Category(Pages[index], buttonWidth);
+            }
         }
         ImGui.EndChild();
     }
 
-    private void Category(Page page, string label, float width, bool horizontal)
+    private void Category(Page page, float width)
     {
-        if (horizontal && page != Page.Display)
-            ImGui.SameLine();
         bool selected = _page == page;
-        string text = horizontal ? label : $"{(int)page + 1:00}    {label}";
-        if (selected)
-            ImGui.PushStyleColor((int)ImGuiCol_Text, Accent);
-        if (ImGui.Selectable($"{text}###settings-page-{(int)page}", (byte)(selected ? 1 : 0), 0,
-                Vec(width, horizontal ? 24f : 37f)) != 0)
+        ImGui.PushStyleColor((int)ImGuiCol_Button, selected ? Color(0.20f, 0.30f, 0.46f) : Color(0, 0, 0, 0));
+        ImGui.PushStyleColor((int)ImGuiCol_Text, selected ? Accent : Muted);
+        if (ImGui.Button($"{PageTitle(page)}###settings-page-{(int)page}", Vec(width, ImGui.GetFrameHeight())) != 0)
             _page = page;
+        ImGui.PopStyleColor(2);
         if (selected)
-        {
-            ImGui.PopStyleColor();
             ImGui.SetItemDefaultFocus();
-        }
     }
+
+    private string PageTitle(Page page) => page switch
+    {
+        Page.Display => Tr("显示", "Display"),
+        Page.Graphics => Tr("画面", "Graphics"),
+        Page.Effects => Tr("特效过滤", "Effects"),
+        Page.Audio => Tr("音频", "Audio"),
+        Page.Interface => Tr("界面", "Interface"),
+        Page.Editing => Tr("轨道编辑", "Track editing"),
+        _ => throw new ArgumentOutOfRangeException(nameof(page)),
+    };
 
     private void DrawPage(float height, bool editor)
     {
         if (ImGui.BeginChild($"##settings-content-{(int)_page}", Vec(0, height),
                 (int)(ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding)) != 0)
         {
+            Heading(PageTitle(_page));
             switch (_page)
             {
                 case Page.Display:
-                    Heading(Tr("显示", "Display"));
+                    Section(Tr("窗口", "Window"));
                     if (Choice("window-mode", Tr("窗口模式", "Window mode"), WindowModes, _draft.WindowMode,
                             value => value == ApplicationWindowMode.Fullscreen ? Tr("全屏", "Fullscreen") : Tr("窗口化", "Windowed"),
                             out ApplicationWindowMode mode))
                         Change(_draft with { WindowMode = mode });
-                    if (Toggle("vsync", Tr("垂直同步", "VSync"), _draft.VSync, out bool sync))
-                        Change(_draft with { VSync = sync });
+                    Note(Tr("Alt+Enter 切换全屏", "Alt+Enter toggles fullscreen"));
+                    Section(Tr("帧率", "Frame pacing"));
                     if (Choice("frame-limit", Tr("帧率上限", "Frame rate limit"), FrameLimits, _draft.FrameLimit,
                             value => value == 0 ? Tr("不限", "Unlimited") : $"{value} FPS", out int limit))
                         Change(_draft with { FrameLimit = limit });
+                    if (Toggle("vsync", Tr("垂直同步", "VSync"), _draft.VSync, out bool sync))
+                        Change(_draft with { VSync = sync });
+                    break;
+                case Page.Graphics:
+                    Section(Tr("星球", "Planets"));
                     if (PlanetColor("fire-color", Tr("火球颜色", "Fire planet color"), _draft.FirePlanetColor, out string fire))
                         Change(_draft with { FirePlanetColor = fire });
                     if (PlanetColor("ice-color", Tr("冰球颜色", "Ice planet color"), _draft.IcePlanetColor, out string ice))
                         Change(_draft with { IcePlanetColor = ice });
-                    if (Choice("decoration-textures", Tr("装饰纹理尺寸（下次加载生效）", "Decoration texture size (on next load)"),
-                            TextureScales, _draft.DecorationTexturePercent,
-                            value => value == 100 ? Tr("100% 原图", "100% Original") : $"{value}%", out int textureScale))
-                        Change(_draft with { DecorationTexturePercent = textureScale });
                     if (Percent("planet-trail", Tr("星球拖尾长度", "Planet trail length"),
                             _draft.PlanetTrailPercent, 200, out int trail))
                         Change(_draft with { PlanetTrailPercent = trail });
-                    ImGui.Separator();
-                    ImGui.TextUnformatted(Tr("特效过滤", "Effect filters"));
+                    if (editor && Toggle("tiles-only-hide-planets", Tr("仅轨道时隐藏星球", "Hide planets in track-only mode"),
+                            _draft.HidePlanetsInTilesOnly, out bool hidePlanets))
+                        Change(_draft with { HidePlanetsInTilesOnly = hidePlanets });
+                    Section(Tr("装饰纹理", "Decoration textures"));
+                    if (Choice("decoration-textures", Tr("纹理尺寸", "Texture size"), TextureScales, _draft.DecorationTexturePercent,
+                            value => value == 100 ? Tr("100% 原图", "100% Original") : $"{value}%", out int textureScale))
+                        Change(_draft with { DecorationTexturePercent = textureScale });
+                    Note(Tr("下次加载关卡时生效", "Applies the next time a level loads"));
+                    break;
+                case Page.Effects:
+                    Section(Tr("场景特效", "Scene effects"));
                     if (Toggle("camera-filters", Tr("相机滤镜", "Camera filters"), _draft.CameraFilters, out bool filters))
                         Change(_draft with { CameraFilters = filters });
-                    if (Toggle("screen-effects", Tr("辉光、屏幕滚动和平铺及残影", "Bloom, screen scroll, tiling and feedback"),
+                    if (Toggle("screen-effects", Tr("辉光、滚动、平铺和残影", "Bloom, scroll, tiling and feedback"),
                             _draft.ScreenEffects, out bool effects))
                         Change(_draft with { ScreenEffects = effects });
                     if (Toggle("screen-flash", Tr("屏幕闪光", "Screen flashes"), _draft.ScreenFlash, out bool flash))
                         Change(_draft with { ScreenFlash = flash });
                     if (Toggle("camera-shake", Tr("相机震动", "Camera shake"), _draft.CameraShake, out bool shake))
                         Change(_draft with { CameraShake = shake });
-                    DecorationToggle(DecorationKinds.Image, Tr("图片装饰", "Image decorations"));
-                    DecorationToggle(DecorationKinds.Text, Tr("文字装饰", "Text decorations"));
-                    DecorationToggle(DecorationKinds.Floor, Tr("轨道装饰", "Floor decorations"));
-                    DecorationToggle(DecorationKinds.Planet, Tr("星球装饰", "Planet decorations"));
-                    DecorationToggle(DecorationKinds.Particle, Tr("粒子装饰", "Particle decorations"));
-                    DecorationToggle(DecorationKinds.PlayerBubble, Tr("玩家气泡装饰", "Player bubble decorations"));
+                    Section(Tr("显示的装饰", "Visible decorations"));
+                    if (BeginOptionsGrid("##decorations"))
+                    {
+                        DecorationToggle(DecorationKinds.Image, Tr("图片装饰", "Image decorations"));
+                        DecorationToggle(DecorationKinds.Text, Tr("文字装饰", "Text decorations"));
+                        DecorationToggle(DecorationKinds.Floor, Tr("轨道装饰", "Floor decorations"));
+                        DecorationToggle(DecorationKinds.Planet, Tr("星球装饰", "Planet decorations"));
+                        DecorationToggle(DecorationKinds.Particle, Tr("粒子装饰", "Particle decorations"));
+                        ImGui.EndTable();
+                    }
                     break;
                 case Page.Audio:
-                    Heading(Tr("音频", "Audio"));
-                    if (Toggle("skip-audio", Tr("不加载音频（下次加载生效）", "Skip audio on next level load"),
-                            _draft.SkipAudio, out bool skipAudio))
-                        Change(_draft with { SkipAudio = skipAudio });
-                    if (Percent("master", Tr("主音量", "Main Volume"), _draft.MasterVolume, 100, out int master))
+                    Section(Tr("播放音量", "Playback volume"));
+                    if (Percent("master", Tr("主音量", "Master volume"), _draft.MasterVolume, 100, out int master))
                         Change(_draft with { MasterVolume = master });
-                    if (Percent("music", Tr("音乐音量", "Music Volume"), _draft.MusicVolume, 100, out int music))
+                    if (Percent("music", Tr("音乐音量", "Music volume"), _draft.MusicVolume, 100, out int music))
                         Change(_draft with { MusicVolume = music });
-                    if (Percent("hitsound", Tr("节拍音量", "Hitsound Volume"), _draft.HitsoundVolume, 100, out int hitsound))
+                    if (Percent("hitsound", Tr("打击音量", "Hitsound volume"), _draft.HitsoundVolume, 100, out int hitsound))
                         Change(_draft with { HitsoundVolume = hitsound });
+                    Section(Tr("音频加载", "Audio loading"));
+                    if (Toggle("skip-audio", Tr("跳过音频加载", "Skip audio loading"), _draft.SkipAudio, out bool skipAudio))
+                        Change(_draft with { SkipAudio = skipAudio });
+                    Note(Tr("下次加载关卡时生效", "Applies the next time a level loads"));
                     break;
                 case Page.Interface:
-                    Heading(Tr("界面", "Interface"));
                     if (Toggle("fps", Tr("显示菜单栏帧率", "Show FPS in menu bar"), _draft.ShowFrameRate, out bool fps))
                         Change(_draft with { ShowFrameRate = fps });
                     if (editor && Choice("language", Tr("语言", "Language"), Languages, _draft.Language,
                             value => value switch { "en" => "English", "zh-Hans" => "简体中文", _ => Tr("跟随系统", "System default") },
                             out string? language))
                         Change(_draft with { Language = language });
-                    if (editor)
-                        DrawTrackEditingOptions();
+                    break;
+                case Page.Editing:
+                    DrawTrackEditingOptions();
                     break;
             }
         }
@@ -246,25 +294,30 @@ public sealed unsafe class ApplicationSettingsWindow
 
     private void DrawTrackEditingOptions()
     {
-        ImGui.Separator();
-        ImGui.TextUnformatted(Tr("轨道编辑", "Track editing"));
+        Section(Tr("选区统计", "Selection statistics"));
         if (Toggle("selection-stats", Tr("显示选区统计", "Show selection statistics"), _draft.ShowSelectionStatistics, out bool show))
             Change(_draft with { ShowSelectionStatistics = show });
         ImGui.BeginDisabled((byte)(_draft.ShowSelectionStatistics ? 0 : 1));
-        StatisticToggle(SelectionStatisticsFields.Angle, Tr("总角度", "Total angle"));
-        StatisticToggle(SelectionStatisticsFields.Beats, Tr("拍数", "Beats"));
-        StatisticToggle(SelectionStatisticsFields.Count, Tr("砖块数", "Tile count"));
-        StatisticToggle(SelectionStatisticsFields.Duration, Tr("时长", "Duration"));
-        if (Toggle("selection-tulttak", Tr("计时排除选区最后一块（Tulttak）", "Exclude the last selected tile from timing (Tulttak)"),
+        if (BeginOptionsGrid("##selection-fields"))
+        {
+            StatisticToggle(SelectionStatisticsFields.Angle, Tr("总角度", "Total angle"));
+            StatisticToggle(SelectionStatisticsFields.Beats, Tr("拍数", "Beats"));
+            StatisticToggle(SelectionStatisticsFields.Count, Tr("砖块数", "Tile count"));
+            StatisticToggle(SelectionStatisticsFields.Duration, Tr("时长", "Duration"));
+            ImGui.EndTable();
+        }
+        if (Toggle("selection-tulttak", Tr("计时排除选区最后一块", "Exclude last selected tile from timing"),
                 _draft.ExcludeLastSelectedTileFromTiming, out bool exclude))
             Change(_draft with { ExcludeLastSelectedTileFromTiming = exclude });
         ImGui.EndDisabled();
 
-        if (Toggle("fine-rotation", Tr("自定义步长旋转（Ctrl+Alt+, / .）", "Custom rotation step (Ctrl+Alt+, / .)"),
+        Section(Tr("旋转和翻转", "Rotation and flips"));
+        if (Toggle("fine-rotation", Tr("启用自定义旋转步长", "Enable custom rotation step"),
                 _draft.FineTrackRotation, out bool fineRotation))
             Change(_draft with { FineTrackRotation = fineRotation });
+        Note("Ctrl+Alt+, / .");
         ImGui.BeginDisabled((byte)(_draft.FineTrackRotation ? 0 : 1));
-        Row(Tr("旋转步长", "Rotation step"), fullWidth: true);
+        Row(Tr("旋转步长", "Rotation step"));
         float step = _draft.TrackRotationStep;
         if (ImGui.DragFloat("##rotation-step", ref step, .1f, .001f, 360f, "%.3f°",
                 (int)ImGuiSliderFlags.ImGuiSliderFlags_AlwaysClamp) != 0 && float.IsFinite(step))
@@ -272,53 +325,77 @@ public sealed unsafe class ApplicationSettingsWindow
         ImGui.Spacing();
         ImGui.EndDisabled();
 
-        if (Toggle("sync-track-events", Tr("翻转或旋转时同步事件坐标", "Transform event coordinates with the track"),
+        if (Toggle("sync-track-events", Tr("同步变换事件坐标", "Transform event coordinates with track"),
                 _draft.SyncTrackEventPositions, out bool sync))
             Change(_draft with { SyncTrackEventPositions = sync });
 
         void StatisticToggle(SelectionStatisticsFields field, string label)
         {
+            ImGui.TableNextColumn();
             if (Toggle($"stat-{field}", label, (_draft.SelectionStatistics & field) != 0, out bool enabled))
                 Change(_draft with { SelectionStatistics = enabled ? _draft.SelectionStatistics | field : _draft.SelectionStatistics & ~field });
         }
     }
 
+    private bool BeginOptionsGrid(string id)
+    {
+        int columns = ImGui.GetContentRegionAvail().x >= (_chinese ? 360f : 490f) ? 2 : 1;
+        return ImGui.BeginTable(id, columns, (int)ImGuiTableFlags.ImGuiTableFlags_SizingStretchSame, default, 0) != 0;
+    }
+
     private static void Heading(string title)
     {
-        ImGui.PushFont(null, 21f);
+        ImGui.PushFont(null, 22f);
         ImGui.TextUnformatted(title);
         ImGui.PopFont();
-        ImGui.Separator();
         ImGui.Spacing();
     }
 
-    private static void Row(string label, bool fullWidth = false)
+    private static void Section(string title)
+    {
+        ImGui.PushStyleColor((int)ImGuiCol_Text, Muted);
+        ImGui.SeparatorText(title);
+        ImGui.PopStyleColor();
+    }
+
+    private static void Note(string text)
+    {
+        ImGui.PushTextWrapPos(0);
+        ImGui.TextDisabled(text);
+        ImGui.PopTextWrapPos();
+    }
+
+    private static void Row(string label)
     {
         float width = ImGui.GetContentRegionAvail().x;
-        float controlWidth = Math.Min(260f, Math.Max(1, width * 0.45f));
+        float controlWidth = Math.Clamp(width * 0.48f, 1f, 270f);
         float x = ImGui.GetCursorPosX();
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(label);
-        float indent = fullWidth ? width - controlWidth : width - ImGui.GetFrameHeight();
-        if (ImGui.CalcTextSize(label, null, 0, -1f).x + 20f < indent)
+        if (ImGui.CalcTextSize(label, null, 0, -1f).x + 16f < width - controlWidth)
         {
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(label);
             ImGui.SameLine();
-            ImGui.SetCursorPosX(x + indent);
+            ImGui.SetCursorPosX(x + width - controlWidth);
         }
-        ImGui.SetNextItemWidth(Math.Min(controlWidth, ImGui.GetContentRegionAvail().x));
+        else
+        {
+            ImGui.PushTextWrapPos(0);
+            ImGui.TextUnformatted(label);
+            ImGui.PopTextWrapPos();
+            controlWidth = width;
+        }
+        ImGui.SetNextItemWidth(Math.Max(1, Math.Min(controlWidth, ImGui.GetContentRegionAvail().x)));
     }
 
     private static bool Toggle(string id, string label, bool value, out bool result)
     {
-        Row(label);
         result = value;
-        bool changed = ImGui.Checkbox($"##{id}", ref result) != 0;
-        ImGui.Spacing();
-        return changed;
+        return ImGui.Checkbox($"{label}###{id}", ref result) != 0;
     }
 
     private void DecorationToggle(DecorationKinds kind, string label)
     {
+        ImGui.TableNextColumn();
         if (Toggle($"decoration-{kind}", label, (_draft.VisibleDecorations & kind) != 0, out bool visible))
             Change(_draft with
             {
@@ -328,14 +405,13 @@ public sealed unsafe class ApplicationSettingsWindow
 
     private bool PlanetColor(string id, string label, string value, out string result)
     {
-        Row(label, fullWidth: true);
+        Row(label);
         ApplicationSettings.TryParsePlanetColor(value, out int rgb);
         float* color = stackalloc float[3] { (rgb >> 16) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f };
         bool changed = ImGui.ColorEdit3($"##{id}", color, (int)ImGuiColorEditFlags.ImGuiColorEditFlags_DisplayHex) != 0;
         _choiceOpen |= ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId) != 0;
         result = changed ? ApplicationSettings.FormatPlanetColor(
             (ToByte(color[0]) << 16) | (ToByte(color[1]) << 8) | ToByte(color[2])) : value;
-        ImGui.Spacing();
         return changed;
 
         static int ToByte(float channel) => (int)MathF.Round(Math.Clamp(channel, 0f, 1f) * 255f);
@@ -343,17 +419,16 @@ public sealed unsafe class ApplicationSettingsWindow
 
     private static bool Percent(string id, string label, int value, int maximum, out int result)
     {
-        Row(label, fullWidth: true);
+        Row(label);
         result = value;
         bool changed = ImGui.SliderInt($"##{id}", ref result, 0, maximum, "%d%%") != 0;
         result = Math.Clamp(result, 0, maximum);
-        ImGui.Spacing();
         return changed;
     }
 
     private bool Choice<T>(string id, string label, T[] values, T current, Func<T, string> format, out T result)
     {
-        Row(label, fullWidth: true);
+        Row(label);
         result = current;
         bool changed = false;
         if (ImGui.BeginCombo($"##{id}", format(current)) != 0)
@@ -372,30 +447,42 @@ public sealed unsafe class ApplicationSettingsWindow
             }
             ImGui.EndCombo();
         }
-        ImGui.Spacing();
         return changed;
     }
 
-    private void DrawFooter(ApplicationSettings defaults, Func<ApplicationSettings, bool> tryApply, bool comboWasOpen)
+    private void DrawFooter(ApplicationSettings defaults, Func<ApplicationSettings, bool> tryApply,
+        bool comboWasOpen, bool statusAbove, bool close)
     {
         ImGui.Separator();
         bool dirty = _draft != _original;
-        ImGui.TextColored(_saveFailed || dirty ? Amber : Muted, _saveFailed ? Tr("保存失败，设置未应用", "Could not save settings") :
-            dirty ? Tr("有未应用的更改", "Unsaved changes") : Tr("无未应用的更改", "No pending changes"));
+        string? status = _saveFailed ? Tr("保存失败，设置未应用", "Could not save settings") :
+            dirty ? Tr("有未应用的更改", "Unsaved changes") : null;
+        if (statusAbove && status is not null)
+            ImGui.TextColored(Amber, status);
 
-        float remaining = ImGui.GetContentRegionAvail().x;
+        float width = ImGui.GetContentRegionAvail().x;
+        float left = ImGui.GetCursorPosX();
         float gap = ImGui.GetStyle()->ItemSpacing.x;
-        float buttonWidth = Math.Min(122f, Math.Max(1f, (remaining - 2 * gap) / 3f));
-        if (ImGui.Button(Tr("恢复默认", "Reset defaults") + "###settings-reset", Vec(buttonWidth, 0)) != 0)
+        float resetWidth = Math.Clamp((width - 2 * gap) / 3f, 1f, 118f);
+        float buttonWidth = Math.Min(resetWidth, 90f);
+        ImGui.BeginDisabled((byte)(_draft == defaults ? 1 : 0));
+        if (ImGui.Button(Tr("恢复默认", "Reset defaults") + "###settings-reset", Vec(resetWidth, 0)) != 0)
             Change(defaults);
+        ImGui.EndDisabled();
+        if (!statusAbove && status is not null)
+        {
+            ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextColored(Amber, status);
+        }
         ImGui.SameLine();
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0f, remaining - 3f * buttonWidth - 2f * gap));
+        ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), left + width - 2f * buttonWidth - gap));
         bool cancel = ImGui.Button(Tr("取消", "Cancel") + "###settings-cancel", Vec(buttonWidth, 0)) != 0;
         ImGui.SameLine();
-        ImGui.PushStyleColor((int)ImGuiCol_Text, Color(0.04f, 0.12f, 0.11f));
+        ImGui.PushStyleColor((int)ImGuiCol_Text, Color(0.05f, 0.10f, 0.18f));
         ImGui.PushStyleColor((int)ImGuiCol_Button, Accent);
-        ImGui.PushStyleColor((int)ImGuiCol_ButtonHovered, Color(0.60f, 0.97f, 0.88f));
-        ImGui.PushStyleColor((int)ImGuiCol_ButtonActive, Color(0.30f, 0.76f, 0.66f));
+        ImGui.PushStyleColor((int)ImGuiCol_ButtonHovered, Color(0.75f, 0.86f, 1f));
+        ImGui.PushStyleColor((int)ImGuiCol_ButtonActive, Color(0.46f, 0.66f, 0.96f));
         ImGui.BeginDisabled((byte)(_draft == _original ? 1 : 0));
         bool apply = ImGui.Button(Tr("应用", "Apply") + "###settings-apply", Vec(buttonWidth, 0)) != 0;
         ImGui.EndDisabled();
@@ -404,7 +491,7 @@ public sealed unsafe class ApplicationSettingsWindow
         bool escape = !comboWasOpen && ImGui.IsKeyPressed(ImGuiKey.ImGuiKey_Escape, 0) != 0;
         if (apply)
             _saveFailed = !tryApply(_draft);
-        if (cancel || escape || (apply && !_saveFailed))
+        if (close || cancel || escape || (apply && !_saveFailed))
         {
             ImGui.CloseCurrentPopup();
             _open = false;
@@ -421,9 +508,9 @@ public sealed unsafe class ApplicationSettingsWindow
     {
         foreach (var (role, value) in Palette)
             ImGui.PushStyleColor((int)role, value);
-        ImGui.PushStyleVar((int)ImGuiStyleVar_WindowPadding, Vec(18, 12));
-        ImGui.PushStyleVar((int)ImGuiStyleVar_FramePadding, Vec(11, 7));
-        ImGui.PushStyleVar((int)ImGuiStyleVar_ItemSpacing, Vec(8, 9));
+        ImGui.PushStyleVar((int)ImGuiStyleVar_WindowPadding, Vec(18, 13));
+        ImGui.PushStyleVar((int)ImGuiStyleVar_FramePadding, Vec(11, 6));
+        ImGui.PushStyleVar((int)ImGuiStyleVar_ItemSpacing, Vec(9, 8));
         ImGui.PushStyleVar((int)ImGuiStyleVar_WindowRounding, 8f);
         ImGui.PushStyleVar((int)ImGuiStyleVar_PopupRounding, 8f);
         ImGui.PushStyleVar((int)ImGuiStyleVar_ChildRounding, 5f);

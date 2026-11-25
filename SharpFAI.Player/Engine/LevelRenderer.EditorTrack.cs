@@ -10,7 +10,16 @@ public sealed unsafe partial class LevelRenderer
     private OfficialFloorRenderer? _editorInsertedTrack;
     private OfficialFloorMeshBaker.BakeCache? _editorInsertedCache;
     private int _editorInsertedVersion = -1;
+    private int _editorInsertedAnchor = -1;
     private bool _editorInsertedTilesOnly;
+    private OfficialFloorRenderer? _editorAngleTrack;
+    private OfficialFloorMeshBaker.BakeCache? _editorAngleCache;
+    private int _editorAngleAnchor = -1;
+    private double _editorAngle;
+    private Vector2 _editorAngleOffset;
+    private PositionTrackGuides? _positionTrackGuides;
+    private bool _positionTrackGuidesDirty = true;
+    internal bool ShowPositionTrackGuides { get; set; }
     internal int EditorInsertedFloorCount => _editorInsertedTrack?.FloorCount ?? 0;
 
     internal bool EditorInsertedTrackNeedsUpdate(int version, bool tilesOnly) =>
@@ -69,6 +78,7 @@ public sealed unsafe partial class LevelRenderer
                 new FloorAppearance(color, tilesOnly ? 1f : state.Opacity));
         }
         _editorInsertedVersion = version;
+        _editorInsertedAnchor = anchor;
         _editorInsertedTilesOnly = tilesOnly;
     }
 
@@ -78,5 +88,100 @@ public sealed unsafe partial class LevelRenderer
         _editorInsertedTrack?.ClearGeometry();
         _editorInsertedCache = null;
         _editorInsertedVersion = -1;
+        _editorInsertedAnchor = -1;
+    }
+
+    internal void SetEditorAnglePreview(int anchor, double angle)
+    {
+        if (anchor == _editorAngleAnchor && angle == _editorAngle) return;
+        Floor selected = _floors[anchor];
+        Floor[] boundary;
+        FloorTrackState[] states;
+        Vector2 offset = Vector2.Zero;
+        if (anchor + 1 < _floors.Count)
+        {
+            int next = anchor + 1;
+            boundary = [WithAngles(selected, angle, selected.exitAngle), WithAngles(_floors[next], _floors[next].entryAngle, angle - 180)];
+            states = [_trackStates[anchor], _trackStates[next]];
+            float distance = TileSpacing * (_planetTrack[next].Radius + _planetTrack[anchor].HoldDistance);
+            offset = Direction(angle) * TileSpacing - Direction(selected.angle) * distance;
+        }
+        else
+        {
+            boundary = [WithAngles(selected, angle, selected.exitAngle)];
+            states = [_trackStates[anchor]];
+        }
+
+        _officialRenderer ??= new OfficialFloorRenderer(_uploader, _floorTextureCapacity);
+        _editorAngleTrack ??= new OfficialFloorRenderer(_uploader, _floorTextureCapacity, _officialRenderer);
+        _editorAngleCache ??= new OfficialFloorMeshBaker.BakeCache(shapeCacheLimit: 64);
+        FloorGeometry geometry = OfficialFloorMeshBaker.BakeLevel(boundary, states, _floorTextureCapacity,
+            levelDirectory: Path.GetDirectoryName(LevelPath), styleOverride: _styleOverride,
+            cache: _editorAngleCache, computeBounds: false);
+        try
+        {
+            _editorAngleTrack.SetGeometry(geometry, releaseCpuMesh: true);
+        }
+        catch
+        {
+            geometry.Dispose();
+            throw;
+        }
+        _editorAngleAnchor = anchor;
+        _editorAngle = angle;
+        _editorAngleOffset = offset;
+        _floorVisualTime = double.NaN;
+
+        static Floor WithAngles(Floor floor, double outgoing, double incoming) => new(outgoing, incoming, floor.position)
+        {
+            index = floor.index,
+            renderOrder = floor.renderOrder,
+            angle = (float)outgoing,
+            isMidspin = floor.isMidspin,
+            icon = floor.icon,
+            iconAngle = floor.iconAngle,
+            iconFlipped = floor.iconFlipped,
+            swirlRed = floor.swirlRed,
+            textureRotation = floor.textureRotation,
+            textureOffsetX = floor.textureOffsetX,
+            textureOffsetY = floor.textureOffsetY,
+        };
+
+        static Vector2 Direction(double degrees)
+        {
+            (double sin, double cos) = Math.SinCos(degrees * Math.PI / 180);
+            return new((float)cos, (float)sin);
+        }
+    }
+
+    internal void ClearEditorAnglePreview()
+    {
+        if (_editorAngleAnchor < 0) return;
+        _editorAngleAnchor = -1;
+        _editorAngleOffset = Vector2.Zero;
+        _editorAngleTrack?.ClearGeometry();
+        _floorVisualTime = double.NaN;
+    }
+
+    private void InvalidatePositionTrackGuides()
+    {
+        _positionTrackGuides?.Clear();
+        _positionTrackGuidesDirty = true;
+    }
+
+    private void DrawPositionTrackGuides(Matrix4 viewProjection)
+    {
+        if (!ShowPositionTrackGuides || _editorEvents is not { } events) return;
+        if (_positionTrackGuidesDirty)
+        {
+            _positionTrackGuidesDirty = false;
+            _positionTrackGuides ??= new PositionTrackGuides(_uploader);
+            _positionTrackGuides.Update(_floors, _trackStates, _planetTrack, events, TileSpacing);
+        }
+        if (_positionTrackGuides is { HasGeometry: true } guides)
+        {
+            guides.Draw(viewProjection, _lastFrameTime);
+            DrawCalls++;
+        }
     }
 }

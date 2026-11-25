@@ -22,6 +22,12 @@ internal static class GameAssetPreparation
             validate.Complete();
         }
         string assets = Path.Combine(data, "resources.assets");
+        string? connectorAssets;
+        using (var locate = new ConsoleProgressBar("Locating the editor's track connector texture"))
+        {
+            connectorAssets = FindConnectorAssets(data, cancellation);
+            locate.Complete(connectorAssets is null ? "texture unavailable" : Path.GetFileName(connectorAssets));
+        }
         string managed = Path.Combine(data, "Managed");
         string[] assemblies = Directory.GetFiles(managed, "*.dll");
         string gameFiles = Path.Combine(workspace, "GameFiles");
@@ -32,11 +38,16 @@ internal static class GameAssetPreparation
             "Another game asset preparation is already running.");
 
         var (ripper, hlslcc) = await ToolCache.PrepareAsync(workspace, checkLatest: false, cancellation);
-        var inputs = new[] { typeof(GameAssetPreparation).Assembly.Location, assets, ripper.Marker, hlslcc.Marker }
+        string toolPath = typeof(GameAssetPreparation).Assembly.Location;
+        if (toolPath.Length == 0)
+            toolPath = Environment.ProcessPath ?? throw new IOException("Cannot identify the resource preparation executable.");
+        var inputs = new[] { toolPath, assets, ripper.Marker, hlslcc.Marker }
             .Concat(Directory.EnumerateFiles(data, "resources.assets.*"))
             .Concat(assemblies)
             .Concat(ToolBinaries(ripper))
             .Concat(ToolBinaries(hlslcc));
+        if (connectorAssets is not null)
+            inputs = inputs.Append(connectorAssets).Concat(Directory.EnumerateFiles(data, Path.GetFileName(connectorAssets) + ".*"));
         string fingerprint = await FingerprintAsync(inputs, cancellation);
         string destination = Path.Combine(prepared, fingerprint);
         string staging = Path.Combine(prepared, $".staging-{Guid.NewGuid():N}");
@@ -71,6 +82,24 @@ internal static class GameAssetPreparation
                     layout = ShaderLayoutReader.Read(ripper, assets, readLayout, cancellation);
                     readLayout.Complete($"{layout.Length} shaders");
                 }
+                string? connectorTexture = null;
+                if (connectorAssets is not null)
+                {
+                    using var extract = new ConsoleProgressBar("Extracting the track connector texture");
+                    string editorRip = Path.Combine(staging, "EditorTextures");
+                    await RunToolAsync(ripper.Executable, [connectorAssets, editorRip, "--only", "Texture2D",
+                        "--only-strict"], staging, cancellation, line =>
+                    {
+                        Match match = ExportProgress.Match(line);
+                        if (match.Success && long.TryParse(match.Groups[1].ValueSpan, out long completed) &&
+                            long.TryParse(match.Groups[2].ValueSpan, out long total))
+                            extract.Report(completed, total);
+                    });
+                    connectorTexture = Path.Combine(editorRip, "ExportedProject", "Assets", "Texture2D", "dotted-line.png");
+                    if (!File.Exists(connectorTexture))
+                        throw new IOException("The editor's dotted-line texture was not exported.");
+                    extract.Complete();
+                }
 
                 if (Directory.Exists(destination))
                     Directory.Move(destination, Path.Combine(staging, "Incomplete"));
@@ -89,7 +118,8 @@ internal static class GameAssetPreparation
                         copy.Complete($"{assemblies.Length} assemblies");
                     }
                     string exported = Path.Combine(rip, "ExportedProject", "Assets");
-                    await new AssetCompiler(destination, hlslcc).CompileAsync(exported, layout, staging, cancellation);
+                    await new AssetCompiler(destination, hlslcc).CompileAsync(exported, layout, staging, cancellation,
+                        connectorTexture);
                 }
                 catch
                 {
@@ -112,6 +142,30 @@ internal static class GameAssetPreparation
             cleanup.Complete();
         }
         Console.WriteLine($"Game assets are ready for offline builds: {destination}");
+    }
+
+    private static string? FindConnectorAssets(string data, CancellationToken cancellation)
+    {
+        // Unity serializes the texture name with its byte length. Match the complete name,
+        // including its prefix, so alternate textures such as dotted-line-3 are skipped.
+        ReadOnlySpan<byte> name = "\u000b\0\0\0dotted-line"u8;
+        byte[] buffer = new byte[128 * 1024];
+        foreach (string path in Directory.EnumerateFiles(data, "sharedassets*.assets").Order(StringComparer.Ordinal))
+        {
+            using var file = File.OpenRead(path);
+            int carry = 0;
+            int read;
+            while ((read = file.Read(buffer.AsSpan(carry))) > 0)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                Span<byte> chunk = buffer.AsSpan(0, carry + read);
+                if (chunk.IndexOf(name) >= 0)
+                    return path;
+                carry = Math.Min(chunk.Length, name.Length - 1);
+                chunk[^carry..].CopyTo(buffer);
+            }
+        }
+        return null;
     }
 
     internal static FileStream OpenLock(string lockPath, string busyMessage)

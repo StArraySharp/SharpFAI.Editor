@@ -29,7 +29,12 @@
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="Settings" xml:space="preserve"><value>Level settings</value></data>
   <data name="Decorations" xml:space="preserve"><value>Decorations</value></data>
-  <data name="Inspector" xml:space="preserve"><value>Event properties</value></data>
+  <data name="Inspector" xml:space="preserve"><value>Tile Properties</value></data>
+  <data name="CanvasOnly" xml:space="preserve"><value>Chart Only</value></data>
+  <data name="HelpCanvasOnly" xml:space="preserve"><value>Alt+H   Show or hide the interface</value></data>
+  <data name="UnitBeats" xml:space="preserve"><value>beats</value></data>
+  <data name="UnitTiles" xml:space="preserve"><value>tiles</value></data>
+  <data name="UnitLoops" xml:space="preserve"><value>turns</value></data>
   <data name="Palette" xml:space="preserve"><value>Event palette</value></data>
   <data name="ParticleEditor" xml:space="preserve"><value>Particle editor</value></data>
   <data name="ParticleGeneral" xml:space="preserve"><value>General</value></data>
@@ -128,8 +133,9 @@
   <data name="HelpTransforms" xml:space="preserve"><value>Ctrl+L flips · Shift changes axis · Ctrl+comma/period/slash rotates</value></data>
   <data name="HelpEvents" xml:space="preserve"><value>↑ / ↓ cycle event types · Shift cycles event instances</value></data>
   <data name="HelpEventPages" xml:space="preserve"><value>[ / ] page through events of the same type · Shift jumps to either end</value></data>
-  <data name="HelpPalette" xml:space="preserve"><value>1–0 add events · Ctrl+number switches categories</value></data>
+  <data name="HelpPalette" xml:space="preserve"><value>1–0 add events or remove toggleable events · Ctrl+number switches categories</value></data>
   <data name="HelpCamera" xml:space="preserve"><value>Wheel or - / = to zoom · left-drag to pan</value></data>
+  <data name="HelpFreeAngle" xml:space="preserve"><value>Hold right mouse to aim · Shift for free angles · left click while holding to place</value></data>
   <data name="HelpPlay" xml:space="preserve"><value>Ctrl+wheel adjusts speed · Ctrl+Space plays at set speed · Ctrl+P half speed · Alt+A Manual Play · Alt+N No Fail</value></data>
   <data name="HelpReturn" xml:space="preserve"><value>Esc centers the playback tile · Shift+Esc also selects it</value></data>
   <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B toggles bookmark · Alt+← / → jumps between bookmarks</value></data>

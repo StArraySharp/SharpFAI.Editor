@@ -1,8 +1,4 @@
 #version 330 core
-#extension GL_ARB_explicit_attrib_location : require
-#ifdef GL_ARB_shader_bit_encoding
-#extension GL_ARB_shader_bit_encoding : enable
-#endif
 
 uniform 	vec4 uScreenParams;
 uniform 	vec4 uModel[4];
@@ -12,8 +8,21 @@ uniform sampler2D uFloorData;
 uniform bool uStreamFloors;
 uniform vec4 uDecorationColor;
 uniform vec4 uDecorationParams;
+#ifdef FLOOR_STREAM_TEXTURE_WIDTH
+uniform sampler2D uFloorInstances;
+uniform sampler2D uFloorShapes;
+vec4 readFloorStream(sampler2D data, int address)
+{
+    return texelFetch(data, ivec2(address % FLOOR_STREAM_TEXTURE_WIDTH, address / FLOOR_STREAM_TEXTURE_WIDTH), 0);
+}
+#else
 uniform samplerBuffer uFloorInstances;
 uniform samplerBuffer uFloorShapes;
+vec4 readFloorStream(samplerBuffer data, int address)
+{
+    return texelFetch(data, address);
+}
+#endif
 uniform 	float _FlashColor;
 layout(location = 0) in vec4 aPosition;
 layout(location = 4) in vec4 aVertexColor;
@@ -47,10 +56,10 @@ void main()
     {
         // The element buffer carries the instance number and the vertex inside its shared shape.
         instance = (gl_VertexID >> 10) * 6;
-        vec4 instanceAddress = texelFetch(uFloorInstances, instance);
+        vec4 instanceAddress = readFloorStream(uFloorInstances, instance);
         position.w = instanceAddress.y;
         vertex = int(instanceAddress.x) + 3 * (gl_VertexID & 1023);
-        iconData = texelFetch(uFloorInstances, instance + 1);
+        iconData = readFloorStream(uFloorInstances, instance + 1);
     }
     int floorId = int(position.w);
     // Four RGBA32F texels per floor: color, transform, appearance, and active material.
@@ -78,13 +87,13 @@ void main()
     vec4 tileOffset = aTileOffset;
     if (uStreamFloors)
     {
-        position.xyz = texelFetch(uFloorShapes, vertex).xyz;
-        vertexColor = texelFetch(uFloorShapes, vertex + 1);
-        uv = texelFetch(uFloorShapes, vertex + 2);
-        style = texelFetch(uFloorInstances, instance + 2);
-        shadow = texelFetch(uFloorInstances, instance + 3);
-        textures = texelFetch(uFloorInstances, instance + 4);
-        tileOffset = texelFetch(uFloorInstances, instance + 5);
+        position.xyz = readFloorStream(uFloorShapes, vertex).xyz;
+        vertexColor = readFloorStream(uFloorShapes, vertex + 1);
+        uv = readFloorStream(uFloorShapes, vertex + 2);
+        style = readFloorStream(uFloorInstances, instance + 2);
+        shadow = readFloorStream(uFloorInstances, instance + 3);
+        textures = readFloorStream(uFloorInstances, instance + 4);
+        tileOffset = readFloorStream(uFloorInstances, instance + 5);
     }
     vec2 local = position.xy * scaleOpacity.xy;
     // Subtract the camera before adding sub-tile offsets to preserve distant geometry.

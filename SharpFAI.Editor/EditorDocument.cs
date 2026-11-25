@@ -19,16 +19,19 @@ internal sealed class EditorDocument
     private const string TimeSignatureKey = "sharpFaiTimeSignatures";
     private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null,
         object? Group = null, bool SettingsOnly = false, bool EditorOnly = false,
-        Action<JObject>? PlaybackPatch = null, ValueChange? Value = null, TileInsertion? Insertion = null);
+        ValueChange? Value = null, TileInsertion? Insertion = null,
+        LevelRenderer.EditorEventAppend? EventAppend = null, bool DecorationList = false);
     private sealed record ValueChange(JObject Target, string Name, JToken? Before, JToken? After);
-    private sealed record TileInsertion(int Floor, double[] Angles);
-    private readonly record struct PlaybackChange(int Version, Action<JObject>? Apply, TileInsertion? Insertion);
+    private sealed record TileInsertion(int Floor, double[] Angles, bool MovesEvents);
+    private readonly record struct PlaybackChange(int Version, TileInsertion? Insertion,
+        LevelRenderer.EditorEventAppend? EventAppend);
     private int _lastChartChange;
     private int _lastNonInsertionChange;
+    private int _lastNonAppendChange;
     private int _lastUnpatchableChange;
     private readonly List<PlaybackChange> _playbackPatches = [];
-    private Dictionary<int, List<JValue>>? _floorNumbers;
-    private List<(JObject Owner, string Key)>? _tileReferences;
+    private FloorAnchorIndex? _floorNumbers;
+    private TileReferenceIndex? _tileReferences;
     private readonly Dictionary<JObject, int> _effectChanges = new(ReferenceEqualityComparer.Instance);
     private int _lastFullPlaybackChange;
 
@@ -51,7 +54,7 @@ internal sealed class EditorDocument
         }
         IndexEvents();
         _floorNumbers = IndexFloorNumbers();
-        _tileReferences = ReadTileReferences(_actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())).ToList();
+        _tileReferences = IndexTileReferences();
     }
 
     public string? Path { get; private set; }
@@ -60,6 +63,7 @@ internal sealed class EditorDocument
     public bool CanRedo => _revision < _edits.Count;
     public int ChangeVersion { get; private set; }
     public int PlaybackVersion { get; private set; }
+    public int DecorationListVersion { get; private set; }
     public JObject Settings { get; }
     public EditorTimeSignatures TimeSignatures { get; private set; }
     public JArray Decorations => _decorations;
@@ -118,7 +122,7 @@ internal sealed class EditorDocument
         JToken? after = value?.DeepClone();
         Apply(new(() => Write(after), () => Write(before), name == "floor" && ReferenceEquals(target.Parent, _actions),
             isEffect ? target : null, group, SettingsOnly: ReferenceEquals(target, Settings),
-            Value: new(target, name, before, after)));
+            Value: new(target, name, before, after), DecorationList: ReferenceEquals(target.Parent, _decorations)));
 
         void Write(JToken? token)
         {
@@ -168,16 +172,19 @@ internal sealed class EditorDocument
         if (!CanInsertTiles(floor, angles)) return;
         int oldLast = LastFloor;
         var references = ReferenceChanges(oldLast, oldLast + angles.Length,
-            target => target > floor ? target + angles.Length : target);
+            target => target > floor ? target + angles.Length : target, insertionFloor: floor);
+        var anchors = _floorNumbers ??= IndexFloorNumbers();
+        int[] movedFloors = anchors.After(floor);
         JValue[] values = angles.Select(angle => new JValue(angle)).ToArray();
         var events = actions.Select(AtDestination).ToArray();
         var objects = decorations.Select(AtDestination).ToArray();
         Apply(new(
             () =>
             {
-                for (int i = 0; i < values.Length; i++) _angles.Insert(floor + i, values[i]);
-                ShiftFloorAnchors(floor, values.Length);
+                InsertAngles(_angles, floor, values);
+                ShiftFloorAnchors(movedFloors, values.Length);
                 WriteReferences(references, true);
+                _tileReferences?.RecordReferenceMoves(references);
                 foreach (var item in events) AddAction(item);
                 foreach (var item in objects) _decorations.Add(item);
             },
@@ -186,10 +193,12 @@ internal sealed class EditorDocument
                 for (int i = values.Length - 1; i >= 0; i--) _angles.RemoveAt(floor + i);
                 foreach (var item in events) RemoveAction(item);
                 foreach (var item in objects) item.Remove();
-                ShiftFloorAnchors(floor + values.Length, -values.Length);
+                ShiftFloorAnchors(movedFloors.Select(value => value + values.Length).ToArray(), -values.Length);
                 WriteReferences(references, false);
             },
-            false, Insertion: clipboard is null ? new(floor, (double[])angles.Clone()) : null));
+            false, Insertion: clipboard is null
+                ? new(floor, (double[])angles.Clone(), movedFloors.Length != 0 || references.Length != 0) : null,
+            DecorationList: movedFloors.Length != 0 || decorations.Length != 0));
 
         JObject AtDestination(JObject item)
         {
@@ -244,7 +253,7 @@ internal sealed class EditorDocument
                 MoveAnchors(attached, 0);
                 MoveAnchors(moved, 0);
                 WriteReferences(references, false);
-            }, true));
+            }, true, DecorationList: true));
     }
 
     public void TransformTiles(int first, int last, Func<double, double> transform, TrackTransform? eventTransform = null)
@@ -322,7 +331,7 @@ internal sealed class EditorDocument
         JArray list = decoration ? _decorations : _actions;
         Apply(new(
             () => { foreach (var item in copies) list.Add(item); },
-            () => { foreach (var item in copies) item.Remove(); }, !decoration));
+            () => { foreach (var item in copies) item.Remove(); }, !decoration, DecorationList: decoration));
     }
 
     public bool Add(JObject value, bool decoration)
@@ -332,14 +341,14 @@ internal sealed class EditorDocument
         if (value.Parent is not null)
             value = (JObject)value.DeepClone();
         JArray list = decoration ? _decorations : _actions;
-        JObject playbackCopy = (JObject)value.DeepClone();
+        var append = new LevelRenderer.EditorEventAppend(list.Count, decoration, (JObject)value.DeepClone());
         Apply(new(
             () =>
             {
                 if (decoration) list.Add(value);
                 else AddAction(value);
                 if (_floorNumbers is { } numbers) IndexFloorNumber(numbers, value, Floor(value));
-                if (_tileReferences is { } references) references.AddRange(ReadTileReferences([value]));
+                _tileReferences?.AddRange(ReadTileReferences([value]));
             },
             () =>
             {
@@ -352,10 +361,9 @@ internal sealed class EditorDocument
                     if (index >= 0) group.RemoveAt(index);
                     if (group.Count == 0) numbers.Remove(Floor(value));
                 }
-                _tileReferences?.RemoveAll(reference => ReferenceEquals(reference.Owner, value));
+                _tileReferences?.Remove(value);
             },
-            false, PlaybackPatch: root =>
-                ((JArray)root[decoration ? "decorations" : "actions"]!).Add(playbackCopy.DeepClone())));
+            false, EventAppend: append, DecorationList: decoration));
         return true;
     }
 
@@ -364,7 +372,7 @@ internal sealed class EditorDocument
         if (value.Parent is not JArray list)
             return;
         int index = list.IndexOf(value);
-        Apply(new(value.Remove, () => list.Insert(index, value), list == _actions));
+        Apply(new(value.Remove, () => list.Insert(index, value), list == _actions, DecorationList: list == _decorations));
     }
 
     public void MoveDecoration(JObject value, JObject target)
@@ -375,7 +383,7 @@ internal sealed class EditorDocument
             return;
         Apply(new(
             () => { value.Remove(); _decorations.Insert(to, value); },
-            () => { value.Remove(); _decorations.Insert(from, value); }, false));
+            () => { value.Remove(); _decorations.Insert(from, value); }, false, DecorationList: true));
     }
 
     public void RemoveDecorations(IEnumerable<JObject> selection)
@@ -391,7 +399,7 @@ internal sealed class EditorDocument
         Apply(new(
             () => { foreach (var (item, _) in entries) item.Remove(); },
             () => { foreach (var (item, index) in entries) list.Insert(index, item); },
-            !decoration));
+            !decoration, DecorationList: decoration));
     }
 
     public void PasteDecorations(IEnumerable<JObject> selection)
@@ -400,7 +408,7 @@ internal sealed class EditorDocument
         if (copies.Length != 0)
             Apply(new(
                 () => { foreach (var item in copies) _decorations.Add(item); },
-                () => { foreach (var item in copies) item.Remove(); }, false));
+                () => { foreach (var item in copies) item.Remove(); }, false, DecorationList: true));
     }
 
     public void SetDecorationLocks(IEnumerable<JObject> selection, bool locked)
@@ -509,45 +517,72 @@ internal sealed class EditorDocument
     public bool HasOnlyTileInsertionsSince(int version) =>
         version >= _lastNonInsertionChange && version < _lastChartChange;
 
-    public Action<JObject>? PlaybackPatchSince(int version)
+    public bool HasOnlyEventAppendsSince(int version) =>
+        version >= _lastNonAppendChange && version < _lastChartChange;
+
+    public LevelRenderer.EditorChartPatch? PlaybackPatchSince(int version)
     {
         if (version < _lastUnpatchableChange || CanReusePlaybackChart(version)) return null;
         var patches = _playbackPatches.Where(patch => patch.Version > version).ToArray();
         if (patches.Length == 0) return null;
-        return root =>
+        bool tileInsertions = Array.TrueForAll(patches, patch => patch.Insertion is not null);
+        bool preservesBindings = tileInsertions && Array.TrueForAll(patches, patch => !patch.Insertion!.MovesEvents);
+        var appends = Array.TrueForAll(patches, patch => patch.EventAppend.HasValue)
+            ? Array.ConvertAll(patches, patch => patch.EventAppend!.Value) : null;
+        return new(ApplyPatch, tileInsertions, preservesBindings, appends);
+
+        void ApplyPatch(JObject root)
         {
             for (int index = 0; index < patches.Length; index++)
             {
                 var patch = patches[index];
                 if (patch.Insertion is not { } insert)
                 {
-                    patch.Apply!(root);
+                    var append = patch.EventAppend!.Value;
+                    ((JArray)root[append.Decoration ? "decorations" : "actions"]!).Add(append.Value.DeepClone());
                     continue;
                 }
                 // Sequential inputs extend the same run of tiles. Relocate the chart once for that run.
                 var angles = new List<double>(insert.Angles);
+                bool movesEvents = insert.MovesEvents;
                 while (index + 1 < patches.Length && patches[index + 1].Insertion is { } next &&
                        next.Floor == insert.Floor + angles.Count)
                 {
                     angles.AddRange(next.Angles);
+                    movesEvents |= next.MovesEvents;
                     index++;
                 }
-                ApplyTileInsertion(root, insert.Floor, angles);
+                ApplyTileInsertion(root, insert.Floor, angles, movesEvents);
             }
-        };
+        }
     }
 
-    private static void ApplyTileInsertion(JObject root, int floor, List<double> angles)
+    private static void ApplyTileInsertion(JObject root, int floor, List<double> angles, bool movesEvents)
     {
         var path = (JArray)root["angleData"]!;
-        var actions = (JArray)root["actions"]!;
-        var decorations = (JArray)root["decorations"]!;
-        var references = ReadTileReferences(actions.OfType<JObject>().Concat(decorations.OfType<JObject>()));
-        WriteReferences(ReferenceChanges(references, path.Count, path.Count + angles.Count,
-            target => target > floor ? target + angles.Count : target), true);
-        MoveAnchors(AnchorsAfter(actions, floor), angles.Count);
-        MoveAnchors(AnchorsAfter(decorations, floor), angles.Count);
-        for (int i = 0; i < angles.Count; i++) path.Insert(floor + i, new JValue(angles[i]));
+        if (movesEvents)
+        {
+            var actions = (JArray)root["actions"]!;
+            var decorations = (JArray)root["decorations"]!;
+            var references = ReadTileReferences(actions.OfType<JObject>().Concat(decorations.OfType<JObject>()));
+            WriteReferences(ReferenceChanges(references, path.Count, path.Count + angles.Count,
+                target => target > floor ? target + angles.Count : target), true);
+            MoveAnchors(AnchorsAfter(actions, floor), angles.Count);
+            MoveAnchors(AnchorsAfter(decorations, floor), angles.Count);
+        }
+        InsertAngles(path, floor, angles.Select(angle => new JValue(angle)));
+    }
+
+    private static void InsertAngles(JArray path, int floor, IEnumerable<JValue> angles)
+    {
+        if (floor == path.Count)
+        {
+            foreach (var angle in angles) path.Add(angle);
+        }
+        else
+        {
+            foreach (var angle in angles) path.Insert(floor++, angle);
+        }
     }
 
     public LevelRenderer.EditorEffectPatch[] EffectChangesSince(int version)
@@ -649,6 +684,7 @@ internal sealed class EditorDocument
     private void Refresh(Edit edit, bool undo = false)
     {
         ChangeVersion++;
+        if (edit.DecorationList) DecorationListVersion++;
         if (edit.EditorOnly) return;
         PlaybackVersion = ChangeVersion;
         if (!edit.SettingsOnly)
@@ -656,8 +692,10 @@ internal sealed class EditorDocument
             _lastChartChange = ChangeVersion;
             if (undo || edit.Insertion is null)
                 _lastNonInsertionChange = ChangeVersion;
-            if (!undo && (edit.PlaybackPatch is not null || edit.Insertion is not null))
-                _playbackPatches.Add(new(ChangeVersion, edit.PlaybackPatch, edit.Insertion));
+            if (undo || edit.EventAppend is null)
+                _lastNonAppendChange = ChangeVersion;
+            if (!undo && (edit.EventAppend is not null || edit.Insertion is not null))
+                _playbackPatches.Add(new(ChangeVersion, edit.Insertion, edit.EventAppend));
             else
             {
                 _lastUnpatchableChange = ChangeVersion;
@@ -673,7 +711,7 @@ internal sealed class EditorDocument
         }
         if (edit.Events)
             IndexEvents();
-        if (edit.Value is null && edit.PlaybackPatch is null && edit.Insertion is null)
+        if (edit.Value is null && edit.EventAppend is null && edit.Insertion is null)
         {
             _tileReferences = null;
             _floorNumbers = null;
@@ -684,10 +722,60 @@ internal sealed class EditorDocument
 
     private readonly record struct TileReference(JObject Owner, string Key, int Before, int After);
 
-    private TileReference[] ReferenceChanges(int oldLast, int newLast, Func<int, int> relocate) =>
-        ReferenceChanges(_tileReferences ??= ReadTileReferences(
-            _actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())).ToList(),
-            oldLast, newLast, relocate);
+    private TileReference[] ReferenceChanges(int oldLast, int newLast, Func<int, int> relocate, int? insertionFloor = null) =>
+        ReferenceChanges((_tileReferences ??= IndexTileReferences()).Candidates(insertionFloor), oldLast, newLast, relocate);
+
+    private TileReferenceIndex IndexTileReferences()
+    {
+        var index = new TileReferenceIndex();
+        index.AddRange(ReadTileReferences(_actions.OfType<JObject>().Concat(_decorations.OfType<JObject>())));
+        return index;
+    }
+
+    private sealed class TileReferenceIndex
+    {
+        private readonly List<(JObject Owner, string Key)> _start = [];
+        private readonly List<(JObject Owner, string Key)> _end = [];
+        // A conservative bound stays valid if an edit is undone or a reference is removed.
+        private int _maxStart = int.MinValue;
+
+        public IEnumerable<(JObject Owner, string Key)> Candidates(int? floor) =>
+            floor >= _maxStart ? _end : _end.Concat(_start);
+
+        public void AddRange(IEnumerable<(JObject Owner, string Key)> references)
+        {
+            foreach (var (owner, key) in references)
+            {
+                var value = (JArray)owner[key]!;
+                if (value[1]!.Value<string>() == "End")
+                    _end.Add((owner, key));
+                else
+                {
+                    _start.Add((owner, key));
+                    int floor = (value[0] as JValue)?.Value switch
+                    {
+                        int number => number,
+                        long number when number is >= int.MinValue and <= int.MaxValue => (int)number,
+                        _ => int.MaxValue,
+                    };
+                    _maxStart = Math.Max(_maxStart, floor);
+                }
+            }
+        }
+
+        public void Remove(JObject owner)
+        {
+            _start.RemoveAll(reference => ReferenceEquals(reference.Owner, owner));
+            _end.RemoveAll(reference => ReferenceEquals(reference.Owner, owner));
+        }
+
+        public void RecordReferenceMoves(TileReference[] moves)
+        {
+            foreach (var move in moves)
+                if (move.After > _maxStart && ((JArray)move.Owner[move.Key]!)[1]!.Value<string>() == "Start")
+                    _maxStart = move.After;
+        }
+    }
 
     private static IEnumerable<(JObject Owner, string Key)> ReadTileReferences(IEnumerable<JObject> actions)
     {
@@ -773,13 +861,16 @@ internal sealed class EditorDocument
         }
     }
 
-    public bool CanRotateExit(int floor) => floor >= 0 && floor < LastFloor && !IsMidspinAt(floor);
     public bool IsMidspinAt(int floor) => floor >= 0 && floor < LastFloor && _angles[floor]!.Value<double>() == 999;
 
-    public void RotateExit(int floor, double angle)
+    public bool IsFreeAngleBacktrack(int floor, double angle)
     {
-        if (!CanRotateExit(floor) || !double.IsFinite(angle)) return;
-        TransformTiles(floor + 1, floor + 1, _ => angle);
+        if (floor <= 0 || floor > LastFloor || IsMidspinAt(floor))
+            return false;
+        double backwards = IncomingAngle(floor) + 180;
+        return MatchesBackwards(angle) && (floor == LastFloor || !MatchesBackwards(_angles[floor]!.Value<double>()));
+
+        bool MatchesBackwards(double direction) => Math.Abs(Math.IEEERemainder(direction - backwards, 360)) < .0001;
     }
 
     private (JObject Item, int Floor)[] AnchorsAfter(int floor) => _actions.OfType<JObject>()
@@ -798,9 +889,9 @@ internal sealed class EditorDocument
                 item["floor"] = floor + offset;
     }
 
-    private Dictionary<int, List<JValue>> IndexFloorNumbers()
+    private FloorAnchorIndex IndexFloorNumbers()
     {
-        var numbers = new Dictionary<int, List<JValue>>();
+        var numbers = new FloorAnchorIndex();
         foreach (var (floor, items) in _eventsByFloor)
             foreach (var item in items)
                 IndexFloorNumber(numbers, item, floor);
@@ -809,7 +900,7 @@ internal sealed class EditorDocument
         return numbers;
     }
 
-    private static void IndexFloorNumber(Dictionary<int, List<JValue>> index, JObject item, int floor)
+    private static void IndexFloorNumber(FloorAnchorIndex index, JObject item, int floor)
     {
         if (item["floor"] is not JValue number)
             return;
@@ -818,31 +909,48 @@ internal sealed class EditorDocument
         group.Add(number);
     }
 
-    private void ShiftFloorAnchors(int after, int offset)
+    private void ShiftFloorAnchors(int[] floors, int offset)
     {
-        ShiftFloorBuckets(_floorNumbers ??= IndexFloorNumbers(), after, offset, static (floor, numbers) =>
+        if (floors.Length == 0) return;
+        var index = _floorNumbers ??= IndexFloorNumbers();
+        // Move from the far end so a destination never overwrites a bucket still to be moved.
+        int indexInFloors = offset > 0 ? floors.Length - 1 : 0;
+        int step = offset > 0 ? -1 : 1;
+        for (; (uint)indexInFloors < (uint)floors.Length; indexInFloors += step)
         {
-            // Every token on this floor can reuse one boxed integer.
+            int previous = floors[indexInFloors];
+            int floor = previous + offset;
+            index.TryGetValue(previous, out var numbers);
+            index.Remove(previous);
+            index.Add(floor, numbers!);
             object value = floor;
-            foreach (var number in numbers) number.Value = value;
-        });
-        ShiftFloorBuckets(_eventsByFloor, after, offset);
+            foreach (var number in numbers!) number.Value = value;
+            if (_eventsByFloor.Remove(previous, out var events)) _eventsByFloor.Add(floor, events);
+        }
     }
 
-    private static void ShiftFloorBuckets<T>(Dictionary<int, List<T>> index, int after, int offset,
-        Action<int, List<T>>? relocate = null)
+    private sealed class FloorAnchorIndex
     {
-        var moved = new List<KeyValuePair<int, List<T>>>();
-        foreach (var bucket in index)
-            if (bucket.Key > after)
-                moved.Add(bucket);
-        foreach (var bucket in moved) index.Remove(bucket.Key);
-        foreach (var (floor, group) in moved)
+        private readonly Dictionary<int, List<JValue>> _numbers = [];
+        private readonly SortedSet<int> _floors = [];
+
+        public bool TryGetValue(int floor, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<JValue>? group) =>
+            _numbers.TryGetValue(floor, out group);
+
+        public void Add(int floor, List<JValue> group)
         {
-            int shifted = floor + offset;
-            relocate?.Invoke(shifted, group);
-            index.Add(shifted, group);
+            _numbers.Add(floor, group);
+            _floors.Add(floor);
         }
+
+        public void Remove(int floor)
+        {
+            _numbers.Remove(floor);
+            _floors.Remove(floor);
+        }
+
+        public int[] After(int floor) =>
+            _floors.Count == 0 || _floors.Max <= floor ? [] : _floors.GetViewBetween(floor + 1, int.MaxValue).ToArray();
     }
 
     private void AddAction(JObject item)

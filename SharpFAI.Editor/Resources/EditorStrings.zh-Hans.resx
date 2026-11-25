@@ -29,7 +29,12 @@
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="Settings" xml:space="preserve"><value>关卡设置</value></data>
   <data name="Decorations" xml:space="preserve"><value>装饰</value></data>
-  <data name="Inspector" xml:space="preserve"><value>事件属性</value></data>
+  <data name="Inspector" xml:space="preserve"><value>砖块属性</value></data>
+  <data name="CanvasOnly" xml:space="preserve"><value>仅显示谱面</value></data>
+  <data name="HelpCanvasOnly" xml:space="preserve"><value>Alt+H   显示或隐藏界面</value></data>
+  <data name="UnitBeats" xml:space="preserve"><value>拍</value></data>
+  <data name="UnitTiles" xml:space="preserve"><value>格</value></data>
+  <data name="UnitLoops" xml:space="preserve"><value>圈</value></data>
   <data name="Palette" xml:space="preserve"><value>事件栏</value></data>
   <data name="ParticleEditor" xml:space="preserve"><value>粒子编辑器</value></data>
   <data name="ParticleGeneral" xml:space="preserve"><value>常规</value></data>
@@ -128,8 +133,9 @@
   <data name="HelpTransforms" xml:space="preserve"><value>Ctrl+L 翻转 · Shift 切换轴 · Ctrl+逗号/句号/斜杠旋转</value></data>
   <data name="HelpEvents" xml:space="preserve"><value>↑ / ↓ 切换事件类型 · Shift 逐个切换事件</value></data>
   <data name="HelpEventPages" xml:space="preserve"><value>[ / ] 同类事件翻页 · Shift 跳到首尾</value></data>
-  <data name="HelpPalette" xml:space="preserve"><value>1–0 添加事件 · Ctrl+数字切换分类</value></data>
+  <data name="HelpPalette" xml:space="preserve"><value>1–0 添加事件，旋转等切换类事件再次按下可移除 · Ctrl+数字切换分类</value></data>
   <data name="HelpCamera" xml:space="preserve"><value>滚轮或 - / = 缩放 · 左键拖动画布</value></data>
+  <data name="HelpFreeAngle" xml:space="preserve"><value>按住右键预览铺砖方向 · Shift 自由角度 · 按住右键时点左键落砖</value></data>
   <data name="HelpPlay" xml:space="preserve"><value>Ctrl+滚轮调速 · Ctrl+Space 按设定速度播放 · Ctrl+P 半速 · Alt+A 手打 · Alt+N 不死</value></data>
   <data name="HelpReturn" xml:space="preserve"><value>Esc 将视角移到播放砖块 · Shift+Esc 同时选中该砖块</value></data>
   <data name="HelpBookmarks" xml:space="preserve"><value>Alt+B 切换书签 · Alt+← / → 跳转书签</value></data>

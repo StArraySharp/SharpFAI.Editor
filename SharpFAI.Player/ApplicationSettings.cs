@@ -54,6 +54,7 @@ public sealed record ApplicationSettings
     public bool FineTrackRotation { get; init; } = true;
     public float TrackRotationStep { get; init; } = 22.5f;
     public bool SyncTrackEventPositions { get; init; }
+    public bool HidePlanetsInTilesOnly { get; init; } = true;
 
     public static ApplicationSettings PlayerDefaults { get; } = new();
     public static ApplicationSettings EditorDefaults { get; } = new() { VSync = true };

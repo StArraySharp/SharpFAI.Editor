@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using SharpFAI.Framework;
 
 namespace SharpFAI.Player.Engine.Audio;
 
@@ -36,10 +37,13 @@ public static class HitsoundSynth
         float volume = 0.85f)
         => SynthCache.GetOrAdd(new(cacheKey, volume), () => SynthesizeCore(noteTimesSeconds, totalDuration, volume))!;
 
-    internal static DecodedAudio? SynthesizeTimeline(double[] entryTimes, double rate, float volume = 0.85f)
+    internal static DecodedAudio? SynthesizeTimeline(double[] entryTimes, double rate, float volume = 0.85f,
+        IReadOnlyList<Floor>? floors = null)
     {
         if (entryTimes.Length <= 1)
             return null;
+        if (floors is not null)
+            entryTimes = WithoutMidspinDuplicates(entryTimes, floors);
 
         // Tile zero never triggers a hit. Hash the remaining times without allocating a scaled list on a hit.
         string timing = Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(entryTimes.AsSpan(1))));
@@ -56,13 +60,29 @@ public static class HitsoundSynth
         });
     }
 
+    private static double[] WithoutMidspinDuplicates(double[] entryTimes, IReadOnlyList<Floor> floors)
+    {
+        List<double>? times = null;
+        for (int i = 1; i < entryTimes.Length; i++)
+        {
+            // A midspin and its instantaneous continuation are one physical hit.
+            if (i > 1 && i - 1 < floors.Count && floors[i - 1].isMidspin && entryTimes[i] == entryTimes[i - 1])
+            {
+                times ??= [.. entryTimes.AsSpan(0, i)];
+                continue;
+            }
+            times?.Add(entryTimes[i]);
+        }
+        return times?.ToArray() ?? entryTimes;
+    }
+
     internal static List<double> HitsoundTimes(ReadOnlySpan<double> entryTimes)
     {
         List<double> times = new(entryTimes.Length);
         for (int i = 1; i < entryTimes.Length; i++)
         {
             double time = entryTimes[i];
-            if (time >= 0.0 && (times.Count == 0 || Math.Abs(time - times[^1]) >= 1e-6))
+            if (time >= 0.0)
                 times.Add(time);
         }
 
@@ -109,7 +129,7 @@ public static class HitsoundSynth
         int totalFrames = Math.Max(1, (int)Math.Ceiling(totalDuration * sampleRate));
         byte[] pcm = new byte[checked(totalFrames * channels * sizeof(short))];
 
-        float gain = Math.Clamp(volume, 0f, 1f) / short.MaxValue;
+        float gain = Math.Clamp(volume, 0f, 1f);
         if (sampleFrames > 0 && gain != 0f)
         {
             float[] kick = new float[sampleFrames * channels];
@@ -174,18 +194,6 @@ public static class HitsoundSynth
             frames.Sort();
         }
 
-        // Two onsets that map to the same PCM frame cannot be played separately.
-        int unique = 0;
-        for (int i = 0; i < frames.Count; i++)
-        {
-            int frame = frames[i];
-            if (unique > 0 && frames[unique - 1] == frame)
-                continue;
-            if (unique != i)
-                frames[unique] = frame;
-            unique++;
-        }
-        frames.RemoveRange(unique, frames.Count - unique);
         return frames.ToArray();
     }
 
@@ -229,7 +237,7 @@ public static class HitsoundSynth
     {
         for (int i = 0; i < mixed.Length; i++)
         {
-            short quantized = (short)(FastTanh(mixed[i]) * short.MaxValue);
+            short quantized = (short)MathF.Round(Math.Clamp(mixed[i], short.MinValue, short.MaxValue));
             BinaryPrimitives.WriteInt16LittleEndian(bytes[(i * sizeof(short))..], quantized);
         }
     }
@@ -266,25 +274,6 @@ public static class HitsoundSynth
         {
             destination[i] += source[i] * gain;
         }
-    }
-
-    /// <summary>
-    /// Fast tanh approximation (error below 0.001), plenty accurate for soft clipping.
-    /// </summary>
-    private static float FastTanh(float x)
-    {
-        if (x < -3f)
-        {
-            return -1f;
-        }
-
-        if (x > 3f)
-        {
-            return 1f;
-        }
-
-        float x2 = x * x;
-        return x * (27f + x2) / (27f + 9f * x2);
     }
 
     /// <summary>

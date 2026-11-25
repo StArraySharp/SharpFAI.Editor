@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using Thrust;
@@ -31,6 +32,16 @@ public sealed unsafe class SpriteRenderer : IDisposable
         public int Frame;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ParticleInstance
+    {
+        public Vector2 Center;
+        public Vector2 HalfSize;
+        public Vector4 Tint;
+        public float Rotation;
+        public float Frame;
+    }
+
     private const int MaxInstances = 16384;
 
     // Planet program ----
@@ -57,10 +68,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
     private int _particleLtexture;
     private int _particleLcolumns;
     private int _particleLstraightAlpha;
-
-    // Instance staging buffer, reused every frame
-    private float[]? _particleInstances;
-    private int _particleInstanceCapacity;
+    private ParticleInstance[] _convertedParticles = [];
 
     // Textures ----
     private readonly int _planetTexture;
@@ -235,10 +243,29 @@ public sealed unsafe class SpriteRenderer : IDisposable
     /// <summary>
     /// Draw the particles using <c>Blend One OneMinusSrcAlpha</c> (premultiplied alpha).
     /// </summary>
-    public void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles) =>
-        DrawParticles(viewProjection, particles, _particleTexture, 1, straightAlpha: false);
+    public void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles)
+    {
+        if (particles.IsEmpty || _particleTexture == 0)
+            return;
 
-    internal void DrawParticles(in Matrix4 viewProjection, ReadOnlySpan<Particle> particles,
+        if (_convertedParticles.Length < particles.Length)
+            _convertedParticles = new ParticleInstance[Math.Max(particles.Length, _convertedParticles.Length * 2)];
+        for (int i = 0; i < particles.Length; i++)
+        {
+            ref readonly Particle particle = ref particles[i];
+            _convertedParticles[i] = new ParticleInstance
+            {
+                Center = particle.Center, HalfSize = particle.HalfSize, Tint = particle.Tint,
+                Rotation = particle.Rotation, Frame = particle.Frame,
+            };
+        }
+        DrawParticleInstances(viewProjection, _convertedParticles.AsSpan(0, particles.Length));
+    }
+
+    internal void DrawParticleInstances(in Matrix4 viewProjection, ReadOnlySpan<ParticleInstance> particles) =>
+        DrawParticleInstances(viewProjection, particles, _particleTexture, 1, straightAlpha: false);
+
+    internal void DrawParticleInstances(in Matrix4 viewProjection, ReadOnlySpan<ParticleInstance> particles,
         int texture, int columns, bool straightAlpha)
     {
         if (particles.IsEmpty || texture == 0)
@@ -266,49 +293,18 @@ public sealed unsafe class SpriteRenderer : IDisposable
         GL.Disable(EnableCap.DepthTest);
         GL.Disable(EnableCap.CullFace);
 
-        const int FloatsPerInstance = 10;
-
-        int count = particles.Length;
-        int needed = count * FloatsPerInstance * sizeof(float);
-
-        if (_particleInstanceCapacity < needed)
-        {
-            // Grow in powers of two so this does not reallocate every frame
-            int capacity = Math.Max(needed, _particleInstanceCapacity * 2);
-            Array.Resize(ref _particleInstances, capacity / sizeof(float));
-            _particleInstanceCapacity = capacity;
-        }
-
-        float[] buffer = _particleInstances!;
-
-        for (int i = 0; i < count; i++)
-        {
-            Particle particle = particles[i];
-            int o = i * FloatsPerInstance;
-
-            buffer[o + 0] = particle.Center.X;
-            buffer[o + 1] = particle.Center.Y;
-            buffer[o + 2] = particle.HalfSize.X;
-            buffer[o + 3] = particle.HalfSize.Y;
-            buffer[o + 4] = particle.Tint.X;
-            buffer[o + 5] = particle.Tint.Y;
-            buffer[o + 6] = particle.Tint.Z;
-            buffer[o + 7] = particle.Tint.W;
-            buffer[o + 8] = particle.Rotation;
-            buffer[o + 9] = particle.Frame;
-        }
-
+        // Effects fill the vertex buffer layout directly, so uploading needs no staging copy.
         GL.BindBuffer(BufferTarget.ArrayBuffer, _particleInstanceVbo);
-        fixed (float* data = buffer)
+        fixed (ParticleInstance* data = particles)
         {
             GL.BufferData(
                 BufferTarget.ArrayBuffer,
-                count * FloatsPerInstance * sizeof(float),
+                (nint)particles.Length * sizeof(ParticleInstance),
                 (nint)data,
                 BufferUsageHint.StreamDraw);
         }
 
-        GL.DrawArraysInstanced(PrimitiveType.TriangleStrip, 0, 4, count);
+        GL.DrawArraysInstanced(PrimitiveType.TriangleStrip, 0, 4, particles.Length);
 
         GL.ColorMask(true, true, true, true);
         GL.Disable(EnableCap.Blend);
@@ -349,7 +345,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
 
         // Centre, half size, colour, rotation and atlas frame.
         GL.BindBuffer(BufferTarget.ArrayBuffer, instanceVbo);
-        const int stride = 10 * sizeof(float);
+        int stride = sizeof(ParticleInstance);
 
         GL.EnableVertexAttribArray(1);
         GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, stride, 0);
@@ -462,7 +458,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
     internal static int LinkProgram(string vertexName, string fragmentName) =>
         LinkSources(ShaderLibrary.Load(vertexName), ShaderLibrary.Load(fragmentName));
 
-    internal static int LinkSources(string vertexSource, string fragmentSource)
+    internal static int LinkSources(string vertexSource, string fragmentSource, Action<int>? bindAttributes = null)
     {
         int vertex = CompileShader(ShaderType.VertexShader, vertexSource);
         int fragment;
@@ -476,6 +472,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
         int program = GL.CreateProgram();
         GL.AttachShader(program, vertex);
         GL.AttachShader(program, fragment);
+        bindAttributes?.Invoke(program);
         GL.LinkProgram(program);
 
         GL.GetProgram(program, GetProgramParameterName.LinkStatus, out int status);

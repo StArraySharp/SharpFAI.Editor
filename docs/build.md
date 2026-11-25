@@ -38,6 +38,17 @@ dotnet run --project .\build\PrepareGameAssets -c Release -- --download-tools
 
 控制台会显示各阶段的进度。游戏资源准备结束后，`GameFiles/Prepared.current` 指向当前资源包，后续构建会自动使用它。只要工具和游戏文件的内容相同，重复准备会复用已有结果。旧版手动配置仍可参考 [GameFiles 说明](../GameFiles/README.md)。
 
+编辑器的「位置轨道」连接线也使用准备好的原版资源。新版工具会导入 `ADOFAI/ScrollingSprite` 和编辑器使用的 `dotted-line.png`。基础构建使用内置虚线。
+
+可以把当前已准备的资源导出成 ZIP，再在另一份源码工作区离线导入。导入会校验并解压资源，然后更新 `GameFiles/Prepared.current`，无需安装游戏或下载提取工具。
+
+```powershell
+dotnet run --project .\build\PrepareGameAssets -c Release -- --export-zip ".\adofai-assets.zip"
+dotnet run --project .\build\PrepareGameAssets -c Release -- --import-zip "D:\Archives\adofai-assets.zip"
+```
+
+已打包的 `PrepareGameAssets.exe` 也接受这两个参数。省略路径会打开文件选择窗口。ZIP 包含构建用的纹理、GLSL、资源元数据和游戏程序集。
+
 ## 3. 编译与运行
 
 ```powershell
@@ -45,11 +56,13 @@ dotnet build .\SharpFAI.Editor.slnx -c Release
 dotnet run --project .\SharpFAI.Editor -c Release --no-build
 ```
 
-也可直接用独立播放器打开谱面。
+同一个编辑器程序可以用 `--player` 启动播放器模式。
 
 ```powershell
-dotnet run --project .\SharpFAI.Player -c Release --no-build -- --open "D:\Charts\example.adofai"
+dotnet run --project .\SharpFAI.Editor -c Release --no-build -- --player --open "D:\Charts\example.adofai"
 ```
+
+Windows 发布包可直接运行 `.\SharpFAI.Editor.exe --player`。`--player --help` 会列出截图、视频导出和参数覆盖选项。
 
 ## 4. 测试和打包
 
@@ -59,10 +72,25 @@ dotnet test .\SharpFAI.Editor.slnx -c Release
 
 需要桌面 OpenGL 的集成测试可单独选择运行。涉及 MP4 编码的测试还需要 FFmpeg。
 
-在仓库根目录用 PowerShell 7 生成自包含的 Windows x64 单文件，输出为 `publish/SharpFAI.Editor.exe` 和 `publish/PrepareGameAssets.exe`。
+在仓库根目录用 PowerShell 7 生成自包含单文件。默认发布 Windows x64、Linux x64、macOS x64 和 macOS arm64 编辑器，以及 Windows x64 资源准备工具：
+
+| 文件 | 说明 |
+| --- | --- |
+| `publish/SharpFAI.Editor.exe` | Windows x64 |
+| `publish/SharpFAI.Editor-linux-x64-<版本>` | Linux x64 |
+| `publish/SharpFAI.Editor-osx-x64-<版本>` | macOS x64 |
+| `publish/SharpFAI.Editor-osx-arm64-<版本>` | macOS arm64 |
+| `publish/PrepareGameAssets.exe` | Windows x64 资源准备工具 |
+| `publish/SharpFAI.Editor-universal-<版本>.zip` | 以上全部产物 |
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1
+```
+
+用 `-Runtime` 只打包指定平台，可选 `win-x64`、`linux-x64`、`osx-x64`、`osx-arm64`。只选择非 Windows 平台时不会生成资源准备工具。
+
+```powershell
+pwsh -NoProfile -File .\publish.ps1 -Runtime linux-x64,osx-arm64
 ```
 
 已生成资源准备工具时，可在源码工作区直接运行 `.\publish\PrepareGameAssets.exe`，或传入 `--game-dir` 指定游戏安装目录。工具将资源写入工作区的 `GameFiles`，供下一次构建使用。

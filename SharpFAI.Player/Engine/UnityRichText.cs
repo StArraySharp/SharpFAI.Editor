@@ -104,18 +104,26 @@ internal sealed partial record UnityRichText(string Text, IReadOnlyList<UnityRic
         return true;
     }
 
-    public ImageDecoder.RgbaImage Rasterize(TextRasterizationOptions options)
+    public ImageDecoder.RgbaImage? Rasterize(TextRasterizationOptions options)
     {
-        if (Runs.Count == 0)
-            return TextRasterizer.Rasterize(Text, options);
+        try
+        {
+            return RasterizeCore(options);
+        }
+        catch (Exception error) when (ChartTextFonts.IsFontError(error))
+        {
+            Console.Error.WriteLine($"[Fonts] Cannot render chart text: {error.Message}");
+            return null;
+        }
+    }
 
-        var families = new List<FontFamily>();
-        foreach (string name in new[] { options.FontFamily }.Concat(options.FallbackFamilies ?? []))
-            if (SystemFonts.TryGet(name, out var family) && !families.Contains(family))
-                families.Add(family);
-        FontFamily primary = families.Count > 0 ? families[0] : SystemFonts.Families.First();
+    private ImageDecoder.RgbaImage RasterizeCore(TextRasterizationOptions options)
+    {
+        FontStyle[] requestedStyles = Runs.Select(run => run.Style.FontStyle).Prepend(FontStyle.Regular).Distinct().ToArray();
+        FontFamily[] families = ChartTextFonts.Resolve(options, requestedStyles);
+        FontFamily primary = families[0];
         Font font = primary.CreateFont(options.FontSize);
-        int[] graphemes = StringInfo.ParseCombiningCharacters(Text);
+        int[] graphemes = Runs.Count > 0 ? StringInfo.ParseCombiningCharacters(Text) : [];
         var styles = new List<RichTextRun>(Runs.Count);
         foreach (var run in Runs)
         {
@@ -141,8 +149,8 @@ internal sealed partial record UnityRichText(string Text, IReadOnlyList<UnityRic
                 Thrust.Graphics.TextAlignment.Right => SixLabors.Fonts.TextAlignment.End,
                 _ => SixLabors.Fonts.TextAlignment.Start,
             },
-            FallbackFontFamilies = families.Skip(1).ToArray(),
-            FontFallbackResolver = SystemFonts.FallbackResolver,
+            FallbackFontFamilies = families[1..],
+            FontFallbackResolver = ChartTextFonts.SystemFallback,
             TextRuns = styles,
         };
         FontRectangle advance = TextMeasurer.MeasureAdvance(Text, draw);

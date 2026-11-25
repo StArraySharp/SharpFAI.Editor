@@ -24,6 +24,7 @@ TestResults/
 # Local game data and tools
 /docs/*
 !/docs/build.md
+!/docs/mod-api.md
 /GameFiles/*
 !/GameFiles/README.md
 /testlevels/

@@ -55,7 +55,7 @@ internal sealed unsafe partial class EditorWindow
         if (text.Text.Length == 0 || styledOnly && text.Text == normalized)
             return new(source, fontSize, 0, 0, 0);
 
-        var image = text.Rasterize(new TextRasterizationOptions
+        var raster = text.Rasterize(new TextRasterizationOptions
         {
             FontFamily = TextDecorationImage.ResolveFamily(null),
             FallbackFamilies = TextDecorationImage.FallbackFamilies,
@@ -64,6 +64,8 @@ internal sealed unsafe partial class EditorWindow
             MaxWidth = 2048,
             MaxHeight = 1024,
         });
+        if (raster is not { } image)
+            return new(source, fontSize, 0, 0, 0);
         int oldBinding = GL.GetInteger(GetPName.TextureBinding2D);
         int texture = ImageDecoder.Upload(image, generateMipmaps: false, repeat: false);
         GL.BindTexture(TextureTarget.Texture2D, oldBinding);

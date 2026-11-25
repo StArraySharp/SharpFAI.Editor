@@ -165,7 +165,7 @@ public sealed class EditorChartFilesTests
         chart.InsertTiles(2, [90]);
         var added = JObject.Parse("""{"floor":3,"eventType":"Twirl"}""");
         chart.Add(added, decoration: false);
-        chart.PlaybackPatchSince(version)!(playback.root);
+        chart.PlaybackPatchSince(version)!.Apply(playback.root);
         Assert.That(JToken.DeepEquals(playback.root, chart.SnapshotForPlayback().root), Is.True);
         Assert.That(chart.Events(5), Is.EqualTo(new[] { later }));
         Assert.That(chart.Events(3), Is.EqualTo(new[] { added }));
@@ -174,6 +174,59 @@ public sealed class EditorChartFilesTests
         Assert.That(chart.Events(4), Is.EqualTo(new[] { later }));
         Assert.That(chart.Events(5), Is.Empty);
         Assert.That(chart.PlaybackPatchSince(version), Is.Null);
+    }
+
+    [Test]
+    public void LargeChartTailAppendPreservesEarlierBindingsAndUndo()
+    {
+        var chart = new EditorDocument();
+        chart.InsertTiles(0, new double[20_000]);
+        int oldLast = chart.LastFloor;
+        var first = JObject.Parse("""{"floor":1,"eventType":"MoveTrack","startTile":[1,"Start"],"endTile":[2,"Start"]}""");
+        var tail = JObject.Parse("""{"floor":3,"eventType":"Twirl"}""");
+        tail["floor"] = oldLast;
+        chart.Add(first, false);
+        chart.Add(tail, false);
+        var original = chart.SnapshotForPlayback();
+        int version = chart.PlaybackVersion;
+        chart.ForgetEffectChangesThrough(version);
+
+        chart.InsertTiles(oldLast, [90]);
+        var patch = chart.PlaybackPatchSince(version)!;
+        Assert.That(patch.PreservesBindings, Is.True);
+        patch.Apply(original.root);
+        Assert.That(JToken.DeepEquals(original.root, chart.SnapshotForPlayback().root), Is.True);
+        Assert.That(chart.Events(oldLast).Single(), Is.SameAs(tail));
+        Assert.That(chart.DecorationListVersion, Is.Zero);
+        chart.Undo();
+        Assert.That(chart.LastFloor, Is.EqualTo(oldLast));
+        chart.Redo();
+        chart.InsertTiles(oldLast - 1, [180]);
+        Assert.That(chart.Events(oldLast + 1).Single(), Is.SameAs(tail));
+        chart.Undo();
+        Assert.That(chart.Events(oldLast).Single(), Is.SameAs(tail));
+    }
+
+    [Test]
+    public void MixedAppendedActionsAndDecorationsPreserveEventOrderAndExistingModels()
+    {
+        var chart = new EditorDocument();
+        chart.Add(JObject.Parse("""{"floor":0,"eventType":"MoveDecorations","tag":"old","opacity":80}"""), false);
+        chart.Add(JObject.Parse("""{"floor":0,"eventType":"AddText","decText":"old"}"""), true);
+        var original = chart.SnapshotForPlayback();
+        var previous = PlaybackEventBinder.BindForEditor(original);
+        int version = chart.PlaybackVersion;
+        chart.ForgetEffectChangesThrough(version);
+        int last = chart.LastFloor;
+        chart.Add(new JObject { ["floor"] = last, ["eventType"] = "AddText", ["decText"] = "new" }, true);
+        chart.Add(new JObject { ["floor"] = last, ["eventType"] = "MoveCamera", ["duration"] = 2 }, false);
+        var patch = chart.PlaybackPatchSince(version)!;
+        var updated = PlaybackEventBinder.AppendEditorEvents(previous, patch.AppendedEvents!, chart.Settings);
+        var full = PlaybackEventBinder.BindForEditor(chart.SnapshotForPlayback());
+        Assert.That(updated.Select(item => (item.EventType, item.Floor, item.SourceIndex)),
+            Is.EqualTo(full.Select(item => (item.EventType, item.Floor, item.SourceIndex))));
+        Assert.That(updated[0], Is.SameAs(previous[0]));
+        Assert.That(updated[2], Is.SameAs(previous[1]));
     }
 
     [Test]
@@ -201,7 +254,7 @@ public sealed class EditorChartFilesTests
         chart.InsertTiles(5, [0]);
         Assert.That(chart.HasOnlyTileInsertionsSince(version), Is.True);
         var patched = original.CreateSnapshot(chart.PlaybackPath);
-        chart.PlaybackPatchSince(version)!(patched.root);
+        chart.PlaybackPatchSince(version)!.Apply(patched.root);
         patched = patched.CreateSnapshot(chart.PlaybackPath);
         Assert.That(JToken.DeepEquals(patched.root, chart.SnapshotForPlayback().root), Is.True);
         Assert.That(chart.Events(9), Does.Contain(motion));

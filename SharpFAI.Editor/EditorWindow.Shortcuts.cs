@@ -15,6 +15,7 @@ internal sealed unsafe partial class EditorWindow
     private float _arbitraryAngle = 180;
     private string _commentSearch = "";
     private bool _openFindComment;
+    private bool _shortcutsToggleRequested;
     private EditorDocument.TileClipboard? _tileClipboard;
     private JObject[] _eventClipboard = [];
     private JObject[] _decorationClipboard = [];
@@ -22,10 +23,28 @@ internal sealed unsafe partial class EditorWindow
     private (int First, int Last) FloorRange =>
         (Math.Min(_rangeAnchor ?? _floor, _floor), Math.Max(_rangeAnchor ?? _floor, _floor));
 
-    private bool ShortcutContextBlocked => _settingsWindow.IsOpen || _audioCalibration.IsOpen || _playbackView == PlaybackView.Manual ||
+    private bool ShortcutContextBlocked => _playbackView == PlaybackView.Manual || ShortcutOverlayOpen;
+
+    private bool ShortcutOverlayOpen => _settingsWindow.IsOpen || _audioCalibration.IsOpen ||
         _pending is not null || _error is not null || _openFindFloor || _openFindComment ||
         ImGui.IsPopupOpen((string?)null, (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupId |
             (int)ImGuiPopupFlags.ImGuiPopupFlags_AnyPopupLevel) != 0;
+
+    private void ApplyViewShortcuts()
+    {
+        if (_canvasOnlyToggleRequested)
+        {
+            _canvasOnlyToggleRequested = false;
+            if (_canvasOnly || !ShortcutOverlayOpen)
+                SetCanvasOnly(!_canvasOnly);
+        }
+        if (_shortcutsToggleRequested)
+        {
+            _shortcutsToggleRequested = false;
+            if (!_canvasOnly && !ShortcutOverlayOpen)
+                _showShortcuts = !_showShortcuts;
+        }
+    }
 
     private void ApplyConfiguredPlaybackShortcut()
     {
@@ -48,7 +67,7 @@ internal sealed unsafe partial class EditorWindow
         ImGuiIO* io = ImGui.GetIO();
         KeyModifiers? spaceModifiers = _spacePressModifiers;
         _spacePressModifiers = null;
-        if (ShortcutContextBlocked)
+        if (ShortcutContextBlocked || _freeAngle)
             return;
         if ((spaceModifiers.GetValueOrDefault() & (KeyModifiers.Control | KeyModifiers.Super)) != 0)
         {
@@ -64,9 +83,15 @@ internal sealed unsafe partial class EditorWindow
         {
             if ((modifiers & (KeyModifiers.Shift | KeyModifiers.Alt)) == 0)
                 _queuedRateShortcut = PlaybackRate.Normal;
-            else if (modifiers == KeyModifiers.Shift && _playbackView != PlaybackView.Auto &&
+            else if (!_canvasOnly && modifiers == KeyModifiers.Shift && _playbackView != PlaybackView.Auto &&
                      !_inspectDecoration && _hasFloorSelection && _rangeAnchor is null)
                 InsertTile((_document.IncomingAngle(_floor) + 180) % 360);
+            return;
+        }
+        if (_canvasOnly)
+        {
+            if (!shift && !alt && io->KeyCtrl == 0 && io->KeySuper == 0 && Pressed(ImGuiKey.ImGuiKey_P))
+                StartFromShortcut();
             return;
         }
         if (io->KeyCtrl != 0 || io->KeySuper != 0)
@@ -125,7 +150,7 @@ internal sealed unsafe partial class EditorWindow
         {
             string[] events = AvailableEvents().ToArray();
             if (number < events.Length)
-                AddEvent(events[number]);
+                ActivatePaletteEvent(events[number]);
             return;
         }
         if (Pressed(ImGuiKey.ImGuiKey_Tab)) { InsertTile(999); return; }
@@ -153,7 +178,6 @@ internal sealed unsafe partial class EditorWindow
         if (Pressed(ImGuiKey.ImGuiKey_S)) Save(shift);
         if (Pressed(ImGuiKey.ImGuiKey_Z)) { CancelPropertyEdits(); if (shift) Redo(); else Undo(); }
         if (Pressed(ImGuiKey.ImGuiKey_Y)) { CancelPropertyEdits(); Redo(); }
-        if (Pressed(ImGuiKey.ImGuiKey_H)) _showShortcuts = !_showShortcuts;
         if (Pressed(ImGuiKey.ImGuiKey_Q)) RequestClose();
         if (Pressed(ImGuiKey.ImGuiKey_F)) { if (shift) OpenFindFloor(); else _showBrickNumbers = !_showBrickNumbers; }
         if (Pressed(ImGuiKey.ImGuiKey_P)) _queuedRateShortcut = PlaybackRate.Half;
@@ -265,7 +289,7 @@ internal sealed unsafe partial class EditorWindow
             return;
         _pendingTiles.Clear();
         _document.PasteTiles(_floor, clipboard, includeDecorations);
-        SelectFloor(_floor + clipboard.Angles.Length, false);
+        SelectFloor(_floor + clipboard.Angles.Length, true);
     }
 
     private void DeleteFloorRange(int first, int last, int select)

@@ -32,7 +32,7 @@ internal static class EditorCanvasInput
     {
         double angle = Math.Atan2(y, x) * 180 / Math.PI;
         if (!fine)
-            angle = Math.Round(angle / 15, MidpointRounding.AwayFromZero) * 15;
+            angle = 90 - Math.Round(((450 - angle) % 360) / 15) * 15;
         return (angle % 360 + 360) % 360;
     }
 

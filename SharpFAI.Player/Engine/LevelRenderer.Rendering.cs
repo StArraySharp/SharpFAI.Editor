@@ -351,7 +351,8 @@ public sealed unsafe partial class LevelRenderer
         ImageDecorationRenderer? syncedSprites = tilesOnly ? null : PrepareAndDrawBackDecorations();
 
         EnsureVisibleFloors();
-        if (_activeFloorChunks is null && _officialRenderer is not { HasGeometry: true } && EditorInsertedFloorCount == 0)
+        if (_activeFloorChunks is null && _officialRenderer is not { HasGeometry: true } &&
+            EditorInsertedFloorCount == 0 && _editorAngleTrack is not { HasGeometry: true })
         {
             if (!tilesOnly)
                 DrawFlash(foreground: true);
@@ -359,6 +360,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         Matrix4 viewProjection = _camera.ViewProjection;
+        DrawPositionTrackGuides(viewProjection);
 
         // The floors use premultiplied alpha (Blend One, OneMinusSrcAlpha), so the
         // shadows composite correctly over the dark background
@@ -372,25 +374,30 @@ public sealed unsafe partial class LevelRenderer
         _officialRenderer?.PrepareLevelDraw(viewProjection, _camera.Position, (int)_camera.ViewportWidth, (int)_camera.ViewportHeight);
 
         int nextSynced = 0;
+        var inserted = _editorInsertedTrack is { HasGeometry: true } ? _editorInsertedTrack : null;
+        var angleTrack = _editorAngleTrack is { HasGeometry: true } ? _editorAngleTrack : null;
+        int nextAngle = (angleTrack?.FloorCount ?? 0) - 1;
         if (_activeFloorChunks is { } chunks)
         {
             for (int i = chunks.Length - 1; i >= 0; i--)
             {
-                _chunkDrawCalls += DrawFloorsWithDecorations(chunks[i].Renderer, chunks[i].Floors[0]);
+                _chunkDrawCalls += DrawFloorsWithOverlays(chunks[i].Renderer, chunks[i].Floors[0], chunks[i].Floors);
             }
         }
-        else if (_officialRenderer is not null)
+        else if (_officialRenderer is { FloorCount: > 0 })
         {
-            _chunkDrawCalls = DrawFloorsWithDecorations(_officialRenderer, 0);
+            _chunkDrawCalls = DrawFloorsWithOverlays(_officialRenderer, _residentFloors is { Length: > 0 } resident
+                ? resident[0] : 0, _residentFloors);
         }
-        if (_editorInsertedTrack is { HasGeometry: true } inserted)
-            _chunkDrawCalls += DrawFloors(inserted, 0, int.MaxValue);
-        while (syncedSprites is not null && nextSynced < syncedSprites.SyncedCount)
-            DrawCalls += syncedSprites.DrawSyncedFloor(_imageDecorations!, _camera, ref nextSynced);
+        _chunkDrawCalls += DrawFloorsWithOverlays(null, int.MinValue + 1, null);
 
         GL.Disable(EnableCap.Blend);
         if (tilesOnly)
+        {
+            if (!_visualSettings.HidePlanetsInTilesOnly && _circleRenderer is not null && _floors.Count > 0)
+                DrawPlanets(viewProjection, showTrail: false);
             return;
+        }
 
         if (_trackGuideRenderer is { } guides)
         {
@@ -410,25 +417,55 @@ public sealed unsafe partial class LevelRenderer
             DrawCalls += petals.Draw(particleSprites, _camera, _playTime, _pitch);
         DrawFlash(foreground: true);
 
-        int DrawFloorsWithDecorations(OfficialFloorRenderer renderer, int firstFloor)
+        int DrawFloorsWithOverlays(OfficialFloorRenderer? renderer, int firstFloor, int[]? floorIndices)
         {
-            if (syncedSprites is null)
-                return DrawFloors(renderer, 0, int.MaxValue);
             int from = 0;
             int floorDraws = 0;
-            while (nextSynced < syncedSprites.SyncedCount &&
-                syncedSprites.SyncedFloor(nextSynced) >= firstFloor)
+            // Draw replacements in the same descending floor order as the baked mesh.
+            // A newly inserted run is drawn just behind its selected anchor.
+            while (true)
             {
-                int local = syncedSprites.SyncedFloor(nextSynced) - firstFloor;
-                int end = local >= renderer.FloorCount ? 0 : renderer.IndexAfterFloor(local);
-                if (end > from)
+                int decorationFloor = syncedSprites is not null && nextSynced < syncedSprites.SyncedCount
+                    ? syncedSprites.SyncedFloor(nextSynced) : int.MinValue;
+                int angleFloor = nextAngle >= 0 ? _editorAngleAnchor + nextAngle : int.MinValue;
+                int insertedFloor = inserted is not null ? _editorInsertedAnchor : int.MinValue;
+                int cut = Math.Max(decorationFloor, Math.Max(angleFloor, insertedFloor));
+                if (cut < firstFloor)
+                    break;
+
+                if (cut == insertedFloor)
                 {
-                    floorDraws += DrawFloors(renderer, from, end);
-                    from = end;
+                    DrawThrough(cut + 1);
+                    floorDraws += DrawFloors(inserted!, 0, int.MaxValue);
+                    inserted = null;
+                    continue;
                 }
-                DrawCalls += syncedSprites.DrawSyncedFloor(_imageDecorations!, _camera, ref nextSynced);
+
+                DrawThrough(cut);
+                if (cut == angleFloor)
+                {
+                    int start = angleTrack!.IndexAfterFloor(nextAngle + 1);
+                    floorDraws += DrawFloors(angleTrack, start, angleTrack.IndexAfterFloor(nextAngle));
+                    nextAngle--;
+                }
+                else
+                {
+                    DrawCalls += syncedSprites!.DrawSyncedFloor(_imageDecorations!, _camera, ref nextSynced);
+                }
             }
-            return floorDraws + DrawFloors(renderer, from, int.MaxValue);
+
+            return floorDraws + (renderer is null ? 0 : DrawFloors(renderer, from, int.MaxValue));
+
+            void DrawThrough(int floor)
+            {
+                if (renderer is null) return;
+                int local = floorIndices is null ? floor - firstFloor : Array.BinarySearch(floorIndices, floor);
+                if (floorIndices is not null && local < 0) local = ~local;
+                int end = local >= renderer.FloorCount ? 0 : renderer.IndexAfterFloor(local);
+                if (end <= from) return;
+                floorDraws += DrawFloors(renderer, from, end);
+                from = end;
+            }
         }
 
         int DrawFloors(OfficialFloorRenderer renderer, int from, int end)
@@ -627,7 +664,7 @@ public sealed unsafe partial class LevelRenderer
         _ => PlanetTint(id),
     };
 
-    private void DrawPlanets(in Matrix4 viewProjection)
+    private void DrawPlanets(in Matrix4 viewProjection, bool showTrail = true)
     {
         PlanetTrackFloor track = _planetTrack[_currentIndex];
         Vector4 primary = PlanetBodyTint(track.Pivot);
@@ -664,7 +701,7 @@ public sealed unsafe partial class LevelRenderer
         // Record only when time advances: re-rendering the same instant (paused, or the UI frame during
         // an interactive export) must not add points, or duplicates pile up and fake corners appear at
         // tile changes.
-        if (_trail.ActiveLifetime > 0 && _playTime > _previousPlayTime)
+        if (showTrail && _trail.ActiveLifetime > 0 && _playTime > _previousPlayTime)
         {
             if (!_offlineSubSample)
                 RecordTrailPose(_currentIndex, _planetCenter, _secondaryCenter, _thirdCenter, _playTime,
@@ -673,19 +710,19 @@ public sealed unsafe partial class LevelRenderer
             _previousPlayTime = _playTime;
         }
 
-        ReadOnlySpan<PlanetTrail.Sample> samples = _trail.ActiveLifetime > 0
+        ReadOnlySpan<PlanetTrail.Sample> samples = showTrail && _trail.ActiveLifetime > 0
             ? _trail.Build(_playTime, FloorRegion.FromView(_camera).Expand(Vector2.One)) : [];
 
         if (!samples.IsEmpty)
         {
             if (_trailParticles.Length < samples.Length)
             {
-                _trailParticles = new SpriteRenderer.Particle[Math.Max(samples.Length, _trailParticles.Length * 2)];
+                _trailParticles = new SpriteRenderer.ParticleInstance[Math.Max(samples.Length, _trailParticles.Length * 2)];
             }
             for (int i = 0; i < samples.Length; i++)
             {
                 ref readonly PlanetTrail.Sample sample = ref samples[i];
-                _trailParticles[i] = new SpriteRenderer.Particle
+                _trailParticles[i] = new SpriteRenderer.ParticleInstance
                 {
                     Center = sample.Center,
                     HalfSize = new Vector2(sample.Size * .5f),
@@ -693,7 +730,7 @@ public sealed unsafe partial class LevelRenderer
                 };
             }
 
-            sprites.DrawParticles(viewProjection, _trailParticles.AsSpan(0, samples.Length));
+            sprites.DrawParticleInstances(viewProjection, _trailParticles.AsSpan(0, samples.Length));
             DrawCalls += 1;
         }
 

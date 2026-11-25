@@ -52,7 +52,7 @@ internal sealed unsafe partial class PlayerWindow
         else
         {
             if (_videoExport.Status.Error is not null)
-                Environment.ExitCode = 1;
+                CommandExitCode = 1;
             Close();
         }
     }

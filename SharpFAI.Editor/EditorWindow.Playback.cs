@@ -193,7 +193,8 @@ internal sealed unsafe partial class EditorWindow
             }
             else
             {
-                if (!_pendingEffects && pending != target && _document.HasOnlyTileInsertionsSince(pending.Version))
+                if (!_pendingEffects && pending != target &&
+                    (_document.HasOnlyTileInsertionsSince(pending.Version) || _document.HasOnlyEventAppendsSince(pending.Version)))
                     renderer.RequestEditorRevisionCancellation();
                 if (!FinishPlaybackRevision(renderer, pending, target, _pendingEffects, out effectsFailed))
                     return;
@@ -216,8 +217,12 @@ internal sealed unsafe partial class EditorWindow
                     if (_displayedRevision == target) goto PlaybackReady;
 
                     bool tileInsertion = _document.HasOnlyTileInsertionsSince(current.Version);
-                    double delay = editing && tileInsertion && _document.IsLargeChart
-                        ? 0.4 : editing && _pendingTiles.Count > 0 ? 0.035 : 0.12;
+                    bool nearEnd = _pendingTiles.Count > 0 && _document.LastFloor - _pendingTiles[^1].Floor < 64;
+                    bool tailEvent = editing && _document.LastFloor - _floor < 64 &&
+                        _document.HasOnlyEventAppendsSince(current.Version);
+                    double delay = 0.12;
+                    if (editing && tileInsertion && _document.IsLargeChart && !nearEnd) delay = 0.4;
+                    else if (tailEvent || editing && !_document.IsLargeChart && _pendingTiles.Count > 0) delay = 0.035;
                     if (!effectsFailed && !_startPlayback && !_document.CanReusePlaybackChart(current.Version) &&
                         now - _lastPreviewEdit < delay) return;
 
@@ -226,7 +231,7 @@ internal sealed unsafe partial class EditorWindow
                     var patch = _document.PlaybackPatchSince(current.Version);
                     var snapshot = patch is not null || _document.CanReusePlaybackChart(current.Version)
                         ? null : _document.SnapshotForPlayback();
-                    if (!renderer.BeginEditorRevision(snapshot, settings, patch, patch is not null && tileInsertion))
+                    if (!renderer.BeginEditorRevision(snapshot, settings, patch))
                         throw new InvalidOperationException("The live renderer is not ready to accept editor revisions.");
                     if (!FinishPlaybackRevision(renderer, target, target, effects: false, out _) || _displayedRevision != target)
                         return;
@@ -405,15 +410,47 @@ internal sealed unsafe partial class EditorWindow
 
     private void DrawPlaybackCanvas()
     {
+        bool ready = HasCurrentPlayback;
+        LevelRenderer? renderer = _playback;
+        if (!_canvasOnly && !DrawPlaybackCanvasToolbar(ready, renderer))
+            return;
+
+        ImVec2 size = ImGui.GetContentRegionAvail();
+        size.x = Math.Max(1, size.x);
+        size.y = Math.Max(1, size.y);
+        if (ready && renderer is not null)
+            RenderPlaybackFrame(renderer, size);
+
+        DrawPlaybackImage(size);
+        _playbackHovered = ImGui.IsItemHovered() != 0;
+
+        if (ready && renderer is not null && _playbackView == PlaybackView.Preview)
+            NavigatePlaybackPreview(renderer, selectTiles: !_canvasOnly);
+        if (ready && renderer is { CanNavigateEditorPlayback: true } && _playbackView is PlaybackView.Auto or PlaybackView.Manual)
+            NavigateActivePlayback(renderer);
+        else
+            _playbackPan = false;
+
+        if (!_canvasOnly && ready && renderer is not null && _playbackView == PlaybackView.Manual)
+        {
+            ImVec2 min = ImGui.GetItemRectMin();
+            ImVec2 max = ImGui.GetItemRectMax();
+            ImDrawList* draw = ImGui.GetWindowDrawList();
+            ImDrawList.PushClipRect(draw, min, max, 1);
+            ManualPlayHud.Draw(renderer, draw, min, max, L.T);
+            ImDrawList.PopClipRect(draw);
+        }
+    }
+
+    private bool DrawPlaybackCanvasToolbar(bool ready, LevelRenderer? renderer)
+    {
         if (ImGui.Button(L.T("ReturnToEdit"), default) != 0)
         {
             ReturnToEdit();
-            return;
+            return false;
         }
 
         ImGui.SameLine();
-        bool ready = HasCurrentPlayback;
-        LevelRenderer? renderer = _playback;
         if (!ready || renderer is null)
         {
             string status = renderer?.LoadError ?? (renderer?.IsLoading == true ? L.F("SyncStage", L.LoadPhase(renderer.LoadPhase)) : L.T("Syncing"));
@@ -441,31 +478,7 @@ internal sealed unsafe partial class EditorWindow
             }
         }
 
-        ImVec2 size = ImGui.GetContentRegionAvail();
-        size.x = Math.Max(1, size.x);
-        size.y = Math.Max(1, size.y);
-        if (ready && renderer is not null)
-            RenderPlaybackFrame(renderer, size);
-
-        DrawPlaybackImage(size);
-        _playbackHovered = ImGui.IsItemHovered() != 0;
-
-        if (ready && renderer is not null && _playbackView == PlaybackView.Preview)
-            NavigatePlaybackPreview(renderer);
-        if (ready && renderer is { CanNavigateEditorPlayback: true } && _playbackView is PlaybackView.Auto or PlaybackView.Manual)
-            NavigateActivePlayback(renderer);
-        else
-            _playbackPan = false;
-
-        if (ready && renderer is not null && _playbackView == PlaybackView.Manual)
-        {
-            ImVec2 min = ImGui.GetItemRectMin();
-            ImVec2 max = ImGui.GetItemRectMax();
-            ImDrawList* draw = ImGui.GetWindowDrawList();
-            ImDrawList.PushClipRect(draw, min, max, 1);
-            ManualPlayHud.Draw(renderer, draw, min, max, L.T);
-            ImDrawList.PopClipRect(draw);
-        }
+        return true;
     }
 
     private void DrawPlaybackImage(ImVec2 size)
@@ -474,11 +487,11 @@ internal sealed unsafe partial class EditorWindow
             ImGui.Image(new ImTextureRef { _TexID = (uint)_playbackTexture }, size, WidgetDraw.V2(0, 1), WidgetDraw.V2(1, 0));
         else
             ImGui.Dummy(size);
-        ImVec2 min = ImGui.GetItemRectMin(), max = ImGui.GetItemRectMax();
-        DrawSpeedIndicator(min, max);
+        if (!_canvasOnly)
+            DrawSpeedIndicator(ImGui.GetItemRectMin(), ImGui.GetItemRectMax());
     }
 
-    private void NavigatePlaybackPreview(LevelRenderer renderer)
+    private void NavigatePlaybackPreview(LevelRenderer renderer, bool selectTiles)
     {
         ImGuiIO* io = ImGui.GetIO();
         ImVec2 origin = ImGui.GetItemRectMin();
@@ -488,7 +501,7 @@ internal sealed unsafe partial class EditorWindow
         var mouse = UpdateCanvasGesture(_playbackHovered);
         if (mouse == CanvasGesture.Drag)
             renderer.Pan(delta);
-        else if (mouse == CanvasGesture.Click)
+        else if (selectTiles && mouse == CanvasGesture.Click)
         {
             int floor = renderer.PickFloor(cursor);
             if (floor >= 0)
@@ -575,7 +588,8 @@ internal sealed unsafe partial class EditorWindow
             GL.ClearColor(background.X, background.Y, background.Z, background.W);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             renderer.ShowDecorations = !editing || (!_hideAllDecorations && !tilesOnly);
-            renderer.CollectDecorationQuads = editing && !tilesOnly;
+            renderer.ShowPositionTrackGuides = editing && !_canvasOnly;
+            renderer.CollectDecorationQuads = editing && !tilesOnly && !_canvasOnly;
             if (tilesOnly) renderer.RenderEditorTiles();
             else renderer.RenderAfterClear(background);
             _playbackFrameAvailable = true;
@@ -605,6 +619,16 @@ internal sealed unsafe partial class EditorWindow
         {
             if (!args.IsRepeat)
                 _windowMode.RequestToggle();
+            return;
+        }
+        if (pressed && args.Key == Keys.H &&
+            (args.Modifiers & (KeyModifiers.Alt | KeyModifiers.Control | KeyModifiers.Super)) == KeyModifiers.Alt)
+        {
+            if (!args.IsRepeat)
+            {
+                if (args.Shift) _shortcutsToggleRequested = true;
+                else _canvasOnlyToggleRequested = true;
+            }
             return;
         }
         if (pressed && args.Key == Keys.Escape)
@@ -657,7 +681,8 @@ internal sealed unsafe partial class EditorWindow
         if (pressed && _settingsWindow.IsOpen)
             return;
         if (_playbackView != PlaybackView.Manual || !HasCurrentPlayback || _playback is not { } renderer ||
-            args.IsRepeat || args.Key is Keys.Unknown or Keys.LeftAlt or Keys.RightAlt ||
+            args.IsRepeat || args.Key is Keys.Unknown or Keys.LeftAlt or Keys.RightAlt or
+                Keys.LeftControl or Keys.RightControl or Keys.LeftSuper or Keys.RightSuper ||
             pressed && ImGui.GetIO()->WantTextInput != 0)
             return;
         if (args.Alt && args.Key is Keys.A or Keys.N)

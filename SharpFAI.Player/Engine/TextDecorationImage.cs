@@ -38,8 +38,8 @@ internal static class TextDecorationImage
         "Georgia" => "Georgia",
         "Impact" => "Impact",
         "TimesNewRoman" => "Times New Roman",
-        // Default and Arial both resolve to Arial in the game.
-        _ => "Arial",
+        "Arial" => "Arial",
+        _ => ApplicationFont.FamilyName,
     };
 
     internal static ImageDecoder.RgbaImage Rasterize(string value, string? fontName)
@@ -59,7 +59,8 @@ internal static class TextDecorationImage
             Alignment = TextAlignment.Center,
             LineSpacing = LineSpacing(text),
         };
-        ImageDecoder.RgbaImage raster = richText.Rasterize(options);
+        if (richText.Rasterize(options) is not { } raster)
+            return new ImageDecoder.RgbaImage(1, 1, new byte[4]);
         ImageDecoder.FlipVertically(raster.Pixels, raster.Width, raster.Height);
         return raster;
     }
@@ -94,5 +95,5 @@ internal static class TextDecorationImage
         return false;
     }
 
-    internal static readonly IReadOnlyList<string> FallbackFamilies = ["Microsoft YaHei", "SimSun", "Segoe UI"];
+    internal static readonly IReadOnlyList<string> FallbackFamilies = [ApplicationFont.FamilyName];
 }

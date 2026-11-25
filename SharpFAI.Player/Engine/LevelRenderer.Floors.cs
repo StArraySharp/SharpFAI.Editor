@@ -178,14 +178,15 @@ public sealed unsafe partial class LevelRenderer
 
     private FloorRegion ResidentCoverage()
     {
-        FloorRegion view = FloorRegion.FromView(_camera);
+        FloorRegion view = FloorRegion.FromView(_camera).Expand(Vector2.Abs(_editorAngleOffset));
         return view.Expand((view.Max - view.Min) * .30f + new Vector2(1f));
     }
 
     private void EnsureVisibleFloors()
     {
         if (_visibleFloorIndex is not { } visibility ||
-            (_residentRegion.Contains(FloorRegion.FromView(_camera)) && _residentTime.Contains(_playTime)))
+            (_residentRegion.Contains(FloorRegion.FromView(_camera).Expand(Vector2.Abs(_editorAngleOffset))) &&
+             _residentTime.Contains(_playTime)))
         {
             return;
         }

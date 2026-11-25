@@ -60,7 +60,7 @@ public sealed unsafe partial class LevelRenderer
         SetAudioData(result.MusicPath, result.Music, result.Hitsound);
         UpdateHitsoundPresetWarning();
 
-        _audioBackendReady = !_settings.SkipAudio && AudioEngine.Initialize();
+        _audioBackendReady = EnableAudioOutput && !_settings.SkipAudio && PlaybackAudio.Initialize();
         if (_audioBackendReady)
         {
             _music = new AudioClip { Name = "Music", Volume = _musicVolume * _musicOutputGain };
@@ -89,25 +89,25 @@ public sealed unsafe partial class LevelRenderer
         UpdateHitsoundPresetWarning();
 
         bool backendReady = _audioBackendReady && AudioEngine.IsInitialized;
-        if (backendReady)
+        if (backendReady && _music is { } musicClip && _hitsound is { } hitsoundClip)
         {
             if (musicChanged)
-                UpdateEditorClip(ref _music, music is null ? null : AtPlaybackRate(music));
+                _music = musicClip = UpdateEditorClip(musicClip, music is null ? null : AtPlaybackRate(music));
             if (hitsoundChanged)
-                UpdateEditorClip(ref _hitsound, hitsound);
+                _hitsound = hitsoundClip = UpdateEditorClip(hitsoundClip, hitsound);
 
             float musicGain = _musicVolume * _musicOutputGain;
-            if (_music.Volume != musicGain)
-                _music.Volume = musicGain;
+            if (musicClip.Volume != musicGain)
+                musicClip.Volume = musicGain;
             float hitsoundGain = _hitsoundVolume * _hitsoundOutputGain;
-            if (_hitsound.Volume != hitsoundGain)
-                _hitsound.Volume = hitsoundGain;
+            if (hitsoundClip.Volume != hitsoundGain)
+                hitsoundClip.Volume = hitsoundGain;
         }
 
         UpdateAudioStatus(backendReady);
     }
 
-    private void UpdateEditorClip(ref AudioClip clip, DecodedAudio? audio)
+    private static AudioClip UpdateEditorClip(AudioClip clip, DecodedAudio? audio)
     {
         if (audio is not null)
         {
@@ -117,8 +117,9 @@ public sealed unsafe partial class LevelRenderer
         {
             // AudioClip has no unload operation. Replace only the clip whose PCM was removed.
             clip.Dispose();
-            clip = new AudioClip { Name = clip.Name };
+            return new AudioClip { Name = clip.Name };
         }
+        return clip;
     }
 
     private void SetAudioData(string? musicPath, DecodedAudio? music, DecodedAudio? hitsound)
@@ -150,8 +151,8 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
-        bool musicLoaded = _music.IsLoaded;
-        bool hitsoundLoaded = _hitsound.IsLoaded;
+        bool musicLoaded = _music?.IsLoaded == true;
+        bool hitsoundLoaded = _hitsound?.IsLoaded == true;
         string? warning = _audioMusicPath switch
         {
             null => "未找到音乐文件 / No music file found",
@@ -164,7 +165,7 @@ public sealed unsafe partial class LevelRenderer
         _audioAvailable = musicLoaded || hitsoundLoaded;
         _audioStatus = (musicLoaded, hitsoundLoaded) switch
         {
-            (true, true) => $"音乐 + 打击音（{_music.Duration:0.0}s）",
+            (true, true) => $"音乐 + 打击音（{_music!.Duration:0.0}s）",
             (true, false) => "仅音乐",
             (false, true) => "仅打击音",
             _ => "未找到音频文件",
@@ -194,7 +195,7 @@ public sealed unsafe partial class LevelRenderer
 
         try
         {
-            return HitsoundSynth.SynthesizeTimeline(timeline.EntryTimes, timeline.Pitch);
+            return HitsoundSynth.SynthesizeTimeline(timeline.EntryTimes, timeline.Pitch, floors: floors);
         }
         catch (Exception ex)
         {
@@ -206,7 +207,7 @@ public sealed unsafe partial class LevelRenderer
     /// <summary>Hot-swap the hitsound.</summary>
     public bool ReloadHitsound(string wavPath)
     {
-        if (_settings.SkipAudio || !File.Exists(wavPath))
+        if (_settings.SkipAudio || _hitsound is not { } clip || !File.Exists(wavPath))
         {
             return false;
         }
@@ -215,18 +216,18 @@ public sealed unsafe partial class LevelRenderer
         double position = _playTime;
 
         DecodedAudio? decoded = AudioDecoder.Decode(wavPath);
-        if (decoded is null || decoded.Pcm.Length == 0 || !_hitsound.LoadDecoded(decoded))
+        if (decoded is null || decoded.Pcm.Length == 0 || !clip.LoadDecoded(decoded))
         {
             return false;
         }
 
-        _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
+        clip.Volume = _hitsoundVolume * _hitsoundOutputGain;
         _audioHitsound = decoded;
 
         double target = (position + HitsoundClockShift) / _pitch;
-        _hitsound.Seek(Math.Max(0.0, target));
-        if (wasPlaying && target >= 0.0 && target < _hitsound.Duration)
-            _hitsound.Play();
+        clip.Seek(Math.Max(0.0, target));
+        if (wasPlaying && target >= 0.0 && target < clip.Duration)
+            clip.Play();
 
         UpdateAudioDuration();
         _audioNeedsResync = true;
@@ -255,9 +256,9 @@ public sealed unsafe partial class LevelRenderer
     /// <summary>
     /// Aligns a clip to the playback clock using its offset in chart seconds.
     /// </summary>
-    private void SyncClip(AudioClip clip, bool enabled, double shift)
+    private void SyncClip(AudioClip? clip, bool enabled, double shift)
     {
-        if (!clip.IsLoaded)
+        if (clip is not { IsLoaded: true })
         {
             return;
         }
@@ -326,8 +327,8 @@ public sealed unsafe partial class LevelRenderer
         float gain = Math.Clamp(master, 0, 100) / 100f;
         _musicOutputGain = gain * (Math.Clamp(music, 0, 100) / 100f);
         _hitsoundOutputGain = gain * (Math.Clamp(hitsound, 0, 100) / 100f);
-        _music.Volume = _musicVolume * _musicOutputGain;
-        _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
+        _music?.Volume = _musicVolume * _musicOutputGain;
+        _hitsound?.Volume = _hitsoundVolume * _hitsoundOutputGain;
     }
 
     /// <summary>Music volume.</summary>
@@ -337,7 +338,7 @@ public sealed unsafe partial class LevelRenderer
         set
         {
             _musicVolume = Math.Clamp(value, 0f, 1f);
-            _music.Volume = _musicVolume * _musicOutputGain;
+            _music?.Volume = _musicVolume * _musicOutputGain;
         }
     }
 
@@ -348,7 +349,7 @@ public sealed unsafe partial class LevelRenderer
         set
         {
             _hitsoundVolume = Math.Clamp(value, 0f, 1f);
-            _hitsound.Volume = _hitsoundVolume * _hitsoundOutputGain;
+            _hitsound?.Volume = _hitsoundVolume * _hitsoundOutputGain;
         }
     }
 
@@ -397,7 +398,7 @@ public sealed unsafe partial class LevelRenderer
         _audioNeedsResync = true;
         UpdateAudioDuration();
 
-        if (_hitsound.IsLoaded)
+        if (_hitsound is { IsLoaded: true })
         {
             _hitsound.Seek(Math.Max(0.0, _playTime + HitsoundClockShift) / _pitch);
         }

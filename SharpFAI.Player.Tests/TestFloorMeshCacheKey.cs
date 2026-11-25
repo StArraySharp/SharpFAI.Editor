@@ -1,13 +1,6 @@
-using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using NUnit.Framework;
 using SharpFAI.Player.Engine;
-using SharpFAI.Framework;
-using SharpFAI.Serialization;
-using SharpFAI.Util;
 
 namespace SharpFAI.Player.Tests;
 
@@ -19,9 +12,6 @@ namespace SharpFAI.Player.Tests;
 [TestFixture]
 public class TestFloorMeshCacheKey
 {
-    private const string BigLevelPath =
-        @"c:\Users\StArray\Downloads\Arche - かめりあ (Camellia)\[𝐃𝐎 𝐍𝐎𝐓 𝐎𝐏𝐄𝐍 𝐓𝐇𝐈𝐒 𝐀𝐓 𝐇𝐎𝐌𝐄] FULL.adofai";
-
     [Test]
     public void KeyIsStableAgainstFloatingPointNoise()
     {
@@ -49,48 +39,19 @@ public class TestFloorMeshCacheKey
     }
 
     [Test]
-    public void CacheStaysSmallForHugeLevel()
+    public void CacheStaysSmallForRepeatedShapesWithFloatingPointNoise()
     {
-        if (!File.Exists(BigLevelPath))
-        {
-            Assert.Ignore($"Level not found: {BigLevelPath}");
-            return;
-        }
-
         FloorMesh.ClearCache();
-
-        Stopwatch sw = Stopwatch.StartNew();
-        Level level = new(BigLevelPath);
-        List<Floor> floors = level.CreateFloors(usePositionTrack: true);
-        sw.Stop();
-
-        TestContext.Out.WriteLine($"floors = {floors.Count:N0} in {sw.Elapsed.TotalMilliseconds:N0} ms");
-
-        // Bake every floor exactly the way the renderer does.
         HashSet<string> keys = [];
-        sw.Restart();
-
-        foreach (Floor floor in floors)
+        for (int i = 0; i < 20_000; i++)
         {
-            FloorMesh mesh = new(
-                floor.entryAngle,
-                floor.exitAngle,
-                Floor.width / 100f,
-                Floor.length / 100f,
-                floor.isMidspin ? 3 : 40);
-
+            double noise = (i / 8 + 1) * 1e-14;
+            var mesh = new FloorMesh(45d * (i % 8) + noise, 90d + noise);
             keys.Add(mesh.CacheKey);
             _ = mesh.Build();
         }
 
-        sw.Stop();
-
-        TestContext.Out.WriteLine($"distinct keys = {keys.Count:N0}, cache = {FloorMesh.CacheCount:N0}");
-        TestContext.Out.WriteLine($"bake = {sw.Elapsed.TotalMilliseconds:N0} ms");
-
-        Assert.That(keys.Count, Is.LessThan(200),
-            $"A level should have a handful of shapes, found {keys.Count:N0} distinct keys");
-        Assert.That(FloorMesh.CacheCount, Is.LessThan(200),
-            $"Cache must stay bounded, holds {FloorMesh.CacheCount:N0} entries");
+        Assert.That(keys, Has.Count.EqualTo(8));
+        Assert.That(FloorMesh.CacheCount, Is.EqualTo(keys.Count));
     }
 }

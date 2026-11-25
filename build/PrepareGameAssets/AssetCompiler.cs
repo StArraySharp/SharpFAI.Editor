@@ -15,9 +15,10 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
     private readonly List<string> manifest = [];
     private readonly Dictionary<string, string> stages = new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task CompileAsync(string exported, ShaderLayout[] shaders, string workingDirectory, CancellationToken cancellation)
+    public async Task CompileAsync(string exported, ShaderLayout[] shaders, string workingDirectory, CancellationToken cancellation,
+        string? connectorTexture)
     {
-        CopyTextures(Path.Combine(exported, "Texture2D"), cancellation);
+        CopyTextures(Path.Combine(exported, "Texture2D"), connectorTexture, cancellation);
         var sourceFiles = ReadShaderLabExports(exported, cancellation);
         var sourceNames = shaders.Select(shader => shader.Name).ToHashSet(StringComparer.Ordinal);
         using var compile = new ConsoleProgressBar($"Translating shaders to GLSL with HLSLcc {hlslcc.Tag}");
@@ -78,13 +79,15 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
         writeManifest.Complete($"{manifest.Count} entries");
     }
 
-    private void CopyTextures(string directory, CancellationToken cancellation)
+    private void CopyTextures(string directory, string? connectorTexture, CancellationToken cancellation)
     {
         using var progress = new ConsoleProgressBar("Copying textures and checking duplicates");
         var selected = Directory.GetFiles(directory, "*.png")
             .Where(path => Path.GetFileName(path).StartsWith("CameraFilterPack", StringComparison.Ordinal) ||
                 RequiredTextures.Contains(Path.GetFileName(path), StringComparer.Ordinal))
             .ToDictionary(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
+        if (connectorTexture is not null)
+            selected.TryAdd("dotted-line.png", connectorTexture);
         foreach (string required in RequiredTextures)
         {
             if (!selected.ContainsKey(required))
@@ -166,8 +169,12 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
         if (stages.TryGetValue(file, out string? cached))
             return cached;
 
+        // HLSLcc cannot open some deeply nested AssetRipper exports on Windows.
+        const string translatorInput = "translate.dxbc";
+        File.Copy(file, Path.Combine(workingDirectory, translatorInput), overwrite: true);
         string source = await GameAssetPreparation.RunToolAsync(hlslcc.Executable, ["-q", "-l", "glsl330",
-            "--no-default-flags", "--flag", "disable-globals-struct", "--strip-unused", file], workingDirectory, cancellation);
+            "--no-default-flags", "--flag", "disable-globals-struct", "--strip-unused", translatorInput],
+            workingDirectory, cancellation);
         Match version = Regex.Match(source, @"(?m)^#version 330\b");
         if (!version.Success)
             throw new IOException($"HLSLcc did not return GLSL 330 for {file}.");

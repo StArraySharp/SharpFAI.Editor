@@ -17,7 +17,7 @@ internal sealed class FallingPetalsFilter(IFilterBackend backend) : IGeneratedFi
 
     private const float SimulationSpeed = .3f;
     private const int MaxLifetime = 60;
-    private readonly SpriteRenderer.Particle[] _particles = new SpriteRenderer.Particle[MaxLifetime * 3];
+    private readonly SpriteRenderer.ParticleInstance[] _particles = new SpriteRenderer.ParticleInstance[MaxLifetime * 3];
     private readonly int[] _textures = new int[Emitters.Length];
     private double _start;
     private float _prewarm;
@@ -57,7 +57,7 @@ internal sealed class FallingPetalsFilter(IFilterBackend backend) : IGeneratedFi
             int count = SampleEmitter(index, emitter, simulatedTime);
             if (count == 0)
                 continue;
-            sprites.DrawParticles(projection, _particles.AsSpan(0, count), _textures[index], emitter.Frames, straightAlpha: true);
+            sprites.DrawParticleInstances(projection, _particles.AsSpan(0, count), _textures[index], emitter.Frames, straightAlpha: true);
             draws++;
         }
         return draws;
@@ -85,7 +85,7 @@ internal sealed class FallingPetalsFilter(IFilterBackend backend) : IGeneratedFi
             float halfSize = .25f + .75f * RandomUnit(ref seed);
             float startFrame = emitter.RandomStartFrame ? 5f * RandomUnit(ref seed) : 0f;
             int frame = (int)(age / lifetime * 60f * emitter.Frames + startFrame) % emitter.Frames;
-            _particles[count++] = new SpriteRenderer.Particle
+            _particles[count++] = new SpriteRenderer.ParticleInstance
             {
                 Center = center,
                 HalfSize = new Vector2(halfSize, halfSize * (27f / 35f)),

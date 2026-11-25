@@ -76,7 +76,7 @@ internal static class ShaderLayoutReader
     private static bool IsFilter(string name) =>
         name.StartsWith("CameraFilterPack/", StringComparison.Ordinal) ||
         name.StartsWith("CameraFilterPackLegacy/", StringComparison.Ordinal) ||
-        name is "ADOFAI/PolarScreen" or "ADOFAI/ScreenTile" or "ADOFAI/ScreenScroll" or
+        name is "ADOFAI/PolarScreen" or "ADOFAI/ScreenTile" or "ADOFAI/ScreenScroll" or "ADOFAI/ScrollingSprite" or
             "Sprites/Tile" or "Hidden/VideoBloom" or "Hidden/CameraMotionBlur";
 
     private static uint[] DefaultPrograms(object program)
@@ -123,7 +123,7 @@ internal static class ShaderLayoutReader
 
     private sealed class AssetRipperLibraries(string directory) : AssemblyLoadContext(isCollectible: true)
     {
-        private static readonly string RuntimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        private static readonly string? RuntimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location);
 
         public Type GetType(string assembly, string name) =>
             LoadFromAssemblyName(new AssemblyName("AssetRipper." + assembly)).GetType("AssetRipper." + name, throwOnError: true)!;
@@ -133,7 +133,11 @@ internal static class ShaderLayoutReader
             string file = assembly.Name + ".dll";
             string path = Path.Combine(directory, file);
             // Share the process runtime instead of loading copies from the self-contained release.
-            return File.Exists(Path.Combine(RuntimeDirectory, file)) || !File.Exists(path) ? null : LoadFromAssemblyPath(path);
+            if (RuntimeDirectory is not null)
+                return File.Exists(Path.Combine(RuntimeDirectory, file)) || !File.Exists(path) ? null : LoadFromAssemblyPath(path);
+            // Bundled runtime assemblies have no on-disk location.
+            try { return Default.LoadFromAssemblyName(assembly); }
+            catch (FileNotFoundException) { return File.Exists(path) ? LoadFromAssemblyPath(path) : null; }
         }
     }
 }

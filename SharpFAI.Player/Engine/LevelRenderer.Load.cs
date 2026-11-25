@@ -386,6 +386,7 @@ public sealed unsafe partial class LevelRenderer
     private void CommitLevel(LevelLoadResult result)
     {
         System.Diagnostics.Stopwatch uploadClock = System.Diagnostics.Stopwatch.StartNew();
+        InvalidatePositionTrackGuides();
 
         try
         {
@@ -836,6 +837,8 @@ public sealed unsafe partial class LevelRenderer
         CancelEditorRevision();
         ClearFloorChunks();
         ClearEditorInsertedTrack();
+        ClearEditorAnglePreview();
+        InvalidatePositionTrackGuides();
         _officialRenderer?.ClearLevel();
         _trackGuideRenderer?.Dispose();
         _trackGuideRenderer = null;
@@ -910,8 +913,10 @@ public sealed unsafe partial class LevelRenderer
         ClearManualAttempt();
         ResetTrail();
 
-        _music.Dispose();
-        _hitsound.Dispose();
+        _music?.Dispose();
+        _hitsound?.Dispose();
+        _music = _hitsound = null;
+        _audioBackendReady = false;
         _audioMusic = null;
         _audioHitsound = null;
         _audioMusicPath = null;

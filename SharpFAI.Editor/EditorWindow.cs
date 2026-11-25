@@ -32,6 +32,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private bool _showInspector = true;
     private bool _showPalette = true;
     private bool _showShortcuts;
+    private bool _canvasOnly;
+    private bool _canvasOnlyToggleRequested;
     private bool _showBrickNumbers = true;
     private bool _openFindFloor;
     private int _findFloor;
@@ -83,7 +85,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         style->WindowPadding = WidgetDraw.V2(10, 8);
         style->FramePadding = WidgetDraw.V2(7, 4);
         ApplyTheme(style);
-        LoadFont(io);
+        ApplicationFont.LoadInterfaceFont(io, 17f);
         LoadApplicationSettings();
         _lastChartPath = _recentChart.Read();
         RememberOpenedChart();
@@ -124,17 +126,29 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         if (_closeRequested)
         {
             _closeRequested = false;
+            SetCanvasOnly(false);
             RequestClose();
         }
-        _menuBarFrameRate.Sample(args.Time);
-        DrawMenu();
-        DrawDockspace();
+        ApplyViewShortcuts();
+        if (_canvasOnly)
+            ImGui.DockSpaceOverViewport(0, ImGui.GetMainViewport(), (int)ImGuiDockNodeFlags.ImGuiDockNodeFlags_KeepAliveOnly);
+        else
+        {
+            _menuBarFrameRate.Sample(args.Time);
+            DrawMenu();
+            DrawDockspace();
+        }
         HandleShortcuts();
         _numericDrawn = false;
         UpdatePlayback();
-        DrawSettings();
-        DrawDecorations();
-        DrawCanvas();
+        if (_canvasOnly)
+            DrawCanvasOnly();
+        else
+        {
+            DrawSettings();
+            DrawDecorations();
+            DrawCanvas();
+        }
         _speedWheels.Clear();
         // Starting after the canvas lets it apply a wheel step from this frame first.
         if (_queuedRateShortcut is { } rate && rate != PlaybackRate.Configured)
@@ -142,18 +156,21 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             _queuedRateShortcut = null;
             StartFromShortcut(rate);
         }
-        DrawInspector();
-        DrawPalette();
-        DrawParticleEditor();
-        DrawShortcuts();
-        DrawFindComment();
-        DrawVideoRender();
-        DrawDialogs();
-        _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
-            TryApplyApplicationSettings);
-        if (_playback is { } renderer)
-            _audioCalibration.Draw(renderer, L.IsChinese);
-        DrawSaveNotice();
+        if (!_canvasOnly)
+        {
+            DrawInspector();
+            DrawPalette();
+            DrawParticleEditor();
+            DrawShortcuts();
+            DrawFindComment();
+            DrawVideoRender();
+            DrawDialogs();
+            _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
+                TryApplyApplicationSettings);
+            if (_playback is { } renderer)
+                _audioCalibration.Draw(renderer, L.IsChinese);
+            DrawSaveNotice();
+        }
         if (!_numericDrawn)
             FinishNumericEdit();
         ApplyConfiguredPlaybackShortcut();
@@ -242,8 +259,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderSetNodeSize(dock, viewport->WorkSize);
         uint canvas = dock;
         float footerHeight = TimelineRulerHeight + TimelineFloorHeight +
-            4 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
-        float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .42f);
+            5 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
+        float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .46f);
         uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, footerRatio, null, &canvas);
         uint left = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Left, 0.22f, null, &canvas);
         uint right = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Right, 0.30f, null, &canvas);
@@ -284,6 +301,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         {
             if (ImGui.MenuItem(L.T("Fullscreen"), "Alt+Enter", (byte)(_windowMode.IsFullscreen ? 1 : 0)) != 0)
                 _windowMode.RequestToggle();
+            if (ImGui.MenuItem(L.T("CanvasOnly"), "Alt+H") != 0)
+                _canvasOnlyToggleRequested = true;
             if (ImGui.MenuItem(L.T("AudioCalibration"), null, 0, (byte)(_videoExport?.Request is null ? 1 : 0)) != 0)
                 OpenAudioCalibration();
             ImGui.Separator();
@@ -331,7 +350,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (ImGui.BeginMenu(L.T("MenuHelp")) != 0)
         {
-            ToggleMenu(L.T("Shortcuts"), ref _showShortcuts);
+            ToggleMenu(L.T("Shortcuts"), ref _showShortcuts, "Alt+Shift+H");
             ImGui.EndMenu();
         }
         DrawApplicationSettingsMenuItem();
@@ -392,6 +411,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         RememberOpenedChart();
         _decorationRowsKey = null;
         _decorationMarkersVersion = -1;
+        _pendingCameraFocusVersion = -1;
         _decoration = _particle = null;
         _showParticle = _inspectDecoration = false;
         _selectedDecorations.Clear();
@@ -578,23 +598,4 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ImGuiIO.AddKeyEvent(io, key, (byte)(down ? 1 : 0));
     }
 
-    private static void LoadFont(ImGuiIO* io)
-    {
-        string fonts = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
-        foreach (string path in new[] { Path.Combine(fonts, "msyh.ttc"), Path.Combine(fonts, "simsun.ttc"),
-                     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/System/Library/Fonts/PingFang.ttc" })
-        {
-            if (!File.Exists(path))
-                continue;
-            ImFont* font = ImFontAtlas.AddFontFromFileTTF(io->Fonts, path, 17, null,
-                ImFontAtlas.GetGlyphRangesChineseSimplifiedCommon(io->Fonts));
-            if (font != null)
-            {
-                io->FontDefault = font;
-                return;
-            }
-        }
-        io->FontDefault = ImFontAtlas.AddFontDefault(io->Fonts);
-        Console.Error.WriteLine(L.T("NoChineseFont"));
-    }
 }

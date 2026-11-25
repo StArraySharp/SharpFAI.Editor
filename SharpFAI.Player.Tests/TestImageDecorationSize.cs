@@ -689,7 +689,7 @@ public sealed class TestImageDecorationSize
     }
 
     [Test]
-    public void FontNamesMapToTheFamiliesTheGameUses()
+    public void DefaultFontUsesBundledNotoAndNamedFontsKeepTheirFamilies()
     {
         Assert.Multiple(() =>
         {
@@ -698,9 +698,9 @@ public sealed class TestImageDecorationSize
             Assert.That(TextDecorationImage.ResolveFamily("Georgia"), Is.EqualTo("Georgia"));
             Assert.That(TextDecorationImage.ResolveFamily("Impact"), Is.EqualTo("Impact"));
             Assert.That(TextDecorationImage.ResolveFamily("TimesNewRoman"), Is.EqualTo("Times New Roman"));
-            Assert.That(TextDecorationImage.ResolveFamily("Default"), Is.EqualTo("Arial"));
+            Assert.That(TextDecorationImage.ResolveFamily("Default"), Is.EqualTo(ApplicationFont.FamilyName));
             Assert.That(TextDecorationImage.ResolveFamily("Arial"), Is.EqualTo("Arial"));
-            Assert.That(TextDecorationImage.ResolveFamily(null), Is.EqualTo("Arial"));
+            Assert.That(TextDecorationImage.ResolveFamily(null), Is.EqualTo(ApplicationFont.FamilyName));
         });
     }
 

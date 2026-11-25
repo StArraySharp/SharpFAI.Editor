@@ -20,20 +20,21 @@ dotnet build .\SharpFAI.Editor.slnx -c Release
 dotnet run --project .\SharpFAI.Editor -c Release
 ```
 
-启动后从「文件 → 打开」选择谱面。也可以从命令行用独立播放器打开谱面。
+启动后从「文件 → 打开」选择谱面。加上 `--player` 可从同一入口启动播放器模式。
 
 ```powershell
-dotnet run --project .\SharpFAI.Player -c Release -- --open ".\example.adofai"
+dotnet run --project .\SharpFAI.Editor -c Release -- --player --open ".\example.adofai"
 ```
 
 原版滤镜使用本机 ADOFAI 安装中的构建输入。完整步骤见 [构建指南](docs/build.md)。
 
 ## 打包与测试
 
-在仓库根目录通过 PowerShell 7 运行发布脚本，可在 `publish/` 生成自包含的 Windows x64 编辑器和资源准备工具。 [publish.ps1](publish.ps1)
+在仓库根目录通过 PowerShell 7 运行发布脚本，可在 `publish/` 生成自包含的 Windows x64、Linux x64、macOS x64 和 macOS arm64 编辑器，以及 Windows x64 资源准备工具。所有产物还会打包为 `SharpFAI.Editor-universal-<版本>.zip`。 [publish.ps1](publish.ps1)
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1
+pwsh -NoProfile -File .\publish.ps1 -Runtime linux-x64
 dotnet test .\SharpFAI.Editor.slnx -c Release
 ```
 

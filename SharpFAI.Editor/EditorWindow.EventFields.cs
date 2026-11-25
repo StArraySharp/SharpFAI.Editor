@@ -136,8 +136,13 @@ internal sealed unsafe partial class EditorWindow
             if (richText && _multilineText.Length > 0)
             {
                 ImGui.TextUnformatted(L.T("Preview"));
-                DrawRichLevelTextPreview("description-draft", _multilineText, ImGui.GetCursorPosX(),
-                    width, height, styledOnly: false);
+                if (!DrawRichLevelTextPreview("description-draft", _multilineText, ImGui.GetCursorPosX(),
+                    width, height, styledOnly: false))
+                {
+                    ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + width);
+                    WidgetDraw.TextDisabled(_multilineText);
+                    ImGui.PopTextWrapPos();
+                }
             }
             if (ImGui.Button(L.T("PropertyApply"), default) != 0)
             {

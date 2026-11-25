@@ -1,8 +1,4 @@
 #version 330 core
-#extension GL_ARB_explicit_attrib_location : require
-#ifdef GL_ARB_shader_bit_encoding
-#extension GL_ARB_shader_bit_encoding : enable
-#endif
 
 uniform vec4 _TileTex_ST;
 uniform vec4 _Tint;

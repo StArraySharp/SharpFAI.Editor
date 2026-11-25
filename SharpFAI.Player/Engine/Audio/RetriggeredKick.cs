@@ -2,7 +2,7 @@ namespace SharpFAI.Player.Engine.Audio;
 
 internal sealed class RetriggeredKick
 {
-    private readonly record struct Hit(int Start, int Length, float Blend);
+    private readonly record struct Hit(int Start, int Length, float Gain);
 
     private readonly float[] _kick;
     private readonly int _channels;
@@ -31,17 +31,25 @@ internal sealed class RetriggeredKick
         List<Hit> shortHits = [];
         List<int> longStarts = [];
         List<float> longGains = [];
-        for (int i = 0; i < starts.Length; i++)
+        for (int i = 0; i < starts.Length;)
         {
-            int gap = i + 1 < starts.Length ? starts[i + 1] - starts[i] : full;
+            int start = starts[i];
+            int next = i + 1;
+            while (next < starts.Length && starts[next] == start)
+                next++;
+
+            // Coincident hits use the same envelope and sum at the same sample.
+            int count = next - i;
+            int gap = next < starts.Length ? starts[next] - start : full;
             float blend = SmoothStep((full - gap) / (float)(full - compact));
             if (blend > 0f)
-                shortHits.Add(new Hit(starts[i], gap, blend));
+                shortHits.Add(new Hit(start, gap, count * blend));
             if (blend < 1f)
             {
-                longStarts.Add(starts[i]);
-                longGains.Add(1f - blend);
+                longStarts.Add(start);
+                longGains.Add(count * (1f - blend));
             }
+            i = next;
         }
         starts = longStarts.ToArray();
         gains = longGains.ToArray();
@@ -79,7 +87,9 @@ internal sealed class RetriggeredKick
             int to = Math.Min(end - hit.Start, hit.Length);
             for (int frame = from; frame < to; frame++)
             {
-                float gain = hit.Blend * SmoothStep(frame / attack) * SmoothStep((hit.Length - 1 - frame) / release);
+                // A one- or two-sample voice has no interior samples for a fade.
+                float gain = hit.Length < 3 ? hit.Gain :
+                    hit.Gain * SmoothStep(frame / attack) * SmoothStep((hit.Length - 1 - frame) / release);
                 int offset = (hit.Start + frame - start) * _channels;
                 int source = (sourceStart + frame) * _channels;
                 for (int channel = 0; channel < _channels; channel++)

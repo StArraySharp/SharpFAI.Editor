@@ -78,8 +78,8 @@ public sealed unsafe partial class LevelRenderer
         _isPlaying = false;
         _filterClockPaused = true;
         PlayInput.Clear();
-        _music.Pause();
-        _hitsound.Pause();
+        _music?.Pause();
+        _hitsound?.Pause();
     }
 
     /// <summary>Toggle playback.</summary>
@@ -165,8 +165,8 @@ public sealed unsafe partial class LevelRenderer
         _lastFilterTime = double.NaN;
         _colorHistory?.Reset();
         _audioNeedsResync = true;
-        _music.Stop();
-        _hitsound.Stop();
+        _music?.Stop();
+        _hitsound?.Stop();
         ClearManualAttempt();
 
         // Rewind: put the camera straight back
@@ -187,8 +187,8 @@ public sealed unsafe partial class LevelRenderer
         if (scrubbing)
         {
             SetRuntimeTrackMode(true);
-            _music.Pause();
-            _hitsound.Pause();
+            _music?.Pause();
+            _hitsound?.Pause();
             PlayInput.Clear();
         }
     }
@@ -287,12 +287,12 @@ public sealed unsafe partial class LevelRenderer
         AudioClip? master = null;
         double masterShift = 0.0;
 
-        if (_musicEnabled && _music.IsLoaded && _music.IsPlaying)
+        if (_musicEnabled && _music is { IsLoaded: true, IsPlaying: true })
         {
             master = _music;
             masterShift = AudioClockShift;
         }
-        else if (_hitsoundEnabled && _hitsound.IsLoaded && _hitsound.IsPlaying)
+        else if (_hitsoundEnabled && _hitsound is { IsLoaded: true, IsPlaying: true })
         {
             master = _hitsound;
             masterShift = HitsoundClockShift;

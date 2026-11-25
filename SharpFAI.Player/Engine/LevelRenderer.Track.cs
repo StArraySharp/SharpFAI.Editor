@@ -143,6 +143,9 @@ public sealed unsafe partial class LevelRenderer
         {
             UpdateFloorVisuals(renderer, _residentFloors, runtime, states, ref volume);
         }
+        if (_editorAngleTrack is { HasGeometry: true } angleTrack)
+            for (int i = 0; i < angleTrack.FloorCount; i++)
+                UpdateFloorVisual(angleTrack, i, _editorAngleAnchor + i, null, states, ref volume, anglePreview: true);
         _floorVisualTime = _playTime;
     }
 
@@ -156,38 +159,50 @@ public sealed unsafe partial class LevelRenderer
         {
             int i = selection?[local] ?? local;
             int floor = indices?[i] ?? i;
-            ref readonly FloorTrackState state = ref states[floor];
-            FloorRenderTransform transform = state.Transform;
-            float opacity = state.Hidden ? 0f : state.Opacity;
-            if (runtime is not null)
-            {
-                (transform, opacity) = runtime.TransformAt(floor, _playTime, _hidePassedFloors);
-            }
-
-            Vector4? color = _floorRenderColors?[floor];
-            if (color is null && volume is null && state.Mode == TrackColorMode.Volume)
-                volume = ReadTrackVolume();
-            float trackVolume = volume.GetValueOrDefault();
-
-            if (_floorRenderTransforms is { } transforms)
-                transform = transforms[floor];
-            if (_floorPositionRemainders is { } remainders)
-                transform = transform with { Offset = transform.Offset + remainders[floor] };
-            if (_editorTilesOnly)
-            {
-                opacity = 1f;
-                Vector2 scale = transform.Scale;
-                transform = transform with { Scale = new(scale.X == 0f ? 1f : scale.X, scale.Y == 0f ? 1f : scale.Y) };
-            }
-
-            // The static chart shows unlit tiles. Track glow intensity controls the playback effect.
-            var appearance = runtime is not null
-                ? runtime.AppearanceAt(floor, _playTime, opacity, trackVolume, color)
-                : new FloorAppearance(color ?? state.EvaluateColor(floor, (float)_playTime, trackVolume), opacity);
-            if (_editorTilesOnly)
-                appearance = appearance with { Color = appearance.Color with { W = 1f } };
-            renderer.SetFloorVisual(i, transform, appearance);
+            UpdateFloorVisual(renderer, i, floor, runtime, states, ref volume);
         }
+    }
+
+    private void UpdateFloorVisual(OfficialFloorRenderer renderer, int local, int floor, RuntimeTrackTimeline? runtime,
+        FloorTrackState[] states, ref float? volume, bool anglePreview = false)
+    {
+        ref readonly FloorTrackState state = ref states[floor];
+        FloorRenderTransform transform = state.Transform;
+        float opacity = state.Hidden ? 0f : state.Opacity;
+        if (runtime is not null)
+            (transform, opacity) = runtime.TransformAt(floor, _playTime, _hidePassedFloors);
+
+        Vector4? color = _floorRenderColors?[floor];
+        if (color is null && volume is null && state.Mode == TrackColorMode.Volume)
+            volume = ReadTrackVolume();
+        float trackVolume = volume.GetValueOrDefault();
+
+        if (_floorRenderTransforms is { } transforms)
+            transform = transforms[floor];
+        if (_floorPositionRemainders is { } remainders)
+            transform = transform with { Offset = transform.Offset + remainders[floor] };
+        if (_editorTilesOnly)
+        {
+            opacity = 1f;
+            Vector2 scale = transform.Scale;
+            transform = transform with { Scale = new(scale.X == 0f ? 1f : scale.X, scale.Y == 0f ? 1f : scale.Y) };
+        }
+        if (_editorAngleAnchor >= 0)
+        {
+            if (floor > _editorAngleAnchor)
+                transform = transform with { Offset = transform.Offset + _editorAngleOffset };
+            // The two connecting meshes are replaced; subsequent tiles keep their meshes and shift together.
+            if (!anglePreview && (uint)(floor - _editorAngleAnchor) <= 1)
+                opacity = 0f;
+        }
+
+        // The static chart shows unlit tiles. Track glow intensity controls the playback effect.
+        var appearance = runtime is not null
+            ? runtime.AppearanceAt(floor, _playTime, opacity, trackVolume, color)
+            : new FloorAppearance(color ?? state.EvaluateColor(floor, (float)_playTime, trackVolume), opacity);
+        if (_editorTilesOnly)
+            appearance = appearance with { Color = appearance.Color with { W = 1f } };
+        renderer.SetFloorVisual(local, transform, appearance);
     }
 
     private float ReadTrackVolume()

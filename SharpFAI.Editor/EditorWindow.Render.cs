@@ -28,7 +28,7 @@ internal sealed unsafe partial class EditorWindow
             FinishNumericEdit();
             var snapshot = _document.SnapshotForPlayback();
             var request = settings.CreateRequest(sourcePath, snapshot);
-            LevelRenderer renderer = _videoRenderSource ??= new LevelRenderer();
+            LevelRenderer renderer = _videoRenderSource ??= new LevelRenderer { EnableAudioOutput = false };
             renderer.SkipAudio = _applicationSettings.SkipAudio;
             renderer.ApplyVisualSettings(_applicationSettings);
             _videoExport ??= new VideoExportSession(renderer);

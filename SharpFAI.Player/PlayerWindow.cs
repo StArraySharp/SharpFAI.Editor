@@ -60,6 +60,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
     public bool SkipAudioFromCommandLine { get; set; }
     public string? FireColorFromCommandLine { get; set; }
     public string? IceColorFromCommandLine { get; set; }
+    internal int CommandExitCode { get; private set; }
 
     /// <summary>Frames still to render before the capture fires; -1 means "not armed yet".</summary>
     private int _captureCountdown = -1;
@@ -328,7 +329,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
             throw new InvalidOperationException("ImGui_ImplOpenGL3.Init 失败");
 
         ImGui.StyleColorsDark();
-        LoadFont();
+        ApplicationFont.LoadInterfaceFont(ImGui.GetIO(), 16f);
         BuildKeyMap();
         TextInput += e => ImGuiIO.AddInputCharacter(ImGui.GetIO(), (uint)e.Unicode);
         MouseWheel += e => ImGuiIO.AddMouseWheelEvent(ImGui.GetIO(), e.OffsetX, e.OffsetY);
@@ -502,6 +503,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         if (_renderer.LoadError is { } error)
         {
             Console.Error.WriteLine($"capture failed: {error}");
+            CommandExitCode = 1;
             Close();
             return;
         }
@@ -557,6 +559,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         catch (Exception ex)
         {
             Console.Error.WriteLine($"capture failed: {ex.Message}");
+            CommandExitCode = 1;
         }
 
         Close();
@@ -738,109 +741,4 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
     }
 
-    private static void LoadFont()
-    {
-        ImGuiIO* io = ImGui.GetIO();
-        ImFontAtlas* atlas = io->Fonts;
-        ushort* ranges = ImFontAtlas.GetGlyphRangesChineseSimplifiedCommon(atlas);
-
-        ImFont* font = null;
-        foreach (string path in FontCandidates())
-        {
-            if (!File.Exists(path))
-            {
-                continue;
-            }
-
-            font = ImFontAtlas.AddFontFromFileTTF(atlas, path, 16f, null, ranges);
-            if (font != null)
-            {
-                break;
-            }
-        }
-
-        if (font == null)
-        {
-            Console.Error.WriteLine("[字体] 未找到中文字体，界面中文将无法显示");
-        }
-
-        io->FontDefault = font != null ? font : ImFontAtlas.AddFontDefault(atlas);
-    }
-
-    /// <summary>
-    /// Chinese font candidates per platform: Windows system fonts, common Linux/macOS locations,
-    /// and finally a fontconfig lookup for the default CJK sans-serif.
-    /// </summary>
-    private static IEnumerable<string> FontCandidates()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            yield return @"C:\Windows\Fonts\msyh.ttc";
-            yield return @"C:\Windows\Fonts\Deng.ttf";
-            yield return @"C:\Windows\Fonts\simhei.ttf";
-            yield break;
-        }
-
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string[] paths =
-        [
-            // Fonts the user installed (WSL commonly shares Windows fonts here)
-            Path.Combine(home, ".local/share/fonts/msyh.ttc"),
-            Path.Combine(home, ".local/share/fonts/Deng.ttf"),
-            Path.Combine(home, ".local/share/fonts/simhei.ttf"),
-            Path.Combine(home, ".fonts/msyh.ttc"),
-            // Shipped by the distribution
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-            "/usr/share/fonts/truetype/arphic/uming.ttc",
-            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-            // macOS
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-        ];
-
-        foreach (string path in paths)
-        {
-            yield return path;
-        }
-
-        string? system = FindSystemCjkFont();
-        if (system != null)
-        {
-            yield return system;
-        }
-    }
-
-    /// <summary>Ask fontconfig for the default CJK font.</summary>
-    private static string? FindSystemCjkFont()
-    {
-        try
-        {
-            ProcessStartInfo info = new("fc-match", ["-f", "%{file}", "sans-serif:lang=zh-cn"])
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-
-            using Process? process = Process.Start(info);
-            if (process == null)
-            {
-                return null;
-            }
-
-            string path = process.StandardOutput.ReadToEnd().Trim();
-            process.WaitForExit(2000);
-            return path.Length > 0 && File.Exists(path) ? path : null;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[字体] fontconfig 查询失败: {ex.Message}");
-            return null;
-        }
-    }
 }

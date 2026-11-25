@@ -203,21 +203,20 @@ public sealed class TrackEditingRegressionTests
     }
 
     [Test]
-    public void RotationChangesOutgoingSegmentAndLeavesMidspinsUntouched()
+    public void FreeAngleBacktracksOnlyFromOrdinaryTiles()
     {
         var document = Chart(0);
-        document.InsertTiles(0, [0, 999, 90]);
-        document.RotateExit(0, 360);
-        Assert.That(document.IncomingAngle(1), Is.Zero);
-        string before = State(document);
-        document.RotateExit(1, 15);
-        Assert.That(State(document), Is.EqualTo(before));
-        document.RotateExit(2, -15);
-        Assert.That(document.IncomingAngle(3), Is.EqualTo(345));
-        document.Undo();
-        Assert.That(State(document), Is.EqualTo(before));
-        document.RotateExit(3, 45);
-        Assert.That(State(document), Is.EqualTo(before));
+        document.InsertTiles(0, [0, 0, 999, 90, 270, 90]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(document.IsFreeAngleBacktrack(0, 180), Is.False);
+            Assert.That(document.IsFreeAngleBacktrack(1, 180), Is.True);
+            Assert.That(document.IsFreeAngleBacktrack(1, 179), Is.False);
+            Assert.That(document.IsFreeAngleBacktrack(2, 180), Is.False);
+            Assert.That(document.IsFreeAngleBacktrack(3, 0), Is.True);
+            Assert.That(document.IsFreeAngleBacktrack(4, 270), Is.False);
+            Assert.That(document.IsFreeAngleBacktrack(6, 270), Is.True);
+        });
     }
 
     [Test]

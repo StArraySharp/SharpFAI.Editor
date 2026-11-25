@@ -22,6 +22,7 @@ internal sealed unsafe partial class EditorWindow
     private bool _showArbitraryAngle;
     private string? _angleDraft;
     private int? _centerEditFloor = 0;
+    private int _pendingCameraFocusVersion = -1;
     private enum CanvasGesture { None, Click, Drag }
     private readonly record struct PendingTile(int Floor, int Version, double Direction);
     private readonly List<PendingTile> _pendingTiles = [];
@@ -37,10 +38,10 @@ internal sealed unsafe partial class EditorWindow
     private JObject? _dragDecoration;
     private Vector2 _dragOffset;
     private EditorDocument? _trackGestureDocument;
-    private bool _rotatingTrack;
     private int _trackFirst, _trackLast;
     private Vector2 _trackStart, _trackOffset;
-    private double? _trackAngle;
+    private bool _freeAngle;
+    private bool _freeAngleClick;
 
     private void SelectFloor(int index, bool center)
     {
@@ -76,7 +77,7 @@ internal sealed unsafe partial class EditorWindow
                 _pendingTiles.Add(new(_floor + i + 1, _document.ChangeVersion, heading));
             }
         }
-        SelectFloor(_floor + angles.Length, false);
+        SelectFloor(_floor + angles.Length, true);
     }
 
     private void DrawCanvas()
@@ -92,12 +93,44 @@ internal sealed unsafe partial class EditorWindow
         ImGui.End();
     }
 
+    private void SetCanvasOnly(bool enabled)
+    {
+        if (_canvasOnly == enabled) return;
+        FinishNumericEdit();
+        ImGui.ClearActiveID();
+        ResetCanvasGesture();
+        _dragDecoration = null;
+        _playbackHovered = false;
+        _canvasOnly = enabled;
+    }
+
+    private void DrawCanvasOnly()
+    {
+        ImGuiViewport* viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(viewport->Pos, (int)ImGuiCond.ImGuiCond_Always, default);
+        ImGui.SetNextWindowSize(viewport->Size, (int)ImGuiCond.ImGuiCond_Always);
+        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_WindowPadding, default(ImVec2));
+        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_WindowBorderSize, 0f);
+        const ImGuiWindowFlags flags = ImGuiWindowFlags.ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags.ImGuiWindowFlags_NoDocking | ImGuiWindowFlags.ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags.ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags.ImGuiWindowFlags_NoBackground |
+            ImGuiWindowFlags.ImGuiWindowFlags_NoScrollWithMouse;
+        bool visible = true;
+        if (ImGui.Begin("###chart-only", ref visible, (int)flags) != 0)
+        {
+            if (_playbackView == PlaybackView.Edit) DrawEditCanvas();
+            else DrawPlaybackCanvas();
+        }
+        ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
     private void UpdateDecorationMarkers()
     {
-        if (_document.ChangeVersion == _decorationMarkersVersion)
+        if (_document.DecorationListVersion == _decorationMarkersVersion)
             return;
 
-        _decorationMarkersVersion = _document.ChangeVersion;
+        _decorationMarkersVersion = _document.DecorationListVersion;
         _decorationMarkers.Clear();
         var decorations = _document.Decorations;
         for (int index = 0; index < decorations.Count; index++)
@@ -138,7 +171,7 @@ internal sealed unsafe partial class EditorWindow
         return submit && valid;
     }
 
-    private void DrawEditCanvas()
+    private void DrawEditCanvasToolbar(bool ready)
     {
         string mode = L.T(_tilesOnly ? "TilesOnly" : "Preview") + "###edit-scene-mode";
         if (ImGui.Button(mode, default) != 0)
@@ -176,19 +209,25 @@ internal sealed unsafe partial class EditorWindow
                 _centerEditFloor = _floor;
             }
         }
-        bool ready = HasCurrentPlayback;
         string status = ready ? $"{_playback!.Camera.Zoom:P0}" : _playback?.LoadError ??
             (_playback?.IsLoading == true ? L.F("SyncStage", L.LoadPhase(_playback.LoadPhase)) : L.T("Syncing"));
         ContinueToolbar(ImGui.CalcTextSize(status).x);
         ImGui.AlignTextToFramePadding();
         WidgetDraw.TextDisabled(status);
+    }
 
+    private void DrawEditCanvas()
+    {
+        bool ready = HasCurrentPlayback;
+        if (!_canvasOnly) DrawEditCanvasToolbar(ready);
+        _playbackHovered = false;
         ImVec2 size = ImGui.GetContentRegionAvail();
         size.x = Math.Max(1, size.x);
         size.y = Math.Max(1, size.y);
         LevelRenderer? renderer = _playback;
         bool canUseScene = renderer?.Level is not null && _displayedRevision?.Document == _document;
         var pending = canUseScene ? PendingTileCenters(renderer!) : [];
+        bool previewingAngle = false;
         if (canUseScene && renderer is not null)
         {
             if (pending.Count <= 1) renderer.ClearEditorInsertedTrack();
@@ -203,17 +242,31 @@ internal sealed unsafe partial class EditorWindow
                 }
                 renderer.SetEditorInsertedTrack(_document.ChangeVersion, _pendingTiles[0].Floor - 1, inserted, _tilesOnly);
             }
+            if (pending.Count > 1 && _centerEditFloor == _pendingTiles[^1].Floor &&
+                _pendingCameraFocusVersion != _pendingTiles[^1].Version)
+            {
+                CenterEditCamera(renderer, pending[^1]);
+                _pendingCameraFocusVersion = _pendingTiles[^1].Version;
+            }
             if (_centerEditDecoration is { } item)
             {
                 CenterEditCamera(renderer, DecorationPosition(renderer, item));
                 _centerEditDecoration = null;
             }
+            previewingAngle = !_canvasOnly && UpdateFreeAngle(renderer, size, ready);
             RenderPlaybackFrame(renderer, size);
         }
         DrawPlaybackImage(size);
         if (!canUseScene || renderer is null)
         {
             ResetCanvasGesture();
+            return;
+        }
+        if (previewingAngle) return;
+        if (_canvasOnly)
+        {
+            _playbackHovered = ImGui.IsItemHovered() != 0;
+            NavigatePlaybackPreview(renderer, selectTiles: false);
             return;
         }
 
@@ -356,30 +409,17 @@ internal sealed unsafe partial class EditorWindow
         }
 
         Vector2 delta = new(io->MouseDelta.x * scale.X, io->MouseDelta.y * scale.Y);
-        const int right = (int)ImGuiMouseButton.ImGuiMouseButton_Right;
         if (ready && hovered && !_pathLocked && !_inspectDecoration && _dragDecoration is null &&
-            _trackGestureDocument is null && direction is null && decorationHit is null)
+            _trackGestureDocument is null && direction is null && decorationHit is null &&
+            io->KeyAlt != 0 && leftPressed && renderer.PickFloor(cursor) is int hit && hit >= 0)
         {
-            if (io->KeyAlt != 0 && ImGui.IsMouseClicked(left, 0) != 0 && renderer.PickFloor(cursor) is int hit && hit >= 0)
-            {
-                var range = FloorRange;
-                if (!_hasFloorSelection || hit < range.First || hit > range.Last) SelectFloor(hit, false);
-                (_trackFirst, _trackLast) = FloorRange;
-                _trackStart = renderer.Camera.ScreenToWorld(cursor);
-                _trackOffset = Vector2.Zero;
-                _rotatingTrack = false;
-                ResetCanvasGesture();
-                _trackGestureDocument = _document;
-            }
-            else if (_hasFloorSelection && _rangeAnchor is null && _document.CanRotateExit(_floor) &&
-                ImGui.IsMouseClicked(right, 0) != 0)
-            {
-                _trackFirst = _trackLast = _floor;
-                _trackAngle = null;
-                _rotatingTrack = true;
-                ResetCanvasGesture();
-                _trackGestureDocument = _document;
-            }
+            var range = FloorRange;
+            if (!_hasFloorSelection || hit < range.First || hit > range.Last) SelectFloor(hit, false);
+            (_trackFirst, _trackLast) = FloorRange;
+            _trackStart = renderer.Camera.ScreenToWorld(cursor);
+            _trackOffset = Vector2.Zero;
+            ResetCanvasGesture();
+            _trackGestureDocument = _document;
         }
         if (_trackGestureDocument is not null)
         {
@@ -389,46 +429,25 @@ internal sealed unsafe partial class EditorWindow
                 _trackGestureDocument = null;
                 return;
             }
-            int button = _rotatingTrack ? right : left;
-            if (_rotatingTrack && renderer.TryGetFloorCenter(_trackFirst, out Vector2 pivot))
-            {
-                Vector2 vector = renderer.Camera.ScreenToWorld(cursor) - pivot;
-                if (vector.LengthSquared > .000001f)
-                    _trackAngle = EditorCanvasInput.Rotation(vector.X, vector.Y, shift);
-                if (_trackAngle is double angle)
-                {
-                    double radians = angle * Math.PI / 180;
-                    Vector2 destination = pivot + new Vector2((float)Math.Cos(radians), (float)Math.Sin(radians)) * tileSize;
-                    ImDrawList.PushClipRect(draw, origin, end, 1);
-                    ImDrawList.AddLine(draw, Screen(pivot), Screen(destination), accent, 3);
-                    ImDrawList.AddCircle(draw, Screen(destination), 10 * _uiScale, accent, 20, 2);
-                    ImDrawList.PopClipRect(draw);
-                }
-            }
-            else if (!_rotatingTrack && ImGui.IsMouseDragging(left, 3) != 0)
+            if (ImGui.IsMouseDragging(left, 3) != 0)
             {
                 Vector2 offset = (renderer.Camera.ScreenToWorld(cursor) - _trackStart) / tileSize;
                 _trackOffset = new Vector2((float)EditorCanvasInput.SnapPosition(offset.X, shift, io->KeyCtrl != 0),
                     (float)EditorCanvasInput.SnapPosition(offset.Y, shift, io->KeyCtrl != 0));
             }
-            if (!_rotatingTrack)
-            {
-                ImDrawList.PushClipRect(draw, origin, end, 1);
-                for (int index = _trackFirst; index <= _trackLast; index++)
-                    if (renderer.TryGetFloorCenter(index, out Vector2 point))
-                    {
-                        ImVec2 target = Screen(point + _trackOffset * tileSize);
-                        ImDrawList.AddLine(draw, Screen(point), target, accent, 1);
-                        ImDrawList.AddCircle(draw, target, 10 * _uiScale, accent, 20, 2);
-                    }
-                ImDrawList.PopClipRect(draw);
-            }
-            if (ImGui.IsMouseDown(button) == 0)
+            ImDrawList.PushClipRect(draw, origin, end, 1);
+            for (int index = _trackFirst; index <= _trackLast; index++)
+                if (renderer.TryGetFloorCenter(index, out Vector2 point))
+                {
+                    ImVec2 target = Screen(point + _trackOffset * tileSize);
+                    ImDrawList.AddLine(draw, Screen(point), target, accent, 1);
+                    ImDrawList.AddCircle(draw, target, 10 * _uiScale, accent, 20, 2);
+                }
+            ImDrawList.PopClipRect(draw);
+            if (ImGui.IsMouseDown(left) == 0)
             {
                 _pendingTiles.Clear();
-                if (_rotatingTrack && _trackAngle is double angle) _document.RotateExit(_trackFirst, angle);
-                else if (!_rotatingTrack) _document.PositionTiles(_trackFirst, _trackLast, _trackOffset.X, _trackOffset.Y);
-                _trackGestureDocument = null;
+                _document.PositionTiles(_trackFirst, _trackLast, _trackOffset.X, _trackOffset.Y);
                 ResetCanvasGesture();
             }
             return;
@@ -562,6 +581,63 @@ internal sealed unsafe partial class EditorWindow
     {
         _canvasPress = _canvasDrag = _playbackPan = false;
         _trackGestureDocument = null;
+        _freeAngle = _freeAngleClick = false;
+        _playback?.ClearEditorAnglePreview();
+    }
+
+    private bool UpdateFreeAngle(LevelRenderer renderer, ImVec2 size, bool ready)
+    {
+        const int right = (int)ImGuiMouseButton.ImGuiMouseButton_Right;
+        const int left = (int)ImGuiMouseButton.ImGuiMouseButton_Left;
+        ImGuiIO* io = ImGui.GetIO();
+        ImVec2 origin = ImGui.GetCursorScreenPos();
+        Vector2 pointer = new(io->MousePos.x - origin.x, io->MousePos.y - origin.y);
+        bool hovered = pointer.X >= 0 && pointer.X < size.x && pointer.Y >= 0 && pointer.Y < size.y &&
+            ImGui.IsWindowHovered(0) != 0;
+        bool allowed = !_pathLocked && _hasFloorSelection && _rangeAnchor is null && !_inspectDecoration &&
+            _dragDecoration is null && _trackGestureDocument is null && !ShortcutContextBlocked;
+        if (!_freeAngle)
+        {
+            if (!ready || !allowed || !hovered || ImGui.IsMouseClicked(right, 0) == 0) return false;
+            ResetCanvasGesture();
+            _freeAngle = true;
+        }
+        if (!allowed || ImGui.IsMouseDown(right) == 0 || Pressed(ImGuiKey.ImGuiKey_Escape))
+        {
+            ResetCanvasGesture();
+            return false;
+        }
+        if (!ready || !renderer.TryGetFloorCenter(_floor, out Vector2 pivot))
+        {
+            renderer.ClearEditorAnglePreview();
+            _freeAngleClick = false;
+            return true;
+        }
+
+        Vector2 pixel = pointer * new Vector2(renderer.Camera.ViewportWidth / size.x, renderer.Camera.ViewportHeight / size.y);
+        if (hovered && io->MouseWheel != 0) renderer.Zoom(io->MouseWheel, pixel);
+        Vector2 vector = renderer.Camera.ScreenToWorld(pixel) - pivot;
+        double angle = vector.LengthSquared > .000001f
+            ? EditorCanvasInput.Rotation(vector.X, vector.Y, io->KeyShift != 0)
+            : 90;
+        if (ImGui.IsMouseClicked(left, 0) != 0) _freeAngleClick = hovered;
+        if (_freeAngleClick && ImGui.IsMouseReleased(left) != 0)
+        {
+            _freeAngleClick = false;
+            if (hovered)
+            {
+                int version = _document.ChangeVersion;
+                if (_document.IsFreeAngleBacktrack(_floor, angle))
+                    DeleteFloorRange(_floor, _floor, _floor - 1);
+                else
+                    InsertTile(angle);
+                if (version != _document.ChangeVersion) _centerEditFloor = _floor;
+            }
+            renderer.ClearEditorAnglePreview();
+        }
+        else
+            renderer.SetEditorAnglePreview(_floor, angle);
+        return true;
     }
 
     private void SeekEditFloor(LevelRenderer renderer, int floor)

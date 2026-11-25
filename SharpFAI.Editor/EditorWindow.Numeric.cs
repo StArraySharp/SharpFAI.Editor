@@ -34,6 +34,21 @@ internal sealed unsafe partial class EditorWindow
     private static readonly string[] VectorAxes = ["X", "Y"];
     private static readonly string[] VectorRangeAxes = ["Min X", "Min Y", "Max X", "Max Y"];
 
+    private static string NumberUnit(string? unit) => unit switch
+    {
+        "bpm" => "BPM",
+        "seconds" => "s",
+        "pixels" => "px",
+        "X" => "×",
+        "beats" => L.T("UnitBeats"),
+        "tiles" or "tilesFrom" => L.T("UnitTiles"),
+        "loops" => L.T("UnitLoops"),
+        _ => unit ?? "",
+    };
+
+    private static float NumberUnitWidth(string unit) =>
+        unit.Length == 0 ? 0 : ImGui.CalcTextSize(unit).x + ImGui.GetStyle()->ItemInnerSpacing.x;
+
     private void DrawVectorInput(JObject target, EditorField field, JArray? value)
     {
         bool range = field.Type == "Vector2Range";
@@ -45,7 +60,7 @@ internal sealed unsafe partial class EditorWindow
         float numberOffset = labelWidth + ImGui.GetStyle()->ItemInnerSpacing.x;
         float available = ImGui.GetContentRegionAvail().x;
         float half = MathF.Floor((available - gap) * .5f);
-        bool sideBySide = half >= numberOffset + 52 * _uiScale;
+        bool sideBySide = half >= numberOffset + 52 * _uiScale + NumberUnitWidth(NumberUnit(field.Unit));
         float columnWidth = sideBySide ? half : available;
         float left = ImGui.GetCursorPosX();
 
@@ -79,14 +94,22 @@ internal sealed unsafe partial class EditorWindow
             ? Convert.ToString(scalar.Value, CultureInfo.InvariantCulture) ?? "" : "");
         ImGui.PushID(component);
         float available = width ?? ImGui.GetContentRegionAvail().x;
+        string unit = NumberUnit(field.Unit);
+        float unitWidth = NumberUnitWidth(unit);
         float buttonWidth = ImGui.GetFrameHeight();
         float stepWidth = 2 * (buttonWidth + ImGui.GetStyle()->ItemSpacing.x);
-        step &= available >= stepWidth + 52 * _uiScale;
-        ImGui.SetNextItemWidth(Math.Max(1, available - (step ? stepWidth : 0)));
+        step &= available >= stepWidth + unitWidth + 52 * _uiScale;
+        ImGui.SetNextItemWidth(Math.Max(1, available - unitWidth - (step ? stepWidth : 0)));
         if (component < 0 && !field.AllowEmpty && current is not { Gesture: false })
             DrawInlineNumberDrag(target, field, value, content, current, invalid is not null);
         else
             DrawNumberText(target, field, component, content, current);
+        if (unitWidth > 0)
+        {
+            ImGui.SameLine(0, ImGui.GetStyle()->ItemInnerSpacing.x);
+            ImGui.AlignTextToFramePadding();
+            WidgetDraw.TextDisabled(unit);
+        }
         if (step)
         {
             ImGui.SameLine();
@@ -115,7 +138,7 @@ internal sealed unsafe partial class EditorWindow
             current!.FocusText = false;
             ImGui.SetKeyboardFocusHere();
         }
-        string? update = EditText("##number", field.Unit ?? "", content, live: true,
+        string? update = EditText("##number", "", content, live: true,
             extraFlags: (int)ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll);
         bool active = ImGui.IsItemActive() != 0;
         bool released = ImGui.IsItemDeactivated() != 0;

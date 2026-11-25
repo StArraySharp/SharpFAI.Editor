@@ -23,6 +23,13 @@ public sealed partial class TestLegacyVhsCompatibility
 
     private static void RunControlledComparison(string? hlslccPath)
     {
+        string? game = Environment.GetEnvironmentVariable("SHARPFAI_ADOFAI_GAME");
+        string? ripper = Environment.GetEnvironmentVariable("SHARPFAI_SHADER_RIPPER");
+        if (string.IsNullOrWhiteSpace(game) || string.IsNullOrWhiteSpace(ripper))
+        {
+            Assert.Ignore("Set SHARPFAI_ADOFAI_GAME and SHARPFAI_SHADER_RIPPER to run the original-game comparison.");
+            return;
+        }
         string root = FindRoot();
         string scratch = Path.Combine(root, "SharpFAI.Player.Tests", "obj", hlslccPath is null ? "legacy-vhs-controlled" : "legacy-vhs-hlslcc");
         Directory.CreateDirectory(scratch);
@@ -105,9 +112,6 @@ public sealed partial class TestLegacyVhsCompatibility
                     foreach (var c in cases) { writer.Write(c.Tracking); writer.Write(c.Seconds); writer.Write(c.NativeCoordinates ? 1f : 0f); writer.Write((float)c.Diagnostic); }
                 }
                 string nativeOutput = RunD3d(root, scratch, referencePath, inputPath, outputPath);
-                string[] paths = File.ReadAllLines(Path.Combine(root, "docs", "adofai-paths.md"));
-                string game = Environment.GetEnvironmentVariable("SHARPFAI_ADOFAI_GAME") ?? paths.Single(l => l.Contains("Steam 原版游戏安装目录", StringComparison.Ordinal)).Split('`')[1];
-                string ripper = Environment.GetEnvironmentVariable("SHARPFAI_SHADER_RIPPER") ?? paths.Single(l => l.Contains("着色器解包器", StringComparison.Ordinal)).Split('`')[1];
                 string dxbcPath = Path.Combine(scratch, "original.dxbc"), originalOutputPath = Path.Combine(scratch, "original-output.bin");
                 Run("pwsh", $"-NoProfile -File \"{Path.Combine(root, "SharpFAI.Player.Tests", "Native", "ExtractLegacyVhsDxbc.ps1")}\" -ShaderRipperDirectory \"{ripper}\" -ResourcesAsset \"{Path.Combine(game, "A Dance of Fire and Ice_Data", "resources.assets")}\" -OutputPath \"{dxbcPath}\"", root);
                 Assert.That(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(dxbcPath))),

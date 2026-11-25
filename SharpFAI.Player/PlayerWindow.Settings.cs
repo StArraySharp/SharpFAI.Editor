@@ -15,6 +15,7 @@ internal sealed unsafe partial class PlayerWindow
     {
         if (ExportRequest is not null || CapturePath is not null)
         {
+            _renderer.EnableAudioOutput = false;
             _renderer.SkipAudio = SkipAudioFromCommandLine;
             _renderer.ApplyVisualSettings(WithCommandLineColors(ApplicationSettings.PlayerDefaults));
             return;

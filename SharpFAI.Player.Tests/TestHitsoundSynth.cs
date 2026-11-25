@@ -11,6 +11,26 @@ namespace SharpFAI.Player.Tests;
 
 public class TestHitsoundSynth
 {
+    [Test]
+    public void MidspinContinuationAtTheSameTimeProducesOneKick()
+    {
+        var chart = new Level(new Dictionary<string, object>
+        {
+            ["angleData"] = new JArray(0, 999, 180, 0),
+            ["settings"] = new JObject { ["bpm"] = 120, ["separateCountdownTime"] = false },
+            ["actions"] = new JArray(),
+        });
+        var floors = chart.CreateFloors(default, usePositionTrack: false, calculateLegacyEntryTimes: false);
+        var timeline = LevelRenderer.BuildTimeline(chart, floors);
+        int midspin = floors.FindIndex(floor => floor.isMidspin);
+        Assert.That(midspin, Is.GreaterThan(0));
+        Assert.That(timeline.EntryTimes[midspin + 1], Is.EqualTo(timeline.EntryTimes[midspin]));
+        var keptTimes = timeline.EntryTimes.Where((_, i) => i != midspin + 1).ToArray();
+        var expected = HitsoundSynth.SynthesizeTimeline(keptTimes, timeline.Pitch)!;
+        var mixed = HitsoundSynth.SynthesizeTimeline(timeline.EntryTimes, timeline.Pitch, floors: floors)!;
+        Assert.That(mixed.Pcm, Is.EqualTo(expected.Pcm));
+    }
+
     [TestCase(5000)]
     [TestCase(100000)]
     public void DenseTempoChangesKeepTheHitsoundPeakNearAnIsolatedKick(int fastBpm)
@@ -76,12 +96,46 @@ public class TestHitsoundSynth
         Assert.That(audio.Pcm.AsSpan(tail).SequenceEqual(single.Pcm.AsSpan(tail)), Is.True);
     }
 
-    [Test]
-    public void CoincidentOnsetsDoNotAmplifyTheKick()
+    [TestCase(2, .125f)]
+    [TestCase(1024, 1f)]
+    public void CoincidentTimelineOnsetsSumBeforePcmSaturation(int hitCount, float volume)
     {
-        DecodedAudio single = HitsoundSynth.Synthesize(Guid.NewGuid().ToString(), [.2], .5);
-        DecodedAudio dense = HitsoundSynth.Synthesize(Guid.NewGuid().ToString(), Enumerable.Repeat(.2, 1024).ToArray(), .5);
-        Assert.That(dense.Pcm, Is.EqualTo(single.Pcm));
+        DecodedAudio kick = HitsoundSynth.LoadEmbeddedSample()!;
+        const int first = 200;
+        double time = (first + .25) / kick.SampleRate;
+        double[] entries = [0, .. Enumerable.Repeat(time, hitCount)];
+        DecodedAudio mixed = HitsoundSynth.SynthesizeTimeline(entries, 1, volume)!;
+        int startByte = first * kick.Channels * sizeof(short);
+        byte[] expected = new byte[kick.Pcm.Length];
+        for (int offset = 0; offset < expected.Length; offset += sizeof(short))
+        {
+            short sample = BinaryPrimitives.ReadInt16LittleEndian(kick.Pcm.AsSpan(offset));
+            short sum = (short)MathF.Round(Math.Clamp(sample * volume * hitCount, short.MinValue, short.MaxValue));
+            BinaryPrimitives.WriteInt16LittleEndian(expected.AsSpan(offset), sum);
+        }
+
+        Assert.That(mixed.Pcm.AsSpan(startByte, expected.Length).SequenceEqual(expected), Is.True);
+    }
+
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(29)]
+    [TestCase(1800)]
+    public void DistinctOnsetsInTheSameFrameContributeToShortKicks(int gap)
+    {
+        DecodedAudio kick = HitsoundSynth.LoadEmbeddedSample()!;
+        const int first = 16375;
+        double Time(int frame, double fraction) => (frame + fraction) / kick.SampleRate;
+        int[] frames = Enumerable.Range(0, 8).Select(i => first + i * gap).ToArray();
+        double[] single = frames.Select(frame => Time(frame, .25)).ToArray();
+        double[] doubled = frames.SelectMany(frame => new[] { Time(frame, .25), Time(frame, .75) }).ToArray();
+        double duration = single[^1] + .5;
+        DecodedAudio reference = HitsoundSynth.Synthesize(Guid.NewGuid().ToString(), single, duration, .25f);
+        DecodedAudio mixed = HitsoundSynth.Synthesize(Guid.NewGuid().ToString(), doubled, duration, .125f);
+        int stride = kick.Channels * sizeof(short);
+        byte[] firstHit = mixed.Pcm.AsSpan(first * stride, gap * stride).ToArray();
+        Assert.That(firstHit.Any(value => value != 0), Is.True);
+        Assert.That(mixed.Pcm, Is.EqualTo(reference.Pcm));
     }
 
     private static JObject Speed(int floor, int bpm) => new()

@@ -11,7 +11,8 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
     private const double BeatInterval = .5;
     private const int BeatCount = 24;
     private const int BeatsPerBar = 8;
-    private readonly AudioClip _clicks = new() { Volume = .65f };
+    private AudioClip? _clicks;
+    private float _volume = .65f;
     private readonly TapMeasurement _measurement = new();
     private bool _opening;
     private bool _open;
@@ -22,11 +23,15 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
 
     public void Open() => _opening = true;
 
-    public void SetOutputVolume(int master) => _clicks.Volume = .65f * (master / 100f);
+    public void SetOutputVolume(int master)
+    {
+        _volume = .65f * (master / 100f);
+        _clicks?.Volume = _volume;
+    }
 
     public void Tap(LevelRenderer renderer)
     {
-        if (!IsMeasuring || !_clicks.IsPlaying || _measurement.AddTap(_clicks.Position) is not int delay)
+        if (!IsMeasuring || _clicks is not { IsPlaying: true } clicks || _measurement.AddTap(clicks.Position) is not int delay)
             return;
 
         renderer.AudioDelayMs = delay;
@@ -45,7 +50,9 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
             _opening = false;
             _open = true;
             renderer.Pause();
-            if (!_clicks.IsLoaded)
+            if (_clicks is null && PlaybackAudio.Initialize())
+                _clicks = new AudioClip { Volume = _volume };
+            if (_clicks is { IsLoaded: false })
                 _clicks.LoadDecoded(CreateClickTrack());
             BeginMeasurement();
             ImGui.OpenPopup(title, 0);
@@ -62,13 +69,14 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
         int flags = (int)(ImGuiWindowFlags.ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags.ImGuiWindowFlags_NoSavedSettings);
         if (ImGui.BeginPopupModal(title, ref open, flags) != 0)
         {
+            bool available = _clicks is { IsLoaded: true };
             ImGui.TextUnformatted(IsMeasuring
                 ? Tr(chinese, "跟着节拍按空格，前两拍用于准备。", "Press Space on each beat. The first two beats are for practice.")
                 : Tr(chinese, "可跟拍自动校准，也可对照声音和闪光微调。", "Tap to calibrate or match the flash to the sound manually."));
-            if (_clicks.IsLoaded)
+            if (_clicks is { IsLoaded: true } clicks)
             {
-                _clicks.Update();
-                if (!_clicks.IsPlaying)
+                clicks.Update();
+                if (!clicks.IsPlaying)
                     Restart();
             }
             else
@@ -76,7 +84,7 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
                 ImGui.TextUnformatted(Tr(chinese, "音频设备不可用", "Audio device unavailable"));
             }
 
-            DrawFlash(IsMeasuring ? 0.0 : _clicks.Position + renderer.AudioDelayMs / 1000.0);
+            DrawFlash(IsMeasuring ? 0.0 : (_clicks?.Position ?? 0) + renderer.AudioDelayMs / 1000.0);
             if (IsMeasuring)
             {
                 ImGui.ProgressBar(_measurement.Count / (float)TapMeasurement.RequiredTaps, new ImVec2 { x = -1f },
@@ -89,11 +97,11 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
                 if (_measuredDelay is int measured)
                     ImGui.TextUnformatted(chinese ? $"跟拍结果 {measured:+0;-0;0} ms，已应用" : $"Applied {measured:+0;-0;0} ms");
                 DrawDelay(renderer, chinese);
-                if (!_clicks.IsLoaded)
+                if (!available)
                     ImGui.BeginDisabled();
                 if (ImGui.Button(Tr(chinese, "开始跟拍", "Start tapping"), default) != 0)
                     BeginMeasurement();
-                if (!_clicks.IsLoaded)
+                if (!available)
                     ImGui.EndDisabled();
             }
             ImGui.SameLine();
@@ -113,7 +121,7 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
         if (!open)
         {
             IsMeasuring = false;
-            _clicks.Stop();
+            _clicks?.Stop();
         }
     }
 
@@ -168,20 +176,20 @@ internal sealed unsafe class AudioCalibrationWindow : IDisposable
     {
         _measurement.Reset();
         _measuredDelay = null;
-        IsMeasuring = _clicks.IsLoaded;
+        IsMeasuring = _clicks is { IsLoaded: true };
         Restart();
     }
 
     private void Restart()
     {
-        if (!_clicks.IsLoaded)
+        if (_clicks is not { IsLoaded: true } clicks)
             return;
         _measurement.NewCycle();
-        _clicks.Seek(0.0);
-        _clicks.Play();
+        clicks.Seek(0.0);
+        clicks.Play();
     }
 
-    public void Dispose() => _clicks.Dispose();
+    public void Dispose() => _clicks?.Dispose();
 
     internal sealed class TapMeasurement
     {

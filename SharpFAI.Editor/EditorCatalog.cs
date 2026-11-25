@@ -133,6 +133,8 @@ internal sealed class EditorCatalog
     public EditorEvent? Find(string type) => _events.GetValueOrDefault(type);
     public EditorField[] SettingsFor(string name) => _settings.GetValueOrDefault(name) ?? [];
 
+    public static bool IsToggleableEvent(string type) => type is "Twirl" or "Multitap" or "Checkpoint" or "Bookmark";
+
     // The original editor's solo types are per floor; mutually exclusive types share a slot.
     public static string? ExclusiveEventSlot(string type) => type switch
     {
@@ -271,7 +273,7 @@ internal sealed class EditorCatalog
                 if (value is null && type == "MinMaxGradient")
                     value = new JValue("ffffff");
                 var metadata = new EditorField(key, type, value, field["disableIf"] as JArray,
-                    field.Value<string>("control") == "Hidden", field.Value<string>("unit"),
+                    field.Value<string>("control") == "Hidden", field.Value<string>("unit") ?? DefaultUnit(owner, key),
                     field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") == true,
                     ReadBound(field["min"]), ReadBound(field["max"]), field.Value<bool?>("allowEmpty") == true,
                     ShowIf: field["showIf"] as JArray, HideIf: field["hideIf"] as JArray,
@@ -323,6 +325,29 @@ internal sealed class EditorCatalog
     private static readonly string[] EaseOptions = Enum.GetNames<EventEnums.Ease>()
         .Where(value => value != "Unset" && !value.StartsWith("INTERNAL_", StringComparison.Ordinal)).ToArray();
 
+    private static string? DefaultUnit(string? owner, string key) => (owner, key) switch
+    {
+        ("Hold", "duration") => "loops",
+        ("PlaySound", "playDuration") or (_, "offset" or "vidOffset") => "ms",
+        (_, "previewSongStart" or "previewSongDuration" or "trackColorAnimDuration") or
+            ("AddParticle", "playDuration" or "particleLifetime") => "seconds",
+        (_, "beatsAhead" or "beatsBehind" or "holdMidSoundDelay") or ("RepeatEvents", "interval") => "beats",
+        ("Pause" or "Flash" or "MoveTrack" or "MoveCamera" or "MoveDecorations" or "SetFilter" or
+            "SetFilterAdvanced" or "SetObject" or "SetParticle" or "Bloom", "duration") => "beats",
+        (_, "bpm" or "beatsPerMinute" or "trackSetSpeedIconBpm") => "bpm",
+        (_, "bpmMultiplier" or "speedTrialAim") => "X",
+        (_, "angleOffset" or "rotation" or "rotationOffset" or "trackAngle" or "trackIconAngle" or "startRotation") => "°",
+        (_, "volume" or "hitsoundVolume" or "pitch" or "scale" or "zoom" or "opacity" or "trackOpacity" or
+            "startOpacity" or "endOpacity" or "parallax" or "distanceMultiplier" or "scalingRatio" or "trackGlowIntensity") => "%",
+        ("SetFilter" or "Bloom" or "ShakeScreen", "intensity" or "threshold" or "strength") => "%",
+        (_, "position" or "positionOffset" or "pivotOffset" or "parallaxOffset" or "tileOffset" or
+            "trackPulseLength" or "floorCount" or "gapLength") => "tiles",
+        (_, "startTile" or "endTile") or ("PositionTrack", "relativeTo") => "tilesFrom",
+        (_, "originalSize") => "pixels",
+        (_, "frameRate") => "fps",
+        _ => null,
+    };
+
     public static string[] TileReferenceOptions { get; } = Enum.GetNames<EventEnums.TileRelativeTo>();
 
     public static string? EnumName(string type) => type.StartsWith("Enum:", StringComparison.Ordinal)
@@ -349,7 +374,7 @@ internal sealed class EditorCatalog
             value.ToString().StartsWith("CameraFilterPack", StringComparison.Ordinal)))
             return new(key, "AdvancedFilter", value);
         if (value is JArray { Count: 2 } tile && tile[1]?.Type == JTokenType.String && key is "relativeTo" or "startTile" or "endTile")
-            return new(key, "Tile", value);
+            return new(key, "Tile", value, Unit: DefaultUnit(owner, key));
         if (EditorFieldEnums.For(key, owner) is { } enumName)
         {
             var field = new EditorField(key, "Enum:" + enumName, value);
@@ -372,7 +397,7 @@ internal sealed class EditorCatalog
                 JTokenType.Array when value.Count() == 2 && value.All(item => item.Type is JTokenType.Integer or JTokenType.Float or JTokenType.Null) => "Vector2",
                 JTokenType.Array or JTokenType.Object or JTokenType.Null => "Json",
                 _ => "String"
-            }, value, AllowEmpty: value is JArray && value.Any(part => part.Type == JTokenType.Null));
+            }, value, Unit: DefaultUnit(owner, key), AllowEmpty: value is JArray && value.Any(part => part.Type == JTokenType.Null));
     }
 
     public static string Name(string key) => L.Name(key);

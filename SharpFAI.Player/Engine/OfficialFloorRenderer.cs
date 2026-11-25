@@ -14,7 +14,7 @@ internal readonly record struct FloorDecorationDraw(Vector4 Color, float Opacity
     int Mask, int MaskMode);
 
 internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int textureSlots,
-    OfficialFloorRenderer? sharedPipeline = null) : IDisposable
+    OfficialFloorRenderer? sharedPipeline = null, bool? useStreamTexture2D = null) : IDisposable
 {
     private const int FloorsPerRow = 256;
     private const int TexelsPerFloor = 4;
@@ -35,7 +35,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     private sealed record Batch(int IndexStart, int IndexCount, TextureBinding[] Textures);
 
     private readonly Dictionary<FloorTexture, TextureBinding> _textureCache = [];
-    private readonly FloorStreamGpu _stream = new();
+    private readonly FloorStreamGpu _stream = new(
+        sharedPipeline?._stream.UsesTexture2D ?? useStreamTexture2D ?? FloorStreamGpu.DefaultUseTexture2D);
     private FloorGeometry? _geometry;
     private GlMeshHandle? _meshHandle;
     private Batch[] _batches = [];
@@ -406,11 +407,11 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
         OfficialFloorRenderer pipeline = sharedPipeline ?? this;
         GL.UseProgram(pipeline._program);
-        GL.Uniform4(pipeline._viewProjection, viewProjection.Row0);
-        GL.Uniform4(pipeline._viewProjection + 1, viewProjection.Row1);
-        GL.Uniform4(pipeline._viewProjection + 2, viewProjection.Row2);
-        GL.Uniform4(pipeline._viewProjection + 3, decoration.HasValue ? viewProjection.Row3 :
-            new Vector4(0f, 0f, viewProjection.Row3.Z, viewProjection.Row3.W));
+        Matrix4 projection = viewProjection;
+        if (!decoration.HasValue)
+            projection.Row3 = new Vector4(0f, 0f, projection.Row3.Z, projection.Row3.W);
+        // Submit the array from its queried location rather than deriving individual locations.
+        GL.Uniform4(pipeline._viewProjection, 4, (float*)&projection);
         GL.Uniform2(pipeline._cameraOrigin, cameraOrigin);
         GL.Uniform4(pipeline._screenParams, (float)viewportWidth, (float)viewportHeight, 1f, 1f);
         GL.Uniform1(pipeline._forceIconOutline, forceIconOutline ? 1 : 0);
@@ -433,9 +434,14 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         GL.ActiveTexture(TextureUnit.Texture0 + textureSlots);
         GL.BindTexture(TextureTarget.Texture2D, _dataTexture);
         UploadDirtyRows();
+        if (streamed || _stream.UsesTexture2D)
+        {
+            // The shader still declares both samplers when drawing an expanded mesh.
+            _stream.Bind(textureSlots + 1, streamed ? 0 : _dataTexture);
+        }
         if (streamed)
         {
-            _stream.Bind(textureSlots + 1);
+            _stream.BindVertexArray();
         }
         else
         {
@@ -443,6 +449,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         }
 
         int usedSlots = 0;
+        float* ratios = stackalloc float[textureSlots];
         for (int batchIndex = 0; batchIndex < _batches.Length; batchIndex++)
         {
             if (_activeFloorsPerBatch[batchIndex] == 0)
@@ -459,8 +466,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             {
                 GL.ActiveTexture(TextureUnit.Texture0 + i);
                 GL.BindTexture(TextureTarget.Texture2D, batch.Textures[i].Handle);
-                GL.Uniform1(pipeline._textureRatio + i, batch.Textures[i].AspectRatio);
+                ratios[i] = batch.Textures[i].AspectRatio;
             }
+            GL.Uniform1(pipeline._textureRatio, batch.Textures.Length, ratios);
 
             usedSlots = Math.Max(usedSlots, batch.Textures.Length);
             if (LevelSelection is not null)
@@ -479,9 +487,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         }
 
         GL.BindVertexArray(0);
-        if (streamed)
+        if (streamed || _stream.UsesTexture2D)
         {
-            FloorStreamGpu.Unbind(textureSlots + 1);
+            _stream.Unbind(textureSlots + 1);
         }
         for (int i = 0; i < usedSlots; i++)
         {
@@ -699,16 +707,18 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     public void ReloadShader()
     {
         string vertex = ShaderLibrary.Load(ShaderName + ".vert");
+        if (_stream.UsesTexture2D)
+        {
+            vertex = vertex.Insert(vertex.IndexOf('\n') + 1,
+                $"#define FLOOR_STREAM_TEXTURE_WIDTH {FloorStreamGpu.TextureRowWidth}\n");
+        }
         string fragment = ShaderLibrary.Load(ShaderName + ".frag").Replace(
             DefaultSlotCount, $"#define FLOOR_TEXTURE_SLOTS {textureSlots}", StringComparison.Ordinal);
         int program = LinkProgram(vertex, fragment);
 
         GL.UseProgram(program);
-        int model = GL.GetUniformLocation(program, "uModel");
-        GL.Uniform4(model, Vector4.UnitX);
-        GL.Uniform4(model + 1, Vector4.UnitY);
-        GL.Uniform4(model + 2, Vector4.UnitZ);
-        GL.Uniform4(model + 3, Vector4.UnitW);
+        Matrix4 model = Matrix4.Identity;
+        GL.Uniform4(GL.GetUniformLocation(program, "uModel[0]"), 4, (float*)&model);
         GL.Uniform4(GL.GetUniformLocation(program, "_TileTex_ST"), 0f, 0f, 0f, 0f);
         GL.Uniform4(GL.GetUniformLocation(program, "_Tint"), Vector4.One);
         GL.Uniform4(GL.GetUniformLocation(program, "_IconColor"), Vector4.One);
@@ -724,7 +734,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             GL.Uniform1(GL.GetUniformLocation(program, $"uTextures[{i}]"), i);
         }
 
-        _viewProjection = GL.GetUniformLocation(program, "uViewProjection");
+        _viewProjection = GL.GetUniformLocation(program, "uViewProjection[0]");
         _cameraOrigin = GL.GetUniformLocation(program, "uCameraOrigin");
         _screenParams = GL.GetUniformLocation(program, "uScreenParams");
         _textureRatio = GL.GetUniformLocation(program, "uTextureRatio[0]");

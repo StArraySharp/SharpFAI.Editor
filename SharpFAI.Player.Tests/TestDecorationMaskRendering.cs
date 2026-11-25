@@ -15,6 +15,69 @@ namespace SharpFAI.Player.Tests;
 public sealed class TestDecorationMaskRendering
 {
     [Test, Explicit("Requires desktop OpenGL.")]
+    public void FloorStreamTextureMatchesExpandedMeshAcrossTextureRows()
+    {
+        bool checkMainThread = GLFWProvider.CheckForMainThread;
+        GLFWProvider.CheckForMainThread = false;
+        try
+        {
+            const int width = 256, height = 192, floorCount = 177;
+            using var window = new NativeWindow(new NativeWindowSettings
+            {
+                ClientSize = new(width, height), StartVisible = false, StartFocused = false,
+                APIVersion = new(4, 1), Profile = ContextProfile.Core,
+            });
+            window.MakeCurrent();
+            GL.Viewport(0, 0, width, height);
+            GL.ClearColor(0, 0, 0, 1);
+            using var uploader = new GlMeshUploader();
+            using var track = new OfficialFloorRenderer(uploader, OfficialFloorRenderer.GetTextureCapacity(),
+                useStreamTexture2D: true);
+            var camera = new Camera2D { ViewportWidth = width, ViewportHeight = height, Zoom = .08f };
+            Floor[] floors = Enumerable.Range(0, floorCount).Select(i => new Floor(-180, 90 + i * .1,
+                new System.Numerics.Vector2((i % 16 - 8) * 160, (i / 16 - 5) * 160)) { index = i }).ToArray();
+            FloorTrackState state = new(TrackStyleInfo.Standard, Vector4.One, Vector4.One,
+                TrackColorMode.Single, 0, 1, 1, 0, 0, 0);
+            FloorTrackState[] states = Enumerable.Repeat(state, floorCount).ToArray();
+            var shapes = new FloorShapeLibrary();
+            foreach (Floor floor in floors)
+                shapes.Add(OfficialFloorMeshBaker.Shape.Create(floor, state.Material));
+            Assert.That(shapes.TexelCount, Is.GreaterThan(FloorStreamGpu.TextureRowWidth));
+
+            track.SetGeometry(OfficialFloorMeshBaker.BakeLevel(floors, states, track.TextureSlots));
+            byte[] expanded = Draw();
+            Assert.That(expanded.Where((value, index) => index % 4 == 0 && value != 0).Count(), Is.GreaterThan(100));
+
+            // Start with a partial row, grow past a row boundary, and reuse that allocation.
+            track.SetGeometry(OfficialFloorMeshBaker.BakeLevel(floors, states, track.TextureSlots,
+                floorIndices: [0], computeBounds: false, shapes: shapes));
+            Draw();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                FloorGeometry geometry = OfficialFloorMeshBaker.BakeLevel(floors, states, track.TextureSlots,
+                    computeBounds: false, shapes: shapes);
+                Assert.That(geometry.Stream!.InstanceTexels, Is.GreaterThan(FloorStreamGpu.TextureRowWidth));
+                track.SetGeometry(geometry);
+                Assert.That(Draw(), Is.EqualTo(expanded));
+            }
+
+            byte[] Draw()
+            {
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                track.Draw(camera.ViewProjection, camera.Position, width, height, false);
+                byte[] pixels = new byte[width * height * 4];
+                GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+                Assert.That(GL.GetError(), Is.EqualTo(ErrorCode.NoError));
+                return pixels;
+            }
+        }
+        finally
+        {
+            GLFWProvider.CheckForMainThread = checkMainThread;
+        }
+    }
+
+    [Test, Explicit("Requires desktop OpenGL.")]
     public void FloorDecorationStylesMatchTheTrackPixelForPixel()
     {
         bool checkMainThread = GLFWProvider.CheckForMainThread;

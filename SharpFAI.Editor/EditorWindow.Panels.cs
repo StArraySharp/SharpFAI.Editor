@@ -144,7 +144,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void UpdateDecorationRows()
     {
-        var key = (_document.ChangeVersion, _decorationFilter, L.Language);
+        var key = (_document.DecorationListVersion, _decorationFilter, L.Language);
         if (_decorationRowsKey == key)
             return;
 
@@ -451,7 +451,8 @@ internal sealed unsafe partial class EditorWindow
             ? Math.Max(1, ImGui.GetContentRegionAvail().y - TimelineRulerHeight - TimelineFloorHeight -
                 ImGui.GetFrameHeightWithSpacing() - ImGui.GetStyle()->ItemSpacing.y)
             : 0;
-        if (ImGui.BeginChild("##event-buttons", WidgetDraw.V2(0, eventHeight)) != 0)
+        if (ImGui.BeginChild("##event-buttons", WidgetDraw.V2(0, eventHeight), 0,
+                (int)ImGuiWindowFlags.ImGuiWindowFlags_NoScrollbar) != 0)
         {
             float side = Math.Clamp(MathF.Floor(ImGui.GetContentRegionAvail().x), 1, EventButtonSide);
             bool first = true;
@@ -461,22 +462,26 @@ internal sealed unsafe partial class EditorWindow
                 if (!first) ContinueToolbar(side);
                 first = false;
                 EditorEvent? definition = _catalog.Find(name);
-                bool disabled = definition is null || !CanAddEvent(definition);
+                bool removesEvent = PaletteToggleTarget(definition) is not null;
+                bool disabled = !removesEvent && (definition is null || !CanAddEvent(definition));
                 string label = EditorCatalog.Name(name);
                 ImGui.BeginDisabled((byte)(disabled ? 1 : 0));
                 if (ImGui.Button("###" + name, WidgetDraw.V2(side, side)) != 0)
-                    AddEvent(name);
+                    ActivatePaletteEvent(name);
                 if (ImGui.IsItemVisible() != 0)
                     DrawEventButtonLabel(label);
                 ImGui.EndDisabled();
 
                 // Keep number-key positions stable when an event already occupies its slot.
                 string tooltip = label;
-                if (_hasFloorSelection && (_floor != 0 || definition?.AllowFirstFloor != false) && shortcut < 10)
+                if (_hasFloorSelection && !_inspectDecoration && _rangeAnchor is null &&
+                    (_floor != 0 || definition?.AllowFirstFloor != false) && shortcut < 10)
                 {
                     shortcut++;
                     if (!disabled)
-                        tooltip = $"{label}\n{shortcut % 10}";
+                        tooltip = removesEvent
+                            ? $"{label}\n{shortcut % 10} · {L.T("DeleteEvent")}"
+                            : $"{label}\n{shortcut % 10}";
                 }
                 if (ImGui.IsItemHovered((int)ImGuiHoveredFlags.ImGuiHoveredFlags_AllowWhenDisabled) != 0)
                     WidgetDraw.Tooltip(tooltip);
@@ -508,6 +513,24 @@ internal sealed unsafe partial class EditorWindow
     private bool CanAddEvent(EditorEvent definition) =>
         (_floor != 0 || definition.AllowFirstFloor) &&
         (definition.Decoration || _hasFloorSelection && _document.CanAddEvent(_floor, definition.Type));
+
+    private JObject? PaletteToggleTarget(EditorEvent? definition) =>
+        _hasFloorSelection && !_inspectDecoration && _rangeAnchor is null &&
+        definition is { Decoration: false } && (_floor != 0 || definition.AllowFirstFloor) &&
+        EditorCatalog.IsToggleableEvent(definition.Type)
+            ? _document.Events(_floor).FirstOrDefault(item => EditorDocument.Type(item) == definition.Type)
+            : null;
+
+    private void ActivatePaletteEvent(string type)
+    {
+        if (PaletteToggleTarget(_catalog.Find(type)) is { } item)
+        {
+            CancelPropertyEdits();
+            _document.Remove(item);
+        }
+        else
+            AddEvent(type);
+    }
 
     private void AddEvent(string type)
     {
@@ -720,8 +743,8 @@ internal sealed unsafe partial class EditorWindow
         if (BeginPanel(L.T("Shortcuts") + "###shortcuts", ref _showShortcuts))
         {
             foreach (string row in new[] { "HelpTiles", "HelpSelect", "HelpDelete", "HelpClipboard", "HelpTransforms",
-                "HelpEvents", "HelpEventPages", "HelpPalette", "HelpCamera", "HelpPlay", "HelpReturn",
-                "HelpBookmarks", "HelpLocate", "HelpFile", "HelpUndo" })
+                "HelpEvents", "HelpEventPages", "HelpPalette", "HelpCamera", "HelpFreeAngle", "HelpPlay", "HelpReturn",
+                "HelpBookmarks", "HelpLocate", "HelpFile", "HelpUndo", "HelpCanvasOnly" })
                 ImGui.TextUnformatted(L.T(row));
         }
         ImGui.End();

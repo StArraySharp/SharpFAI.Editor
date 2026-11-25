@@ -233,7 +233,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
     // Trail: tracks each planet's continuous path; see PlanetTrail for the implementation
     private readonly PlanetTrail _trail = new();
-    private SpriteRenderer.Particle[] _trailParticles = [];
+    private SpriteRenderer.ParticleInstance[] _trailParticles = [];
 
     // Shader hot reload
     private FileSystemWatcher? _shaderWatcher;
@@ -242,9 +242,10 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
     private string _shaderStatus = "着色器: 内嵌";
 
-    private AudioClip _music = new() { Name = "Music" };
+    private AudioClip? _music;
 
-    private AudioClip _hitsound = new() { Name = "Hitsound" };
+    private AudioClip? _hitsound;
+    internal bool EnableAudioOutput { get; set; } = true;
 
     private bool _audioAvailable;
 
@@ -469,10 +470,12 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         _shaderWatcher?.Dispose();
         _shaderWatcher = null;
 
-        _music.Dispose();
-        _hitsound.Dispose();
+        _music?.Dispose();
+        _hitsound?.Dispose();
         ClearFloorChunks();
         _editorInsertedTrack?.Dispose();
+        _editorAngleTrack?.Dispose();
+        _positionTrackGuides?.Dispose();
         _officialRenderer?.Dispose();
         _officialRenderer = null;
         _circleRenderer?.Dispose();
