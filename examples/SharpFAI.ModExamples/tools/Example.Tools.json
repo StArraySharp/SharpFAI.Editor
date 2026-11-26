@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 1,
+  "id": "com.sharpfai.example.tools",
+  "name": "Example Chart Tools",
+  "version": "1.0.0",
+  "api": "[1.0.0,2.0.0)",
+  "entryType": "SharpFAI.ModExamples.ChartToolsMod",
+  "dependencies": [
+    {
+      "id": "com.sharpfai.example.base",
+      "version": "[1.0.0,2.0.0)"
+    }
+  ],
+  "translations": {
+    "en": {
+      "menu": "Chart tools",
+      "window": "Chart analysis",
+      "open": "Open chart analysis",
+      "chart": "Chart",
+      "no-chart": "No chart loaded",
+      "floors": "Tiles",
+      "position": "Playback time",
+      "preview-color": "Enable warm color preview",
+      "strength": "Strength",
+      "pulse": "Warm pulse",
+      "duration": "Duration (seconds)",
+      "export-report": "Export chart report…",
+      "depth": "Tint scene depth",
+      "history": "Frame feedback",
+      "gain": "Realtime mix gain",
+      "checks": "Preprocessing runs",
+      "compat-pulse": "Approximated with native Flash."
+    },
+    "zh-Hans": {
+      "menu": "谱面工具",
+      "window": "谱面分析",
+      "open": "打开谱面分析",
+      "chart": "谱面",
+      "no-chart": "当前没有谱面",
+      "floors": "砖块数",
+      "position": "播放时间",
+      "preview-color": "启用暖色预览",
+      "strength": "强度",
+      "pulse": "暖色脉冲",
+      "duration": "时长（秒）",
+      "export-report": "导出谱面报告…",
+      "depth": "深度着色",
+      "history": "历史帧残影",
+      "gain": "实时总线增益",
+      "checks": "预处理执行次数",
+      "compat-pulse": "使用原版闪光近似。"
+    }
+  }
+}

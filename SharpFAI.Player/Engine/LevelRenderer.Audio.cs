@@ -25,12 +25,14 @@ public sealed unsafe partial class LevelRenderer
         LevelPlaybackSettings settings,
         Action<string, double>? markPhase = null,
         EditorAudioReuse? reuse = null,
-        bool reuseHitsound = false)
+        bool reuseHitsound = false, Func<string, string>? prepareMusic = null)
     {
         if (settings.SkipAudio)
             return default;
 
         string? musicPath = LevelAudioLocator.Find(level, levelPath);
+        if (musicPath is not null && prepareMusic is not null)
+            musicPath = prepareMusic(musicPath);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         DecodedAudio? music = reuse is { } prior && string.Equals(musicPath, prior.MusicPath, StringComparison.Ordinal)
             ? prior.Music : musicPath is null ? null : AudioDecoder.Decode(musicPath);
@@ -57,6 +59,7 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void ApplyAudio(LevelLoadResult result)
     {
+        StopModAudio();
         SetAudioData(result.MusicPath, result.Music, result.Hitsound);
         UpdateHitsoundPresetWarning();
 
@@ -85,6 +88,8 @@ public sealed unsafe partial class LevelRenderer
         bool pitchChanged = previousPitch != _pitch;
         bool musicChanged = !ReferenceEquals(_audioMusic, music) || (pitchChanged && music is not null);
         bool hitsoundChanged = !ReferenceEquals(_audioHitsound, hitsound);
+        if (_modAudio is not null && (musicChanged || hitsoundChanged || pitchChanged))
+            _audioNeedsResync = true;
         SetAudioData(musicPath, music, hitsound);
         UpdateHitsoundPresetWarning();
 
@@ -241,6 +246,7 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void SyncAudio()
     {
+        if (SyncModAudio()) return;
         if (!_audioAvailable || _progressScrubbing)
         {
             return;

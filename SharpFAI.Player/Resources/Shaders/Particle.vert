@@ -11,6 +11,8 @@ layout(location = 3) in vec4 iColor;
 layout(location = 4) in vec2 iRotationFrame;
 
 uniform mat4 uViewProjection;
+uniform vec3 uViewRight;
+uniform vec3 uViewUp;
 uniform float uColumns;
 
 out vec2 vUv;
@@ -21,7 +23,8 @@ void main()
     float c = cos(iRotationFrame.x);
     float s = sin(iRotationFrame.x);
     vec2 offset = mat2(c, s, -s, c) * (aCorner * iHalfSize);
-    gl_Position = uViewProjection * vec4(iCenter + offset, 0.0, 1.0);
+    vec3 position = vec3(iCenter, 0.0) + uViewRight * offset.x + uViewUp * offset.y;
+    gl_Position = uViewProjection * vec4(position, 1.0);
 
     // aCorner 是 [-1,1] -> [0,1]
     // aCorner is in [-1,1] -> [0,1]

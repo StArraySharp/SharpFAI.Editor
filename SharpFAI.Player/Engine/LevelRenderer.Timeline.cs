@@ -38,7 +38,8 @@ public sealed unsafe partial class LevelRenderer
     ///   filePos(i) = entryTime[i] + offset - (separateCountdownTime ? countdownTicks * crotchet : 0)
     /// The music, the hitsound and every visual share this single clock, so they cannot drift apart.
     /// </summary>
-    internal static PlaybackTimeline BuildTimeline(Level level, List<Floor> floors, IReadOnlyList<PlaybackEvent>? events = null)
+    internal static PlaybackTimeline BuildTimeline(Level level, List<Floor> floors, IReadOnlyList<PlaybackEvent>? events = null,
+        FloorCoreEvents? coreEvents = null)
     {
         if (floors.Count == 0)
         {
@@ -47,7 +48,8 @@ public sealed unsafe partial class LevelRenderer
 
         // The chart clock includes the countdown and the actual initial sweep. The same timing
         // data carries Pause / Hold extra beats for the later sweeps.
-        List<FloorTimingCalculator.FloorData> timing = FloorTimingCalculator.Calculate(level);
+        List<FloorTimingCalculator.FloorData> timing = coreEvents is null
+            ? FloorTimingCalculator.Calculate(level) : FloorTimingCalculator.Calculate(level, coreEvents);
         events ??= PlaybackEventBinder.BindForPlayback(level);
         PlanetTrackFloor[] planetTrack = PlanetTrackFloor.Resolve(timing, events);
         Dictionary<int, EventEnums.AngleCorrectionDirection> pauseDirections = [];

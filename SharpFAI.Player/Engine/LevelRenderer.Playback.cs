@@ -78,6 +78,7 @@ public sealed unsafe partial class LevelRenderer
         _isPlaying = false;
         _filterClockPaused = true;
         PlayInput.Clear();
+        StopModAudio();
         _music?.Pause();
         _hitsound?.Pause();
     }
@@ -164,7 +165,9 @@ public sealed unsafe partial class LevelRenderer
         ResetDecorationTriggers();
         _lastFilterTime = double.NaN;
         _colorHistory?.Reset();
+        InvalidateModHistory();
         _audioNeedsResync = true;
+        StopModAudio();
         _music?.Stop();
         _hitsound?.Stop();
         ClearManualAttempt();
@@ -187,6 +190,7 @@ public sealed unsafe partial class LevelRenderer
         if (scrubbing)
         {
             SetRuntimeTrackMode(true);
+            StopModAudio();
             _music?.Pause();
             _hitsound?.Pause();
             PlayInput.Clear();
@@ -202,6 +206,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         _colorHistory?.Reset();
+        InvalidateModHistory();
         _lastFilterTime = double.NaN;
         double target = Math.Clamp(seconds, 0.0, _duration);
         if (target == 0.0 && !_progressScrubbing)
@@ -298,12 +303,13 @@ public sealed unsafe partial class LevelRenderer
             masterShift = HitsoundClockShift;
         }
 
-        if (master is null)
+        double audioTime;
+        if (_modAudio is { } stream)
         {
-            return next;
+            if (!stream.TryGetPosition(out double position)) return next;
+            audioTime = position * _pitch;
         }
-
-        if (!TryGetAudioClock(master, masterShift, out double audioTime))
+        else if (master is null || !TryGetAudioClock(master, masterShift, out audioTime))
         {
             // Right after starting, or while the demuxer catches up, the position is not
             // meaningful; advance on the wall clock alone
@@ -476,6 +482,7 @@ public sealed unsafe partial class LevelRenderer
         }
         if (_imageDecorations?.HasConditions == true)
             TriggerDecorationJudgment(hit);
+        NotifyModJudgment(hit);
     }
 
     private void UpdatePlaybackCamera(int index, Vector2 here, CameraTimeline? cameraEvents)
@@ -659,6 +666,7 @@ public sealed unsafe partial class LevelRenderer
         bool offlineStart = !_offlineSubSample;
         if (offlineStart)
         {
+            InvalidateModHistory();
             _colorHistory?.Reset();
             _filterBackend?.ResetCameraHistory();
             _lastFilterTime = double.NaN;

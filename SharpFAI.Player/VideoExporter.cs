@@ -302,7 +302,8 @@ internal static class VideoExporter
         }
 
         /// <summary>关闭输入并等待 ffmpeg 退出。</summary>
-        public void Finish(bool publish)
+        public void Finish(bool publish, Action<string, string, CancellationToken>? postprocess = null,
+            CancellationToken token = default)
         {
             try
             {
@@ -324,10 +325,13 @@ internal static class VideoExporter
 
             if (publish)
             {
+                token.ThrowIfCancellationRequested();
                 string packagedOutput = _temporaryOutput + ".mux";
                 try
                 {
                     Mp4Container.WriteExport(_temporaryOutput, packagedOutput);
+                    postprocess?.Invoke(packagedOutput, _output, token);
+                    token.ThrowIfCancellationRequested();
                     File.Move(packagedOutput, _output, overwrite: true);
                 }
                 finally
@@ -460,8 +464,15 @@ internal static class VideoExporter
         double totalSeconds,
         string path,
         double playbackRate = 1.0,
-        double? hitsoundRate = null)
+        double? hitsoundRate = null, Func<DecodedAudio, DecodedAudio>? processMix = null, DecodedAudio? realtimeMix = null)
     {
+        if (realtimeMix is not null)
+        {
+            var pcm = processMix?.Invoke(realtimeMix) ?? realtimeMix;
+            using var writer = BeginWav(path, pcm.Pcm.Length, pcm.SampleRate, pcm.Channels);
+            writer.Write(pcm.Pcm);
+            return;
+        }
         // 混音统一到 48 kHz 立体声：两条轨采样率可能不同，重采样在这里一次做完
         // Mix at 48 kHz stereo: the two tracks may differ in rate, so resample once here
         const int Rate = 48000;
@@ -475,7 +486,7 @@ internal static class VideoExporter
         Accumulate(music, musicVolume, mix, Rate, Channels, playbackRate);
         Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, hitsoundRate ?? playbackRate);
 
-        WriteWav(path, mix, Rate, Channels);
+        WriteWav(path, mix, Rate, Channels, processMix);
     }
 
     /// <summary>把一条音轨线性重采样后叠加进混音缓冲。</summary>
@@ -537,36 +548,21 @@ internal static class VideoExporter
     }
 
     /// <summary>写 16 位 PCM WAV。</summary>
-    private static void WriteWav(string path, float[] mix, int rate, int channels)
+    private static void WriteWav(string path, float[] mix, int rate, int channels,
+        Func<DecodedAudio, DecodedAudio>? processMix)
     {
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
-
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         int frameCount = mix.Length / channels;
         int dataBytes = frameCount * channels * sizeof(short);
+        using var writer = BeginWav(path, dataBytes, rate, channels);
 
-        using FileStream stream = File.Create(path);
-        using BinaryWriter writer = new(stream);
-
-        writer.Write("RIFF"u8.ToArray());
-        writer.Write(36 + dataBytes);
-        writer.Write("WAVE"u8.ToArray());
-
-        writer.Write("fmt "u8.ToArray());
-        writer.Write(16);                                  // PCM 块长度 / PCM chunk size
-        writer.Write((short)1);                            // PCM / uncompressed
-        writer.Write((short)channels);
-        writer.Write(rate);
-        writer.Write(rate * channels * sizeof(short));      // 字节率 / byte rate
-        writer.Write((short)(channels * sizeof(short)));    // 块对齐 / block align
-        writer.Write((short)16);                           // 位深 / bits per sample
-
-        writer.Write("data"u8.ToArray());
-        writer.Write(dataBytes);
+        if (processMix is not null)
+        {
+            var pcm = new byte[dataBytes];
+            for (int index = 0; index < mix.Length; index++)
+                BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(index * sizeof(short)), Quantize(mix[index]));
+            writer.Write(processMix(new DecodedAudio { Pcm = pcm, SampleRate = rate, Channels = channels }).Pcm);
+            return;
+        }
 
         Span<byte> block = stackalloc byte[8192];
         const int samplesPerBlock = 8192 / sizeof(short);
@@ -575,11 +571,36 @@ internal static class VideoExporter
             int count = Math.Min(samplesPerBlock, mix.Length - first);
             for (int i = 0; i < count; i++)
             {
-                float value = Math.Clamp(mix[first + i], -1f, 1f);
-                BinaryPrimitives.WriteInt16LittleEndian(block[(i * sizeof(short))..], (short)MathF.Round(value * 32767f));
+                BinaryPrimitives.WriteInt16LittleEndian(block[(i * sizeof(short))..], Quantize(mix[first + i]));
             }
             writer.Write(block[..(count * sizeof(short))]);
         }
+
+        static short Quantize(float value) => (short)MathF.Round(Math.Clamp(value, -1f, 1f) * 32767f);
+    }
+
+    private static BinaryWriter BeginWav(string path, int dataBytes, int rate, int channels)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var writer = new BinaryWriter(File.Create(path));
+        try
+        {
+            writer.Write("RIFF"u8);
+            writer.Write(checked(36 + dataBytes));
+            writer.Write("WAVE"u8);
+            writer.Write("fmt "u8);
+            writer.Write(16);
+            writer.Write((short)1);
+            writer.Write((short)channels);
+            writer.Write(rate);
+            writer.Write(rate * channels * sizeof(short));
+            writer.Write((short)(channels * sizeof(short)));
+            writer.Write((short)16);
+            writer.Write("data"u8);
+            writer.Write(dataBytes);
+            return writer;
+        }
+        catch { writer.Dispose(); throw; }
     }
 }
 

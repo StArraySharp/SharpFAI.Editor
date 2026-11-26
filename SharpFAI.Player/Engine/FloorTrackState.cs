@@ -313,6 +313,21 @@ public static class FloorTrackStateResolver
         IReadOnlyList<PlaybackEvent> events, bool includeEditorOnly, ReadOnlySpan<double> floorBpms = default)
     {
         FloorTrackState[] result = new FloorTrackState[floors.Count];
+        ResolveInto(level, floors, events, includeEditorOnly, floorBpms, new FloorTrackStateTable(result));
+        return result;
+    }
+
+    internal static FloorTrackStateTable ResolveForPlayback(Level level, IReadOnlyList<Floor> floors,
+        IReadOnlyList<PlaybackEvent> events, bool includeEditorOnly, ReadOnlySpan<double> floorBpms)
+    {
+        var result = new FloorTrackStateTable(floors.Count);
+        ResolveInto(level, floors, events, includeEditorOnly, floorBpms, result);
+        return result;
+    }
+
+    private static void ResolveInto(Level level, IReadOnlyList<Floor> floors, IReadOnlyList<PlaybackEvent> events,
+        bool includeEditorOnly, ReadOnlySpan<double> floorBpms, FloorTrackStateTable result)
+    {
         FloorTrackState live = ReadDefaults(level);
         ILookup<int, PlaybackEvent> byFloor = events
             .Where(item => TrackPreview.Applies(item, includeEditorOnly))
@@ -337,10 +352,9 @@ public static class FloorTrackStateResolver
                 }
             }
 
-            result[i] = current.WithDisplayColor(i);
+            result.Initialize(i, current.WithDisplayColor(i));
         }
 
-        return result;
     }
 
     private static FloorTrackState ReadDefaults(Level level)

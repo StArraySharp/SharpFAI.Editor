@@ -8,7 +8,7 @@ namespace SharpFAI.Editor;
 internal static class Program
 {
     private const string Usage =
-        "SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--web-ui] [--no-audio]";
+        "SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--web-ui] [--no-audio] [--no-mods]";
 
     [STAThread]
     private static int Main(string[] args)
@@ -25,7 +25,8 @@ internal static class Program
         try
         {
             return args is ["--player", .. var playerArgs]
-                ? SharpFAI.Player.PlayerLauncher.Run(playerArgs, typeof(Program).Assembly)
+                ? SharpFAI.Player.PlayerLauncher.Run(playerArgs, typeof(Program).Assembly,
+                    disabled => new Mods.ModHost(SharpFAI.ModApi.UiHost.Player, safeMode: disabled))
                 : RunEditor(args);
         }
         catch (Exception error)
@@ -42,6 +43,7 @@ internal static class Program
         string? language = null;
         bool webUi = false;
         bool noAudio = false;
+        bool noMods = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--properties" && i + 1 < args.Length)
@@ -52,6 +54,8 @@ internal static class Program
                 webUi = true;
             else if (args[i] == "--no-audio")
                 noAudio = true;
+            else if (args[i] == "--no-mods")
+                noMods = true;
             else if (!args[i].StartsWith('-') && levelPath is null)
                 levelPath = args[i];
             else
@@ -89,7 +93,7 @@ internal static class Program
             APIVersion = new Version(4, 1),
             Profile = ContextProfile.Core,
             Vsync = VSyncMode.On,
-        }, catalog, document, language);
+        }, catalog, document, language) { DisableMods = noMods };
         if (archiveChoices is not null)
             window.ChooseArchiveLevel(archiveChoices);
         using EditorWebMirror? mirror = webUi ? EditorWebMirror.Start() : null;

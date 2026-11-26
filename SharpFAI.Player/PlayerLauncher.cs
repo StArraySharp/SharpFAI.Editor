@@ -12,14 +12,14 @@ namespace SharpFAI.Player;
 internal static class PlayerLauncher
 {
     internal const string Usage = """
-        SharpFAI.Editor --player [level.adofai | --open <level>] [--no-audio]
+        SharpFAI.Editor --player [level.adofai | --open <level>] [--no-audio] [--no-mods]
           --shot <png> [--time <seconds>] [--select <floor>] [--zoom <scale>]
           --video <mp4> [--size <width>x<height>] [--fps <fps>] [--bitrate <kbps>]
                        [--keep-frames] [--hide-passed | --keep-passed] [--software-encoding]
           --fire-color <RRGGBB> --ice-color <RRGGBB>
         """;
 
-    internal static int Run(string[] args, Assembly hostAssembly)
+    internal static int Run(string[] args, Assembly hostAssembly, Func<bool, ModSupport.IModRuntime> createMods)
     {
         if (args is ["--help" or "-h"])
         {
@@ -58,6 +58,7 @@ internal static class PlayerLauncher
             CaptureSelectFloor = options.Floor,
             CaptureTime = options.Time,
             SkipAudioFromCommandLine = options.SkipAudio,
+            CreateMods = () => createMods(options.DisableMods),
             FireColorFromCommandLine = options.FireColor,
             IceColorFromCommandLine = options.IceColor,
         };
@@ -86,6 +87,7 @@ internal static class PlayerLauncher
             switch (flag)
             {
                 case "--no-audio": options.SkipAudio = true; continue;
+                case "--no-mods": options.DisableMods = true; continue;
                 case "--keep-frames": options.KeepFrames = true; continue;
                 case "--hide-passed": options.HidePassed = true; continue;
                 case "--keep-passed": options.HidePassed = false; continue;
@@ -151,7 +153,7 @@ internal static class PlayerLauncher
         public int Width = 1920, Height = 1080, Fps = 60, Floor = -1, Bitrate;
         public double Time = -1;
         public float Zoom;
-        public bool SkipAudio, KeepFrames, HidePassed;
+        public bool SkipAudio, KeepFrames, HidePassed, DisableMods;
         public bool PreferHardware = true;
     }
 }

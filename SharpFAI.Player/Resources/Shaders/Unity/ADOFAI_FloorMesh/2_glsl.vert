@@ -104,8 +104,12 @@ void main()
     mat4 viewProjection = mat4(uViewProjection[0], uViewProjection[1], uViewProjection[2], uViewProjection[3]);
     vec4 clipPosition = viewProjection * (model * vec4(relative, position.z, 1.0));
     vec2 halfViewport = uScreenParams.xy * 0.5;
-    vec2 pixelPosition = roundEven(clipPosition.xy / clipPosition.w * halfViewport);
-    gl_Position = vec4((pixelPosition / halfViewport) * clipPosition.w, clipPosition.zw);
+    gl_Position = clipPosition;
+    if (clipPosition.w > 0.000001)
+    {
+        vec2 pixelPosition = roundEven(clipPosition.xy / clipPosition.w * halfViewport);
+        gl_Position.xy = (pixelPosition / halfViewport) * clipPosition.w;
+    }
 
     vec3 flashedColor = floorColor.rgb + _FlashColor * (vec3(1.0) - floorColor.rgb);
     vs_COLOR0 = vec4(flashedColor, floorColor.a) * vertexColor;

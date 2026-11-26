@@ -6,13 +6,14 @@ using SharpFAI.Serialization;
 
 namespace SharpFAI.Editor;
 
-internal sealed class EditorDocument
+internal sealed partial class EditorDocument
 {
     private readonly Level _level;
     private readonly JArray _angles;
     private readonly JArray _actions;
     private readonly JArray _decorations;
-    private readonly Dictionary<int, List<JObject>> _eventsByFloor = [];
+    // Most occupied floors have one action. Allocate a list only for multiple actions on a floor.
+    private readonly Dictionary<int, object> _eventsByFloor = [];
     private readonly List<Edit> _edits = [];
     private int _revision;
     private int _savedRevision;
@@ -36,9 +37,15 @@ internal sealed class EditorDocument
     private int _lastFullPlaybackChange;
 
     public EditorDocument(string? path = null)
+        : this(path, path is not null && new FileInfo(path).Length >= LevelRenderer.CompactChartFileSize) { }
+
+    internal EditorDocument(string? path, bool compactTwirls)
+        : this(path, path is null ? Level.CreateNewLevel() : new Level(path, compactTwirls)) { }
+
+    private EditorDocument(string? path, Level level)
     {
         Path = path is null ? null : System.IO.Path.GetFullPath(path);
-        _level = Path is null ? Level.CreateNewLevel() : new Level(Path);
+        _level = level;
         _angles = EnsureArray("angleData");
         _actions = EnsureArray("actions");
         _decorations = EnsureArray("decorations");
@@ -53,8 +60,6 @@ internal sealed class EditorDocument
                 action["filterProperties"] = properties;
         }
         IndexEvents();
-        _floorNumbers = IndexFloorNumbers();
-        _tileReferences = IndexTileReferences();
     }
 
     public string? Path { get; private set; }
@@ -85,8 +90,56 @@ internal sealed class EditorDocument
         }
         return spins * 180 % 360;
     }
-    public IReadOnlyList<JObject> Events(int floor) =>
-        _eventsByFloor.TryGetValue(floor, out List<JObject>? list) ? list : [];
+    public IReadOnlyList<JObject> Events(int floor)
+    {
+        return _eventsByFloor.GetValueOrDefault(floor) switch
+        {
+            JObject single => [single],
+            JRaw packed => [MaterializeSingle(packed, floor)],
+            List<JToken> multiple => MaterializeGroup(multiple, floor),
+            _ => [],
+        };
+    }
+
+    private JObject[] MaterializeGroup(List<JToken> group, int floor)
+    {
+        var items = new JObject[group.Count];
+        for (int i = 0; i < items.Length; i++)
+        {
+            items[i] = Materialize(group[i], floor);
+            group[i] = items[i];
+        }
+        return items;
+    }
+
+    private JObject MaterializeSingle(JRaw item, int floor)
+    {
+        var action = Materialize(item, floor);
+        _eventsByFloor[floor] = action;
+        return action;
+    }
+
+    private JObject Materialize(JToken item, int floor)
+    {
+        if (item is JObject action) return action;
+        JObject twirl = TwirlEventToken.Materialize(floor);
+        item.Replace(twirl);
+        // A pending undo may still hold the original anchor.
+        item.AddAnnotation(twirl);
+        if (_floorNumbers?.TryGetValue(floor, out var numbers) == true)
+        {
+            int index = numbers.FindIndex(number => ReferenceEquals(number, item));
+            if (index >= 0) numbers[index] = (JValue)twirl["floor"]!;
+        }
+        return twirl;
+    }
+
+    private IEnumerable<JObject> NonPackedEvents(int floor) => _eventsByFloor.GetValueOrDefault(floor) switch
+    {
+        JObject action => [action],
+        List<JToken> actions => actions.OfType<JObject>(),
+        _ => [],
+    };
 
     public static int Floor(JObject value) => value.Value<int?>("floor") ?? 0;
     public static string Type(JObject value) => value.Value<string>("eventType") ?? "";
@@ -153,13 +206,44 @@ internal sealed class EditorDocument
     public IEnumerable<JObject> ActionsOfType(string type) =>
         _actions.OfType<JObject>().Where(item => Type(item) == type);
 
-    private static JObject[] CopyRange(JArray source, int first, int last) => source.OfType<JObject>()
-        .Where(item => Floor(item) >= first && Floor(item) <= last).Select(item =>
+    public bool IsReversedAt(int floor)
+    {
+        bool reversed = false;
+        foreach (var item in _actions)
+            if (TwirlEventToken.TryGetFloor(item, out int anchor) ? anchor <= floor :
+                item is JObject action && Type(action) == "Twirl" && Floor(action) <= floor &&
+                (!bool.TryParse(action["active"]?.ToString(), out bool active) || active))
+                reversed = !reversed;
+        return reversed;
+    }
+
+    private static JObject[] CopyRange(JArray source, int first, int last)
+    {
+        List<JObject> copies = [];
+        foreach (JToken item in source)
         {
-            JObject copy = (JObject)item.DeepClone();
-            copy["floor"] = Floor(item) - first;
-            return copy;
-        }).ToArray();
+            if (!TryReadFloor(item, out int floor) || floor < first || floor > last) continue;
+            if (item is JObject action)
+            {
+                var copy = (JObject)action.DeepClone();
+                copy["floor"] = floor - first;
+                copies.Add(copy);
+            }
+            else
+                copies.Add(TwirlEventToken.Materialize(floor - first));
+        }
+        return copies.ToArray();
+    }
+
+    private static bool TryReadFloor(JToken item, out int floor)
+    {
+        if (item is JObject action)
+        {
+            floor = Floor(action);
+            return true;
+        }
+        return TwirlEventToken.TryGetFloor(item, out floor);
+    }
 
     public void PasteTiles(int after, TileClipboard clipboard, bool includeDecorations)
     {
@@ -231,15 +315,20 @@ internal sealed class EditorDocument
         JToken[] angles = _angles.Skip(first - 1).Take(count).ToArray();
         var moved = AnchorsAfter(last);
         var removed = _actions.Select((token, index) => (token, index))
-            .Where(entry => entry.token is JObject item && Floor(item) >= first && Floor(item) <= last).ToArray();
+            .Where(entry => TryReadFloor(entry.token, out int floor) && floor >= first && floor <= last).ToArray();
         var attached = _decorations.OfType<JObject>().Where(item => Floor(item) >= first && Floor(item) <= last)
-            .Select(item => (Item: item, Floor: Floor(item))).ToArray();
+            .Select(item => (Item: (JToken)item, Floor: Floor(item))).ToArray();
+        var modEvents = ModEvents;
+        var removedMods = modEvents?.Select((item, index) => (Item: item, Index: index))
+            .Where(entry => entry.Item is JObject item && item["anchor"] is JObject anchor && TryReadFloor(anchor, out int floor) &&
+                floor >= first && floor <= last).ToArray() ?? [];
         Apply(new(
             () =>
             {
                 for (int i = last - 1; i >= first - 1; i--) _angles.RemoveAt(i);
                 foreach (var (item, _) in removed)
-                    item.Remove();
+                    CurrentAction(item).Remove();
+                foreach (var (item, _) in removedMods) item.Remove();
                 foreach (var (item, _) in attached)
                     item["floor"] = first - 1;
                 MoveAnchors(moved, -count);
@@ -249,7 +338,8 @@ internal sealed class EditorDocument
             {
                 for (int i = 0; i < count; i++) _angles.Insert(first - 1 + i, angles[i]);
                 foreach (var (item, index) in removed)
-                    _actions.Insert(index, item);
+                    _actions.Insert(index, CurrentAction(item));
+                foreach (var (item, index) in removedMods) modEvents!.Insert(index, item);
                 MoveAnchors(attached, 0);
                 MoveAnchors(moved, 0);
                 WriteReferences(references, false);
@@ -281,7 +371,7 @@ internal sealed class EditorDocument
         int first, int last, TrackTransform transform)
     {
         for (int floor = first; floor <= last; floor++)
-        foreach (JObject item in Events(floor))
+        foreach (JObject item in NonPackedEvents(floor))
         {
             string? key = Type(item) switch
             {
@@ -509,7 +599,12 @@ internal sealed class EditorDocument
     }
 
     public string PlaybackPath => Path ?? System.IO.Path.Combine(Environment.CurrentDirectory, "untitled.adofai");
-    public Level SnapshotForPlayback() => _level.CreateSnapshot(PlaybackPath);
+    private const int CompactPlaybackActionCount = 250_000;
+
+    public Level SnapshotForPlayback() => _actions.Count >= CompactPlaybackActionCount
+        ? _level.CreateSnapshot(PlaybackPath, CopyPlaybackAction) : _level.CreateSnapshot(PlaybackPath);
+
+    private static JToken CopyPlaybackAction(JToken item) => TwirlEventToken.Pack(item) ?? item.DeepClone();
 
     public bool HasOnlyEffectChangesSince(int version) => version >= _lastFullPlaybackChange;
     public bool CanReusePlaybackChart(int version) => version >= _lastChartChange;
@@ -539,7 +634,9 @@ internal sealed class EditorDocument
                 if (patch.Insertion is not { } insert)
                 {
                     var append = patch.EventAppend!.Value;
-                    ((JArray)root[append.Decoration ? "decorations" : "actions"]!).Add(append.Value.DeepClone());
+                    var target = (JArray)root[append.Decoration ? "decorations" : "actions"]!;
+                    target.Add(!append.Decoration && target.Count >= CompactPlaybackActionCount
+                        ? CopyPlaybackAction(append.Value) : append.Value.DeepClone());
                     continue;
                 }
                 // Sequential inputs extend the same run of tiles. Relocate the chart once for that run.
@@ -569,6 +666,9 @@ internal sealed class EditorDocument
                 target => target > floor ? target + angles.Count : target), true);
             MoveAnchors(AnchorsAfter(actions, floor), angles.Count);
             MoveAnchors(AnchorsAfter(decorations, floor), angles.Count);
+            if (root["sharpFaiMods"] is JObject extension && extension["events"] is JArray modEvents)
+                MoveAnchors(modEvents.OfType<JObject>().Select(item => item["anchor"]).OfType<JObject>()
+                    .Where(item => Floor(item) > floor).Select(item => (Item: (JToken)item, Floor: Floor(item))), angles.Count);
         }
         InsertAngles(path, floor, angles.Select(angle => new JValue(angle)));
     }
@@ -873,36 +973,58 @@ internal sealed class EditorDocument
         bool MatchesBackwards(double direction) => Math.Abs(Math.IEEERemainder(direction - backwards, 360)) < .0001;
     }
 
-    private (JObject Item, int Floor)[] AnchorsAfter(int floor) => _actions.OfType<JObject>()
-        .Concat(_decorations.OfType<JObject>()).Select(item => (Item: item, Floor: Floor(item)))
-        .Where(item => item.Floor > floor).ToArray();
+    private (JToken Item, int Floor)[] AnchorsAfter(int floor) =>
+        AnchorsAfter(_actions, floor).Concat(AnchorsAfter(_decorations, floor))
+            .Concat(ModEvents?.OfType<JObject>().Select(item => item["anchor"]).OfType<JObject>()
+                .Where(item => Floor(item) > floor).Select(item => (Item: (JToken)item, Floor: Floor(item))) ?? []).ToArray();
 
-    private static IEnumerable<(JObject Item, int Floor)> AnchorsAfter(JArray items, int floor) =>
-        items.OfType<JObject>().Select(item => (Item: item, Floor: Floor(item))).Where(item => item.Floor > floor);
-
-    private static void MoveAnchors(IEnumerable<(JObject Item, int Floor)> anchors, int offset)
+    private static IEnumerable<(JToken Item, int Floor)> AnchorsAfter(JArray items, int floor)
     {
-        foreach (var (item, floor) in anchors)
-            if (item["floor"] is JValue { Type: JTokenType.Integer } number)
+        foreach (JToken item in items)
+            if (TryReadFloor(item, out int anchor) && anchor > floor)
+                yield return (item, anchor);
+    }
+
+    private static void MoveAnchors(IEnumerable<(JToken Item, int Floor)> anchors, int offset)
+    {
+        foreach (var (anchor, floor) in anchors)
+        {
+            JToken item = CurrentAction(anchor);
+            if (item is JRaw packed)
+                TwirlEventToken.Move(packed, floor + offset);
+            else if (item["floor"] is JValue { Type: JTokenType.Integer } number)
                 number.Value = floor + offset;
             else
                 item["floor"] = floor + offset;
+        }
     }
+
+    private static JToken CurrentAction(JToken item) =>
+        item is JRaw ? item.Annotation<JObject>() ?? item : item;
 
     private FloorAnchorIndex IndexFloorNumbers()
     {
         var numbers = new FloorAnchorIndex();
         foreach (var (floor, items) in _eventsByFloor)
-            foreach (var item in items)
-                IndexFloorNumber(numbers, item, floor);
+        {
+            if (items is JToken single)
+                IndexFloorNumber(numbers, single, floor);
+            else
+                foreach (var item in (List<JToken>)items)
+                    IndexFloorNumber(numbers, item, floor);
+        }
         foreach (var item in _decorations.OfType<JObject>())
             IndexFloorNumber(numbers, item, Floor(item));
+        if (ModEvents is { } modEvents)
+            foreach (var item in modEvents.OfType<JObject>())
+                if (item["anchor"] is JObject anchor && TryReadFloor(anchor, out int floor))
+                    IndexFloorNumber(numbers, anchor, floor);
         return numbers;
     }
 
-    private static void IndexFloorNumber(FloorAnchorIndex index, JObject item, int floor)
+    private static void IndexFloorNumber(FloorAnchorIndex index, JToken item, int floor)
     {
-        if (item["floor"] is not JValue number)
+        if ((item is JRaw packed ? packed : item["floor"]) is not JValue number)
             return;
         if (!index.TryGetValue(floor, out var group))
             index.Add(floor, group = []);
@@ -924,7 +1046,9 @@ internal sealed class EditorDocument
             index.Remove(previous);
             index.Add(floor, numbers!);
             object value = floor;
-            foreach (var number in numbers!) number.Value = value;
+            foreach (var number in numbers!)
+                if (number is JRaw packed) TwirlEventToken.Move(packed, floor);
+                else number.Value = value;
             if (_eventsByFloor.Remove(previous, out var events)) _eventsByFloor.Add(floor, events);
         }
     }
@@ -956,31 +1080,38 @@ internal sealed class EditorDocument
     private void AddAction(JObject item)
     {
         _actions.Add(item);
-        IndexAction(item);
+        IndexAction(item, Floor(item));
     }
 
     private void RemoveAction(JObject item)
     {
         item.Remove();
         int floor = Floor(item);
-        var events = _eventsByFloor[floor];
-        events.Remove(item);
-        if (events.Count == 0) _eventsByFloor.Remove(floor);
+        if (_eventsByFloor[floor] is List<JToken> events)
+        {
+            events.Remove(item);
+            if (events.Count == 1) _eventsByFloor[floor] = events[0];
+        }
+        else
+            _eventsByFloor.Remove(floor);
     }
 
-    private void IndexAction(JObject item)
+    private void IndexAction(JToken item, int floor)
     {
-        int floor = Floor(item);
-        if (!_eventsByFloor.TryGetValue(floor, out List<JObject>? events))
-            _eventsByFloor[floor] = events = [];
-        events.Add(item);
+        if (!_eventsByFloor.TryGetValue(floor, out var events))
+            _eventsByFloor.Add(floor, item);
+        else if (events is List<JToken> list)
+            list.Add(item);
+        else
+            _eventsByFloor[floor] = new List<JToken> { (JToken)events, item };
     }
 
     private void IndexEvents()
     {
         _eventsByFloor.Clear();
-        foreach (JObject item in _actions.OfType<JObject>())
-            IndexAction(item);
+        foreach (JToken item in _actions)
+            if (TryReadFloor(item, out int floor))
+                IndexAction(item, floor);
     }
 
 }

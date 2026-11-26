@@ -178,14 +178,16 @@ public sealed unsafe partial class LevelRenderer
 
     private FloorRegion ResidentCoverage()
     {
-        FloorRegion view = FloorRegion.FromView(_camera).Expand(Vector2.Abs(_editorAngleOffset));
+        FloorRegion view = (_sceneRenderView?.Coverage ?? FloorRegion.FromView(_camera)).Expand(Vector2.Abs(_editorAngleOffset));
+        if (view.Min.X > view.Max.X || view.Min.Y > view.Max.Y) return view;
         return view.Expand((view.Max - view.Min) * .30f + new Vector2(1f));
     }
 
     private void EnsureVisibleFloors()
     {
         if (_visibleFloorIndex is not { } visibility ||
-            (_residentRegion.Contains(FloorRegion.FromView(_camera).Expand(Vector2.Abs(_editorAngleOffset))) &&
+            (_residentRegion.Contains((_sceneRenderView?.Coverage ?? FloorRegion.FromView(_camera))
+                .Expand(Vector2.Abs(_editorAngleOffset))) &&
              _residentTime.Contains(_playTime)))
         {
             return;
@@ -225,7 +227,7 @@ public sealed unsafe partial class LevelRenderer
             if (_runtimeTrackActive)
             {
                 // On a large jump, bake the current view directly instead of uploading many cold chunks.
-                FloorRegion view = FloorRegion.FromView(_camera);
+                FloorRegion view = _sceneRenderView?.Coverage ?? FloorRegion.FromView(_camera);
                 float pixelMargin = 2f / MathF.Max(1f, MathF.Min(_camera.ViewportWidth, _camera.ViewportHeight));
                 coverage = view.Expand((view.Max - view.Min) * pixelMargin + Vector2.One);
                 time = new FloorTimeRange(_playTime, _playTime + .02);
@@ -254,7 +256,7 @@ public sealed unsafe partial class LevelRenderer
 
         if (_runtimeTrackActive && Math.Abs(_currentIndex - _previousCurrentIndex) > 64)
         {
-            FloorRegion view = FloorRegion.FromView(_camera);
+            FloorRegion view = _sceneRenderView?.Coverage ?? FloorRegion.FromView(_camera);
             float margin = 2f / MathF.Max(1f, MathF.Min(_camera.ViewportWidth, _camera.ViewportHeight));
             coverage = view.Expand((view.Max - view.Min) * margin + Vector2.One);
             time = new FloorTimeRange(_playTime, _playTime + .025);

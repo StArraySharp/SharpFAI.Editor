@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="SharpFAI/SharpFAI/SharpFAI.csproj" />
   <Project Path="Thrust/Thrust.csproj" />
+  <Project Path="SharpFAI.ModApi/SharpFAI.ModApi.csproj" />
   <Project Path="SharpFAI.Player/SharpFAI.Player.csproj" />
   <Project Path="SharpFAI.Editor/SharpFAI.Editor.csproj" />
   <Project Path="SharpFAI.Editor.Tests/SharpFAI.Editor.Tests.csproj" />
@@ -8,5 +9,9 @@
   <Project Path="SharpFAI.Player.Tests/SharpFAI.Player.Tests.csproj" />
   <Folder Name="/Build/">
     <Project Path="build/PrepareGameAssets/PrepareGameAssets.csproj" />
+  </Folder>
+  <Folder Name="/Examples/">
+    <Project Path="examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" />
+    <Project Path="examples/SharpFAI.ModExamples.Shared/SharpFAI.ModExamples.Shared.csproj" />
   </Folder>
 </Solution>

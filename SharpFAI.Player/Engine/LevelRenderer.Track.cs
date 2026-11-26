@@ -40,9 +40,17 @@ public sealed unsafe partial class LevelRenderer
         IReadOnlyList<Floor> floors, FloorTrackState[] preview, FloorTrackState[] runtime,
         Span<Vector2> remainders = default)
     {
+        var view = new FloorTrackStateTable(preview);
+        ApplyTrackPlacement(floors, view, ReferenceEquals(preview, runtime) ? view : new FloorTrackStateTable(runtime), remainders);
+    }
+
+    private static void ApplyTrackPlacement(IReadOnlyList<Floor> floors, FloorTrackStateTable preview,
+        FloorTrackStateTable runtime, Span<Vector2> remainders)
+    {
         for (int i = 0; i < floors.Count; i++)
         {
-            Vector2 offset = runtime[i].Transform.Offset;
+            var state = runtime[i];
+            Vector2 offset = state.Transform.Offset;
             Floor floor = floors[i];
             if (remainders.IsEmpty)
             {
@@ -55,9 +63,16 @@ public sealed unsafe partial class LevelRenderer
             }
             if (!ReferenceEquals(preview, runtime))
             {
-                preview[i] = preview[i] with { Transform = RelativeToMesh(preview[i].Transform, offset) };
+                if (offset != Vector2.Zero)
+                {
+                    var editorState = preview[i];
+                    preview[i] = editorState with { Transform = RelativeToMesh(editorState.Transform, offset) };
+                }
+                preview.CompactCompletedPage(i);
             }
-            runtime[i] = runtime[i] with { Transform = RelativeToMesh(runtime[i].Transform, offset) };
+            if (offset != Vector2.Zero)
+                runtime[i] = state with { Transform = RelativeToMesh(state.Transform, offset) };
+            runtime.CompactCompletedPage(i);
         }
     }
 
@@ -65,7 +80,7 @@ public sealed unsafe partial class LevelRenderer
         transform with { Offset = transform.Offset - offset };
 
     private static void ApplyHoldIcons(IReadOnlyList<Floor> floors, ReadOnlySpan<PlanetTrackFloor> track,
-        FloorTrackState[] states)
+        FloorTrackStateTable states)
     {
         for (int i = 0; i + 1 < floors.Count; i++)
         {
@@ -100,7 +115,7 @@ public sealed unsafe partial class LevelRenderer
     }
 
     public bool HiddenFloorJudgment(int floor) =>
-        (uint)floor < (uint)_trackStates.Length && _trackStates[floor].HideJudgment;
+        (uint)floor < (uint)_trackStates.Count && _trackStates[floor].HideJudgment;
 
     internal void SetRuntimeTrackMode(bool active)
     {
@@ -130,7 +145,7 @@ public sealed unsafe partial class LevelRenderer
     {
         RuntimeTrackTimeline? runtime = _runtimeTrackActive ? _trackRuntime : null;
         runtime?.Advance(_playTime);
-        FloorTrackState[] states = runtime?.States ?? _trackStates;
+        var states = runtime?.States ?? _trackStates;
         float? volume = null;
         if (_activeFloorChunks is { } chunks)
         {
@@ -150,7 +165,7 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private void UpdateFloorVisuals(OfficialFloorRenderer renderer, int[]? indices, RuntimeTrackTimeline? runtime,
-        FloorTrackState[] states, ref float? volume)
+        IReadOnlyList<FloorTrackState> states, ref float? volume)
     {
         renderer.SetMaterials(states, runtime?.MaterialRevision ?? 0, _styleOverride, indices);
         int[]? selection = renderer.LevelSelection;
@@ -164,9 +179,9 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private void UpdateFloorVisual(OfficialFloorRenderer renderer, int local, int floor, RuntimeTrackTimeline? runtime,
-        FloorTrackState[] states, ref float? volume, bool anglePreview = false)
+        IReadOnlyList<FloorTrackState> states, ref float? volume, bool anglePreview = false)
     {
-        ref readonly FloorTrackState state = ref states[floor];
+        FloorTrackState state = states[floor];
         FloorRenderTransform transform = state.Transform;
         float opacity = state.Hidden ? 0f : state.Opacity;
         if (runtime is not null)

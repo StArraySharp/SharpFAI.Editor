@@ -884,7 +884,8 @@ internal sealed class ImageDecorationTimeline
     public static ImageDecorationTimeline? Build(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors,
         double[] times, double[]? bpms, string? directory, List<string> warnings, CancellationToken token,
         bool legacyMasks = false, float tileSize = 150f, bool editable = false,
-        IReadOnlyDictionary<string, DecorationImage>? cachedImages = null, int texturePercent = 100)
+        IReadOnlyDictionary<string, DecorationImage>? cachedImages = null, int texturePercent = 100,
+        Func<string, string>? prepareImage = null)
     {
         if (!events.Any(item => item is AddImageDecoration or ConditionalDecorationEvent))
             return null;
@@ -1136,7 +1137,7 @@ internal sealed class ImageDecorationTimeline
                 if (Path.IsPathRooted(relative) || relative == ".." ||
                     relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                     return;
-                timeline.Images[name] = DecorationImage.ReadFile(fullPath, texturePercent);
+                timeline.Images[name] = DecorationImage.ReadFile(prepareImage?.Invoke(fullPath) ?? fullPath, texturePercent);
             }            catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
                 SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
             {

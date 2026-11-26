@@ -1074,4 +1074,12 @@
   <data name="Option_TrackStyle_Neon" xml:space="preserve"><value>霓虹</value></data>
   <data name="Option_TrackStyle_NeonLight" xml:space="preserve"><value>霓虹灯</value></data>
   <data name="Option_TrackStyle_Standard" xml:space="preserve"><value>标准</value></data>
+  <data name="SceneView3D" xml:space="preserve"><value>3D 场景视图</value></data>
+  <data name="SceneView2D" xml:space="preserve"><value>返回 2D 谱面视图</value></data>
+  <data name="ScenePerspective" xml:space="preserve"><value>透视</value></data>
+  <data name="SceneOrthographic" xml:space="preserve"><value>正交</value></data>
+  <data name="SceneProjectionHelp" xml:space="preserve"><value>切换投影。点击坐标轴可切换到对应方向的正交视图。</value></data>
+  <data name="SceneNavigationHelp" xml:space="preserve"><value>左键拖动环绕，单击选中。中键拖动平移，滚轮缩放，F 聚焦选中项。</value></data>
+  <data name="ScenePlaybackNavigationHelp" xml:space="preserve"><value>左键拖动环绕，中键拖动平移并停止跟随，滚轮缩放。手打时用键盘或右键击打。</value></data>
+  <data name="SceneFollowPlanets" xml:space="preserve"><value>跟随星球</value></data>
 </root>

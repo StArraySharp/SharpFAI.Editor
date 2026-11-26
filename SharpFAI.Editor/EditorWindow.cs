@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ImGui4NET;
+using SharpFAI.ModApi;
 using ImGui4NET.Backend.OpenGL3;
 using NativeFileDialog;
 using Newtonsoft.Json.Linq;
@@ -67,6 +68,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
+        InitializeMods();
         _context = ImGui.CreateContext();
         ImGui.SetCurrentContext(_context);
         ImGuiIO* io = ImGui.GetIO();
@@ -110,6 +112,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
+        TickMods();
         ApplyPendingApplicationSettings();
         _autoBackup.Update(_document);
         if (ClientSize.X <= 0 || ClientSize.Y <= 0)
@@ -138,7 +141,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             DrawMenu();
             DrawDockspace();
         }
-        HandleShortcuts();
+        if (_modUi?.HandleShortcuts(ShortcutContextBlocked || _canvasOnly) != true && _modUi?.HasFocus != true)
+            HandleShortcuts();
         _numericDrawn = false;
         UpdatePlayback();
         if (_canvasOnly)
@@ -165,12 +169,14 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             DrawFindComment();
             DrawVideoRender();
             DrawDialogs();
+            DrawCompatibleExport();
             _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
-                TryApplyApplicationSettings);
+                TryApplyApplicationSettings, DrawModSettings);
             if (_playback is { } renderer)
                 _audioCalibration.Draw(renderer, L.IsChinese);
             DrawSaveNotice();
         }
+        _modUi?.DrawWindows(_settingsWindow.IsOpen);
         if (!_numericDrawn)
             FinishNumericEdit();
         ApplyConfiguredPlaybackShortcut();
@@ -231,12 +237,14 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     protected override void OnUnload()
     {
+        CancelCompatibleExport();
         _autoBackup.CompleteWrite(wait: true);
         _displayFrameLimit.Dispose();
         _inputMethod?.Dispose();
         _audioCalibration.Dispose();
         DisposeVideoRender();
         DisposePlayback();
+        _modUi?.Shutdown();
         DisposeRichLevelTextPreviews();
         if (_backendInitialized)
             ImGui_ImplOpenGL3.Shutdown();
@@ -270,6 +278,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderDockWindow(InspectorWindow, right);
         ImGui.DockBuilderDockWindow(PaletteWindow, footer);
         ImGui.DockBuilderFinish(dock);
+        _modUi?.SetDocks(left, right, footer, canvas);
     }
 
     private void DrawMenu()
@@ -283,6 +292,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             DrawOpenLastChartMenuItem();
             if (ImGui.MenuItem(L.T("Save"), "Ctrl+S") != 0) Save();
             if (ImGui.MenuItem(L.T("SaveAs"), "Ctrl+Shift+S") != 0) Save(true);
+            if (ImGui.MenuItem(L.IsChinese ? "导出原版兼容副本…" : "Export vanilla-compatible copy…") != 0)
+                PrepareCompatibleExport();
+            _modUi?.DrawItems(MenuSlot.File);
             ImGui.Separator();
             if (ImGui.MenuItem(L.T("Exit")) != 0) RequestClose();
             ImGui.EndMenu();
@@ -295,6 +307,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (ImGui.MenuItem(L.T("Cut"), "Ctrl+X") != 0) CopySelection(false, false, true);
             if (ImGui.MenuItem(L.T("Paste"), "Ctrl+V") != 0) PasteSelection(false, true);
             if (ImGui.MenuItem(L.T("DeleteSelection"), "Delete") != 0) DeleteSelection(backwards: false);
+            _modUi?.DrawItems(MenuSlot.Edit);
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu(L.T("MenuView")) != 0)
@@ -303,6 +316,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
                 _windowMode.RequestToggle();
             if (ImGui.MenuItem(L.T("CanvasOnly"), "Alt+H") != 0)
                 _canvasOnlyToggleRequested = true;
+            if (SceneViewAvailable && ImGui.MenuItem(L.T("SceneView3D"), null, (byte)(_showSceneView ? 1 : 0)) != 0)
+                SetSceneView(!_showSceneView);
             if (ImGui.MenuItem(L.T("AudioCalibration"), null, 0, (byte)(_videoExport?.Request is null ? 1 : 0)) != 0)
                 OpenAudioCalibration();
             ImGui.Separator();
@@ -312,6 +327,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ToggleMenu(L.T("Palette"), ref _showPalette);
             ToggleMenu(L.T("Timeline"), ref _showTimeline);
             ToggleMenu(L.T("FloorNumbers"), ref _showBrickNumbers, "Ctrl+F");
+            _modUi?.DrawItems(MenuSlot.View);
+            _modUi?.DrawWindowMenu();
             ImGui.Separator();
             if (ImGui.MenuItem(L.T("ResetLayout")) != 0)
             {
@@ -335,22 +352,28 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             if (ImGui.MenuItem(L.T("NoFail"), "Alt+N", (byte)(_noFail ? 1 : 0)) != 0) SetNoFail(!_noFail);
             if (ImGui.MenuItem(L.T("FindCommentCommand"), "Alt+F") != 0) _openFindComment = true;
             if (ImGui.MenuItem(L.T("ReturnToEdit"), "Esc") != 0) ReturnToEdit();
+            _modUi?.DrawItems(MenuSlot.Chart);
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu(L.T("MenuRender")) != 0)
         {
             if (ImGui.MenuItem(L.T("VideoRenderTitle") + "…") != 0) _videoRenderWindow.Open();
+            _modUi?.DrawItems(MenuSlot.Render);
+            _modUi?.DrawExportItems();
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu(L.T("MenuTools")) != 0)
         {
             if (ImGui.MenuItem(L.T("Decorations")) != 0) _showDecorations = _focusDecorations = true;
             if (ImGui.MenuItem(L.T("ParticleEditor"), null, 0, (byte)(IsSelectedParticle ? 1 : 0)) != 0) OpenParticle();
+            _modUi?.DrawItems(MenuSlot.Tools);
             ImGui.EndMenu();
         }
+        _modUi?.DrawMenuBar();
         if (ImGui.BeginMenu(L.T("MenuHelp")) != 0)
         {
             ToggleMenu(L.T("Shortcuts"), ref _showShortcuts, "Alt+Shift+H");
+            _modUi?.DrawItems(MenuSlot.Help);
             ImGui.EndMenu();
         }
         DrawApplicationSettingsMenuItem();
@@ -408,6 +431,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         SwitchPlaybackView(PlaybackView.Edit);
         _playbackFrameAvailable = false;
         _document = document;
+        _sceneFocus = _showSceneView;
+        _sceneShapes.Clear();
         RememberOpenedChart();
         _decorationRowsKey = null;
         _decorationMarkersVersion = -1;

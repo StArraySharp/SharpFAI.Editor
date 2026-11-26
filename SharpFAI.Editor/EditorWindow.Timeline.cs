@@ -97,6 +97,7 @@ internal sealed unsafe partial class EditorWindow
         if (_chartTimeline.DrawChart("chart", duration, clock, meters, timing.EntryTimes, selectedFloor, canSeek,
                 renderer.IsPlaying, _lastTimelinePosition, out int floor))
             SeekTimeline(renderer, _chartTimeline.Playhead, editing, floor);
+        _modUi?.DrawContext(SharpFAI.ModApi.MenuSlot.TimelineContext, "###mod-timeline-context");
         _lastTimelinePosition = _chartTimeline.Playhead;
     }
 

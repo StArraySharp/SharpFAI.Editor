@@ -10,5 +10,16 @@
     <PackageReference Include="NUnit" Version="4.5.1" />
     <PackageReference Include="NUnit3TestAdapter" Version="6.1.0" />
     <ProjectReference Include="..\SharpFAI.Editor\SharpFAI.Editor.csproj" />
+    <ProjectReference Include="../examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <Target Name="CopyTestModPackages" AfterTargets="Build">
+    <MSBuild Projects="../examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="ExampleModAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <TestModPackage Include="@(ExampleModAssembly->'%(RootDir)%(Directory)Example.Base.sharpfaimod')" />
+      <TestModPackage Include="@(ExampleModAssembly->'%(RootDir)%(Directory)Example.Tools.sharpfaimod')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TestModPackage)" DestinationFolder="$(TargetDir)ModFixtures" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

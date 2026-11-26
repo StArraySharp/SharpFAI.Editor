@@ -114,7 +114,7 @@ internal static class TrackPreview
 }
 
 internal readonly record struct TrackPreviewContext(
-    IReadOnlyList<Floor> Floors, FloorTrackState[] Resolved, int Current, float TileSpacing, double Bpm,
+    IReadOnlyList<Floor> Floors, IReadOnlyList<FloorTrackState> Resolved, int Current, float TileSpacing, double Bpm,
     Vector2 ContinuingOffset = default)
 {
     public Vector2 Position(int floor, bool includeOffset = true)

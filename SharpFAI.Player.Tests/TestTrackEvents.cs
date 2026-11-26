@@ -11,6 +11,30 @@ namespace SharpFAI.Player.Tests;
 public class TestTrackEvents
 {
     [Test]
+    public void LargeTrackStatePagesKeepAnIsolatedChangeAcrossPageBoundaries()
+    {
+        var table = new FloorTrackStateTable(250_001);
+        FloorTrackState original = default;
+        for (int i = 0; i < table.Count; i++)
+            table.Initialize(i, original);
+
+        var faded = original with { Opacity = .25f };
+        table[127] = faded;
+        table[128] = faded;
+        table[table.Count - 1] = faded;
+        Assert.That(table[126], Is.EqualTo(original));
+        Assert.That(table[127], Is.EqualTo(faded));
+        Assert.That(table[128], Is.EqualTo(faded));
+        Assert.That(table[129], Is.EqualTo(original));
+        Assert.That(table[table.Count - 2], Is.EqualTo(original));
+        Assert.That(table[table.Count - 1], Is.EqualTo(faded));
+        table[127] = original;
+        table.CompactCompletedPage(127);
+        Assert.That(table[127], Is.EqualTo(original));
+        Assert.That(table[128], Is.EqualTo(faded));
+    }
+
+    [Test]
     public void PlaybackKeepsCoreTwirlSemanticsWithoutBindingEditorTwirlObjects()
     {
         Level chart = Chart(

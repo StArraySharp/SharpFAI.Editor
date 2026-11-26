@@ -27,7 +27,7 @@ public sealed unsafe partial class LevelRenderer
 
     internal void SetEditorInsertedTrack(int version, int anchor, IReadOnlyList<EditorInsertedFloor> inserted, bool tilesOnly)
     {
-        if (inserted.Count == 0 || (uint)anchor >= (uint)_trackStates.Length)
+        if (inserted.Count == 0 || (uint)anchor >= (uint)_trackStates.Count)
         {
             ClearEditorInsertedTrack();
             return;

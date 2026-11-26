@@ -40,8 +40,9 @@ public sealed unsafe class ApplicationSettingsWindow
         (ImGuiCol_NavCursor, Accent),
     ];
 
-    private enum Page { Display, Graphics, Effects, Audio, Interface, Editing }
-    private static readonly Page[] Pages = Enum.GetValues<Page>();
+    private enum Page { Display, Graphics, Effects, Audio, Interface, Mods, Editing }
+    private static readonly Page[] EditorPages = Enum.GetValues<Page>();
+    private static readonly Page[] PlayerPages = [Page.Display, Page.Graphics, Page.Effects, Page.Audio, Page.Interface];
 
     private ApplicationSettings _original = ApplicationSettings.PlayerDefaults;
     private ApplicationSettings _draft = ApplicationSettings.PlayerDefaults;
@@ -79,7 +80,8 @@ public sealed unsafe class ApplicationSettingsWindow
         _opening = true;
     }
 
-    public void Draw(bool chinese, bool editor, ApplicationSettings defaults, Func<ApplicationSettings, bool> tryApply)
+    public void Draw(bool chinese, bool editor, ApplicationSettings defaults, Func<ApplicationSettings, bool> tryApply,
+        Action? drawMods = null)
     {
         if (!IsOpen)
             return;
@@ -111,21 +113,21 @@ public sealed unsafe class ApplicationSettingsWindow
             if (statusAbove)
                 footerHeight += ImGui.GetTextLineHeightWithSpacing();
             float bodyHeight = Math.Max(1f, ImGui.GetContentRegionAvail().y - footerHeight);
-            int pageCount = editor ? Pages.Length : Pages.Length - 1;
+            Page[] pages = editor ? EditorPages : PlayerPages;
             if (available < 610f)
             {
                 int columns = available >= 340f ? 3 : 2;
-                int rows = (pageCount + columns - 1) / columns;
+                int rows = (pages.Length + columns - 1) / columns;
                 float gap = ImGui.GetStyle()->ItemSpacing.y;
                 float tabs = rows * ImGui.GetFrameHeight() + (rows - 1) * gap + 2f * ImGui.GetStyle()->WindowPadding.y;
-                DrawNavigation(available, tabs, pageCount, columns);
-                DrawPage(Math.Max(1f, bodyHeight - tabs - gap), editor);
+                DrawNavigation(available, tabs, pages, columns);
+                DrawPage(Math.Max(1f, bodyHeight - tabs - gap), editor, drawMods);
             }
             else
             {
-                DrawNavigation(166f, bodyHeight, pageCount, 1);
+                DrawNavigation(166f, bodyHeight, pages, 1);
                 ImGui.SameLine();
-                DrawPage(bodyHeight, editor);
+                DrawPage(bodyHeight, editor, drawMods);
             }
             DrawFooter(defaults, tryApply, childHadKeyboard, statusAbove, close);
             ImGui.EndPopup();
@@ -160,7 +162,7 @@ public sealed unsafe class ApplicationSettingsWindow
         return close;
     }
 
-    private void DrawNavigation(float width, float height, int count, int columns)
+    private void DrawNavigation(float width, float height, Page[] pages, int columns)
     {
         if (ImGui.BeginChild("##settings-categories", Vec(width, height),
                 (int)(ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding),
@@ -168,11 +170,11 @@ public sealed unsafe class ApplicationSettingsWindow
         {
             float gap = ImGui.GetStyle()->ItemSpacing.x;
             float buttonWidth = Math.Max(1f, (ImGui.GetContentRegionAvail().x - (columns - 1) * gap) / columns);
-            for (int index = 0; index < count; index++)
+            for (int index = 0; index < pages.Length; index++)
             {
                 if (index % columns != 0)
                     ImGui.SameLine();
-                Category(Pages[index], buttonWidth);
+                Category(pages[index], buttonWidth);
             }
         }
         ImGui.EndChild();
@@ -197,11 +199,12 @@ public sealed unsafe class ApplicationSettingsWindow
         Page.Effects => Tr("特效过滤", "Effects"),
         Page.Audio => Tr("音频", "Audio"),
         Page.Interface => Tr("界面", "Interface"),
+        Page.Mods => Tr("Mod 管理", "Mods"),
         Page.Editing => Tr("轨道编辑", "Track editing"),
         _ => throw new ArgumentOutOfRangeException(nameof(page)),
     };
 
-    private void DrawPage(float height, bool editor)
+    private void DrawPage(float height, bool editor, Action? drawMods)
     {
         if (ImGui.BeginChild($"##settings-content-{(int)_page}", Vec(0, height),
                 (int)(ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding)) != 0)
@@ -286,6 +289,9 @@ public sealed unsafe class ApplicationSettingsWindow
                     break;
                 case Page.Editing:
                     DrawTrackEditingOptions();
+                    break;
+                case Page.Mods:
+                    drawMods?.Invoke();
                     break;
             }
         }

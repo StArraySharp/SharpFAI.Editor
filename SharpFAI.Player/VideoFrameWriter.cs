@@ -65,11 +65,12 @@ internal sealed class VideoFrameWriter : IDisposable
 
     public void Enqueue(byte[] pixels) => _frames.Add(pixels);
 
-    public void Finish()
+    public void Finish(Action<string, string, CancellationToken>? postprocess = null, CancellationToken token = default)
     {
         _frames.CompleteAdding();
         _worker.Join();
-        _encoder?.Finish(publish: _error is null);
+        _encoder?.Finish(publish: _error is null, postprocess, token);
+        token.ThrowIfCancellationRequested();
         if (_error is { } error)
             throw new InvalidOperationException(error.Message, error);
         if (_framesDirectory is { } destination && _stagingDirectory is { } staging)

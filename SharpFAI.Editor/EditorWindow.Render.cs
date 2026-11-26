@@ -1,4 +1,5 @@
 using OpenTK.Graphics.OpenGL4;
+using SharpFAI.ModApi;
 using SharpFAI.Player;
 using SharpFAI.Player.Engine;
 using Thrust.Graphics;
@@ -28,7 +29,8 @@ internal sealed unsafe partial class EditorWindow
             FinishNumericEdit();
             var snapshot = _document.SnapshotForPlayback();
             var request = settings.CreateRequest(sourcePath, snapshot);
-            LevelRenderer renderer = _videoRenderSource ??= new LevelRenderer { EnableAudioOutput = false };
+            LevelRenderer renderer = _videoRenderSource ??= new LevelRenderer
+                { EnableAudioOutput = false, Mods = _modUi?.Host, ModTarget = UiHost.Export };
             renderer.SkipAudio = _applicationSettings.SkipAudio;
             renderer.ApplyVisualSettings(_applicationSettings);
             _videoExport ??= new VideoExportSession(renderer);

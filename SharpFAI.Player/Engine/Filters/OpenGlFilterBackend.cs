@@ -166,6 +166,27 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         void main() { color = texture(_MainTex, vs_TEXCOORD0); }
         """;
 
+    private const string ModColorFragment = """
+        #version 410 core
+        in vec2 vs_TEXCOORD0;
+        out vec4 color;
+        uniform sampler2D _MainTex;
+        uniform vec4 _Multiply;
+        uniform vec4 _Add;
+        void main() { color = texture(_MainTex, vs_TEXCOORD0) * _Multiply + _Add; }
+        """;
+    private Program? _modColor;
+    private readonly Dictionary<string, Program> _modShaders = new(StringComparer.Ordinal);
+    private sealed record ModShaderInputs(Vector4 Parameters, float Time, IReadOnlyList<IFilterTarget> Textures,
+        int DepthTexture, Target? History);
+    private sealed class ModHistory
+    {
+        public double Time = double.NaN;
+        public Target? Previous;
+        public Target? Current;
+    }
+    private readonly Dictionary<string, ModHistory> _modHistory = new(StringComparer.Ordinal);
+
     private const string FullscreenVertex = """
         #version 410 core
         out vec2 vs_TEXCOORD0;
@@ -428,13 +449,15 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
     public void Blit(IFilterTarget source, IFilterTarget destination, IFilterMaterial? material = null, int pass = -1) =>
         Blit((Target)source, (Target)destination, (Material?)material, pass);
 
-    private void Blit(Target input, Target output, Material? parameters, int pass)
+    private void Blit(Target input, Target output, Material? parameters, int pass,
+        (Vector4 Multiply, Vector4 Add)? modColor = null, Program? custom = null, ModShaderInputs? modInputs = null)
     {
         if (input.Framebuffer == output.Framebuffer)
             throw new InvalidOperationException("Filter source and destination must be distinct.");
 
-        Program program = parameters is null ? _copy ??= Link(CopyFragment) :
-            GetProgram(parameters.Shader.Name, Math.Max(0, pass));
+        Program program = custom ?? (modColor is not null ? _modColor ??= Link(ModColorFragment)
+            : parameters is null ? _copy ??= Link(CopyFragment) :
+            GetProgram(parameters.Shader.Name, Math.Max(0, pass)));
         Bind(output);
         GL.Disable(EnableCap.Blend);
         GL.Disable(EnableCap.DepthTest);
@@ -452,6 +475,22 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         SetVector(program, "_ScreenParams", new Vector4(output.Width, output.Height, 1f + 1f / output.Width, 1f + 1f / output.Height));
         float seconds = (float)_time;
         SetVector(program, "_Time", new Vector4(seconds / 20f, seconds, seconds * 2, seconds * 3));
+        if (modColor is { } color)
+        {
+            SetVector(program, "_Multiply", color.Multiply);
+            SetVector(program, "_Add", color.Add);
+        }
+        if (modInputs is { } inputs)
+        {
+            SetVector(program, "_ModParameters", inputs.Parameters);
+            program.SetFloat("_ModTime", inputs.Time);
+            for (int index = 0; index < inputs.Textures.Count; index++)
+                BindTexture(program, $"_ModInput{index}", ((Target)inputs.Textures[index]).Handle, index + 1);
+            program.SetInt("_ModDepthAvailable", inputs.DepthTexture == 0 ? 0 : 1);
+            program.SetInt("_ModHistoryValid", inputs.History is null ? 0 : 1);
+            BindTexture(program, "_ModDepth", inputs.DepthTexture != 0 ? inputs.DepthTexture : input.Handle, 5);
+            BindTexture(program, "_ModHistory", inputs.History?.Handle ?? input.Handle, 6);
+        }
         if (parameters is not null)
         {
             foreach (var (name, value) in parameters.Floats)
@@ -486,6 +525,142 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
         else
             GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+    }
+
+    internal void ApplyModColor(Vector4 multiply, Vector4 add)
+        => ApplyModPass((multiply, add), null, null, auxiliary: false, history: null);
+
+    internal IFilterTarget? ApplyModShader(string id, string source, Vector4 parameters, double time,
+        IReadOnlyList<IFilterTarget> inputs, bool auxiliary, int depthTexture, bool useHistory)
+    {
+        if (!_modShaders.TryGetValue(source, out Program? program))
+        {
+            string header = """
+                #version 410 core
+                in vec2 vs_TEXCOORD0;
+                out vec4 color;
+                uniform sampler2D _MainTex;
+                uniform sampler2D _ModInput0, _ModInput1, _ModInput2, _ModInput3;
+                uniform sampler2D _ModDepth, _ModHistory;
+                uniform int _ModDepthAvailable, _ModHistoryValid;
+                uniform vec4 _ModParameters, _ScreenParams, _MainTex_TexelSize;
+                uniform float _ModTime;
+                vec4 readColor(vec2 uv) { return texture(_MainTex, uv); }
+                float readDepth(vec2 uv) { return _ModDepthAvailable != 0 ? texture(_ModDepth, uv).r : 1.0; }
+                vec4 readHistory(vec2 uv) { return _ModHistoryValid != 0 ? texture(_ModHistory, uv) : readColor(uv); }
+                """;
+            program = Link(header + "\n" + source + "\nvoid main() { color = modEffect(vs_TEXCOORD0, readColor(vs_TEXCOORD0)); }");
+            _modShaders.Add(source, program);
+        }
+        ModHistory? history = null;
+        if (useHistory)
+        {
+            if (!_modHistory.TryGetValue(id, out history)) _modHistory.Add(id, history = new());
+            if (time != history.Time)
+            {
+                if (history.Previous is { } previous) ReleaseTarget(previous);
+                history.Previous = history.Current;
+                history.Current = null;
+                history.Time = time;
+            }
+        }
+
+        using var binding = new ModAuxiliaryBindings();
+        return ApplyModPass(null, program, new(parameters, (float)time, inputs, depthTexture, history?.Previous),
+            auxiliary, history);
+    }
+
+    private IFilterTarget? ApplyModPass((Vector4 Multiply, Vector4 Add)? color,
+        Program? program, ModShaderInputs? inputs, bool auxiliary, ModHistory? history)
+    {
+        using var state = new SavedState();
+        if (state.Width <= 0 || state.Height <= 0) return null;
+        TrimPool(state.Width, state.Height);
+        var source = (Target)RentTarget(state.Width, state.Height, 0);
+        Target? temporary = null;
+        int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
+        try
+        {
+            Bind(source);
+            GL.Disable(EnableCap.ScissorTest);
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, state.Framebuffer);
+            GL.BlitFramebuffer(state.X, state.Y, state.X + state.Width, state.Y + state.Height,
+                0, 0, source.Width, source.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+            if (auxiliary)
+                temporary = (Target)RentTarget(state.Width, state.Height, 0);
+            Target destination = temporary ?? new(state.Framebuffer, 0, state.Width, state.Height, X: state.X, Y: state.Y);
+            Blit(source, destination, null, -1, color, program, inputs);
+            if (history is not null)
+            {
+                var saved = history.Current ??= (Target)RentTarget(state.Width, state.Height, 0);
+                Bind(saved);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, destination.Framebuffer);
+                GL.BlitFramebuffer(destination.X, destination.Y, destination.X + destination.Width, destination.Y + destination.Height,
+                    0, 0, saved.Width, saved.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+            }
+            return temporary;
+        }
+        catch { if (temporary is not null) ReleaseTarget(temporary); throw; }
+        finally
+        {
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+            ReleaseTarget(source);
+        }
+    }
+
+    internal void ClearModShaders()
+    {
+        ResetModHistory();
+        foreach (Program program in _modShaders.Values) GL.DeleteProgram(program.Handle);
+        _modShaders.Clear();
+    }
+
+    internal void ResetModHistory()
+    {
+        foreach (var history in _modHistory.Values)
+        {
+            if (history.Previous is { } previous) ReleaseTarget(previous);
+            if (history.Current is { } current) ReleaseTarget(current);
+        }
+        _modHistory.Clear();
+    }
+
+    internal void DropModHistory(string id)
+    {
+        if (!_modHistory.Remove(id, out var history)) return;
+        if (history.Previous is { } previous) ReleaseTarget(previous);
+        if (history.Current is { } current) ReleaseTarget(current);
+    }
+
+    private unsafe struct ModAuxiliaryBindings : IDisposable
+    {
+        private readonly int _active;
+        private fixed int _textures[4];
+        private fixed int _samplers[4];
+        public ModAuxiliaryBindings()
+        {
+            this = default;
+            _active = GL.GetInteger(GetPName.ActiveTexture);
+            for (int i = 0; i < 4; i++)
+            {
+                GL.ActiveTexture(TextureUnit.Texture3 + i);
+                _textures[i] = GL.GetInteger(GetPName.TextureBinding2D);
+                _samplers[i] = GL.GetInteger(GetPName.SamplerBinding);
+                GL.BindSampler(3 + i, 0);
+            }
+            GL.ActiveTexture((TextureUnit)_active);
+        }
+
+        public void Dispose()
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                GL.ActiveTexture(TextureUnit.Texture3 + i);
+                GL.BindTexture(TextureTarget.Texture2D, _textures[i]);
+                GL.BindSampler(3 + i, _samplers[i]);
+            }
+            GL.ActiveTexture((TextureUnit)_active);
+        }
     }
 
     private static void SetTargetSampling(FilterSampling sampling)
@@ -885,6 +1060,7 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
 
     public void Dispose()
     {
+        ResetModHistory();
         ResetCameraHistory();
         ReleaseSince(0);
         foreach (var pool in _pool.Values)
@@ -902,6 +1078,9 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
             }
         if (_copy is not null)
             GL.DeleteProgram(_copy.Handle);
+        if (_modColor is not null)
+            GL.DeleteProgram(_modColor.Handle);
+        ClearModShaders();
         GL.DeleteVertexArray(_vao);
         if (_unityQuad != 0)
             GL.DeleteBuffer(_unityQuad);

@@ -193,8 +193,20 @@ public sealed unsafe partial class LevelRenderer
 
     internal void RenderAfterClear(Vector4 background) => Render(background);
 
+    private SceneRenderView? _sceneRenderView;
+    private bool _lastFrameRenderedScene;
+    internal Vector2 ScenePlaybackTarget => _planetCenter;
+
+    internal void RenderEditorScene(Vector4 background, SceneRenderView view)
+    {
+        _sceneRenderView = view;
+        try { Render(background); }
+        finally { _sceneRenderView = null; }
+    }
+
     private void Render(Vector4? clearedBackground)
     {
+        _lastFrameRenderedScene = _sceneRenderView is not null;
         UpdateFilterClock();
         if (_preparingLevelEffects)
         {
@@ -221,6 +233,7 @@ public sealed unsafe partial class LevelRenderer
 
         try
         {
+            BeginModFrame();
             SceneColorHistory? history = null;
             if (_visualSettings.ScreenEffects && _backdrop?.UsesHistory == true)
                 history = _colorHistory ??= new SceneColorHistory();
@@ -237,7 +250,7 @@ public sealed unsafe partial class LevelRenderer
             _chunkDrawCalls = 0;
             // Observe OFF frames too, so a seek or resize cannot revive stale filter output.
             _filterBackend?.ObserveCameraFrame(_playTime);
-            bool mainCamera = !_cameraRenderDisabled || _cameraFree;
+            bool mainCamera = _sceneRenderView is not null || !_cameraRenderDisabled || _cameraFree;
             bool filtersDue = _visualSettings.CameraFilters && mainCamera && _filterTimeline?.HasDueEvent(_playTime) == true;
             bool backgroundDue = _visualSettings.CameraFilters && _backgroundFilterTimeline?.HasDueEvent(_playTime) == true;
             bool screenActive = _visualSettings.ScreenEffects && mainCamera && _sceneEffects?.HasScreenEffect(_playTime) == true;
@@ -272,6 +285,7 @@ public sealed unsafe partial class LevelRenderer
                 clearSource = new System.Numerics.Vector4(0f, 0f, 0f, 1f);
 
             if (_backgroundPasses.Count == 0 && _scenePasses.Count > 0 && clearSource is not null &&
+                !HasModBackgroundPass() &&
                 BackgroundPlaneIsEmpty())
             {
                 // Render directly into the filter source when the viewport has
@@ -281,6 +295,7 @@ public sealed unsafe partial class LevelRenderer
             }
             else
             {
+                ApplyModStage(SharpFAI.ModApi.RenderStage.PrepareFrame);
                 // Draw the background image or tutorial layers before compositing the main camera.
                 if (_backgroundPasses.Count > 0)
                     _filterBackend!.Draw(_playTime, _filterClock, _filterDelta, _backgroundPasses,
@@ -288,6 +303,7 @@ public sealed unsafe partial class LevelRenderer
                 else
                     DrawBackgroundPlane();
 
+                ApplyModStage(SharpFAI.ModApi.RenderStage.BackgroundAfterNative);
                 if (mainCamera)
                 {
                     if (_scenePasses.Count > 0)
@@ -297,9 +313,11 @@ public sealed unsafe partial class LevelRenderer
                 }
             }
             history?.Capture(_playTime);
+            ApplyModStage(SharpFAI.ModApi.RenderStage.SceneAfterNative);
         }
         finally
         {
+            ReleaseModFrame();
             if (shake)
             {
                 _camera.Position = neutralPosition;
@@ -338,6 +356,7 @@ public sealed unsafe partial class LevelRenderer
 
     internal void RenderEditorTiles()
     {
+        _lastFrameRenderedScene = false;
         _colorHistory?.Reset();
         _lastFilterTime = double.NaN;
         DrawCalls = 0;
@@ -359,7 +378,10 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
-        Matrix4 viewProjection = _camera.ViewProjection;
+        var scene = _sceneRenderView;
+        Matrix4 viewProjection = scene?.WorldProjection ?? _camera.ViewProjection;
+        Matrix4 floorProjection = scene?.RelativeProjection ?? viewProjection;
+        Vector2 floorOrigin = scene?.Origin ?? _camera.Position;
         DrawPositionTrackGuides(viewProjection);
 
         // The floors use premultiplied alpha (Blend One, OneMinusSrcAlpha), so the
@@ -371,7 +393,8 @@ public sealed unsafe partial class LevelRenderer
         {
             UpdateTrackVisuals();
         }
-        _officialRenderer?.PrepareLevelDraw(viewProjection, _camera.Position, (int)_camera.ViewportWidth, (int)_camera.ViewportHeight);
+        _officialRenderer?.PrepareLevelDraw(floorProjection, floorOrigin, (int)_camera.ViewportWidth,
+            (int)_camera.ViewportHeight, scene is not null);
 
         int nextSynced = 0;
         var inserted = _editorInsertedTrack is { HasGeometry: true } ? _editorInsertedTrack : null;
@@ -472,8 +495,8 @@ public sealed unsafe partial class LevelRenderer
         {
             if (syncedSprites is not null)
                 GL.Enable(EnableCap.Blend);
-            renderer.Draw(viewProjection, _camera.Position, (int)_camera.ViewportWidth, (int)_camera.ViewportHeight,
-                ForceFloorIconOutlines, from, end);
+            renderer.Draw(floorProjection, floorOrigin, (int)_camera.ViewportWidth, (int)_camera.ViewportHeight,
+                ForceFloorIconOutlines, from, end, scene is not null);
             DrawCalls += renderer.DrawCalls;
             DrawnTriangles += renderer.DrawnTriangles;
             return renderer.DrawCalls;
@@ -526,7 +549,7 @@ public sealed unsafe partial class LevelRenderer
                 sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
                     AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
                     CollectDecorationQuads, DecorationFloorOpacity, _visualSettings.VisibleDecorations,
-                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive);
+                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive, _sceneRenderView);
                 DrawDecorations(background: true);
                 return sprites.SyncedCount > 0 ? sprites : null;
             }
@@ -573,7 +596,7 @@ public sealed unsafe partial class LevelRenderer
     public bool CollectDecorationQuads { get; set; }
 
     private bool CanReadDecorationQuads => CollectDecorationQuads && ShowDecorations && !_decorationShaderFailed &&
-        !_preparingLevelEffects && (!_cameraRenderDisabled || _cameraFree);
+        !_preparingLevelEffects && (_lastFrameRenderedScene || !_cameraRenderDisabled || _cameraFree);
 
     internal IEnumerable<int> VisibleDecorationIndices => CanReadDecorationQuads && _decorationRenderer is { } renderer
         ? renderer.VisibleEditorDecorations : [];
@@ -583,17 +606,17 @@ public sealed unsafe partial class LevelRenderer
         if (pixels.Length < 4 || !CanReadDecorationQuads ||
             _decorationRenderer is not { } renderer || !renderer.TryGetEditorQuad(index, out Matrix4 clip))
             return false;
-        Project(-0.5f, -0.5f, out pixels[0]);
-        Project(0.5f, -0.5f, out pixels[1]);
-        Project(0.5f, 0.5f, out pixels[2]);
-        Project(-0.5f, 0.5f, out pixels[3]);
-        return true;
+        return Project(-0.5f, -0.5f, out pixels[0]) && Project(0.5f, -0.5f, out pixels[1]) &&
+            Project(0.5f, 0.5f, out pixels[2]) && Project(-0.5f, 0.5f, out pixels[3]);
 
-        void Project(float x, float y, out Vector2 point)
+        bool Project(float x, float y, out Vector2 point)
         {
             float clipX = x * clip.Row0.X + y * clip.Row1.X + clip.Row3.X;
             float clipY = x * clip.Row0.Y + y * clip.Row1.Y + clip.Row3.Y;
-            point = new((1 + clipX) * _camera.ViewportWidth * 0.5f, (1 - clipY) * _camera.ViewportHeight * 0.5f);
+            float w = x * clip.Row0.W + y * clip.Row1.W + clip.Row3.W;
+            point = w > 0 ? new((1 + clipX / w) * _camera.ViewportWidth * 0.5f,
+                (1 - clipY / w) * _camera.ViewportHeight * 0.5f) : default;
+            return w > 0;
         }
     }
 
@@ -711,7 +734,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         ReadOnlySpan<PlanetTrail.Sample> samples = showTrail && _trail.ActiveLifetime > 0
-            ? _trail.Build(_playTime, FloorRegion.FromView(_camera).Expand(Vector2.One)) : [];
+            ? _trail.Build(_playTime, (_sceneRenderView?.Coverage ?? FloorRegion.FromView(_camera)).Expand(Vector2.One)) : [];
 
         if (!samples.IsEmpty)
         {
@@ -730,7 +753,7 @@ public sealed unsafe partial class LevelRenderer
                 };
             }
 
-            sprites.DrawParticleInstances(viewProjection, _trailParticles.AsSpan(0, samples.Length));
+            sprites.DrawParticleInstances(viewProjection, _trailParticles.AsSpan(0, samples.Length), _sceneRenderView);
             DrawCalls += 1;
         }
 
@@ -768,7 +791,7 @@ public sealed unsafe partial class LevelRenderer
             planets[2].Tint = PlanetBodyTint(track.Third);
         }
 
-        sprites.DrawPlanets(viewProjection, planets);
+        sprites.DrawPlanets(viewProjection, planets, _sceneRenderView);
         DrawCalls += 1;
     }
 

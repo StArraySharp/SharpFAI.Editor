@@ -56,7 +56,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     private int _decorationColor;
     private int _decorationParams;
     private int _decorationMaskMode;
-    private FloorTrackState[]? _materialStates;
+    private IReadOnlyList<FloorTrackState>? _materialStates;
     private int _materialRevision;
     private readonly List<(int Start, int End)> _visibleIndexRanges = [];
     private int[] _drawCounts = [];
@@ -79,6 +79,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     public void SetLevelSelection(int[] floors) => LevelSelection = floors;
 
     public void PrepareLevelDraw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight)
+        => PrepareLevelDraw(viewProjection, cameraOrigin, viewportWidth, viewportHeight, scene: false);
+
+    internal void PrepareLevelDraw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight, bool scene)
     {
         if (LevelSelection is not { } selected)
             return;
@@ -99,16 +102,24 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
             float radius = geometry.GetVariants(floor)[(int)data.VariantOffset.X].Radius *
                 MathF.Max(MathF.Abs(data.Scale.X), MathF.Abs(data.Scale.Y));
             Vector2 relative = (data.CenterRotation.Xy - cameraOrigin) + new Vector2(data.VariantOffset.Y, data.VariantOffset.Z);
-            Vector2 center = new(Vector2.Dot(relative, xAxis), Vector2.Dot(relative, yAxis));
-            // Allow for CPU/GPU floating-point differences near a rounding boundary.
-            Vector2 absRelative = Vector2.Abs(relative);
-            Vector2 margin = new(
-                .01f + 1e-6f * Vector2.Dot(absRelative, absXAxis),
-                .01f + 1e-6f * Vector2.Dot(absRelative, absYAxis));
-            Vector2 extent = pixelsPerUnit * radius + margin;
-            if (OutsideOrCollapses(center.X, extent.X, halfViewport.X) ||
-                OutsideOrCollapses(center.Y, extent.Y, halfViewport.Y))
-                continue;
+            if (scene)
+            {
+                Matrix4 clip = Matrix4.CreateTranslation(relative.X, relative.Y, 0) * viewProjection;
+                if (SceneRenderView.OutsideClip(clip, new Vector3(radius + 1))) continue;
+            }
+            else
+            {
+                Vector2 center = new(Vector2.Dot(relative, xAxis), Vector2.Dot(relative, yAxis));
+                // Allow for CPU/GPU floating-point differences near a rounding boundary.
+                Vector2 absRelative = Vector2.Abs(relative);
+                Vector2 margin = new(
+                    .01f + 1e-6f * Vector2.Dot(absRelative, absXAxis),
+                    .01f + 1e-6f * Vector2.Dot(absRelative, absYAxis));
+                Vector2 extent = pixelsPerUnit * radius + margin;
+                if (OutsideOrCollapses(center.X, extent.X, halfViewport.X) ||
+                    OutsideOrCollapses(center.Y, extent.Y, halfViewport.Y))
+                    continue;
+            }
 
             int start = geometry.IndexStarts[floor];
             int end = floor == 0 ? geometry.IndexCount : geometry.IndexStarts[floor - 1];
@@ -269,6 +280,9 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     }
 
     public void SetMaterials(FloorTrackState[] states, int revision, TrackStyleInfo? styleOverride, int[]? floorIndices)
+        => SetMaterials((IReadOnlyList<FloorTrackState>)states, revision, styleOverride, floorIndices);
+
+    internal void SetMaterials(IReadOnlyList<FloorTrackState> states, int revision, TrackStyleInfo? styleOverride, int[]? floorIndices)
     {
         if (ReferenceEquals(states, _materialStates) && revision == _materialRevision)
         {
@@ -388,13 +402,17 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
 
     public void Draw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight,
         bool forceIconOutline, int fromIndex = 0, int endIndex = int.MaxValue)
-        => DrawCore(viewProjection, cameraOrigin, viewportWidth, viewportHeight, forceIconOutline, fromIndex, endIndex, null);
+        => Draw(viewProjection, cameraOrigin, viewportWidth, viewportHeight, forceIconOutline, fromIndex, endIndex, scene: false);
+
+    internal void Draw(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight,
+        bool forceIconOutline, int fromIndex, int endIndex, bool scene)
+        => DrawCore(viewProjection, cameraOrigin, viewportWidth, viewportHeight, forceIconOutline, fromIndex, endIndex, null, scene);
 
     public void DrawDecoration(in Matrix4 clip, int width, int height, bool iconOutline, FloorDecorationDraw appearance)
-        => DrawCore(clip, Vector2.Zero, width, height, iconOutline, 0, int.MaxValue, appearance);
+        => DrawCore(clip, Vector2.Zero, width, height, iconOutline, 0, int.MaxValue, appearance, scene: false);
 
     private void DrawCore(in Matrix4 viewProjection, Vector2 cameraOrigin, int viewportWidth, int viewportHeight,
-        bool forceIconOutline, int fromIndex, int endIndex, FloorDecorationDraw? decoration)
+        bool forceIconOutline, int fromIndex, int endIndex, FloorDecorationDraw? decoration, bool scene)
     {
         DrawCalls = 0;
         DrawnTriangles = 0;
@@ -408,7 +426,7 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
         OfficialFloorRenderer pipeline = sharedPipeline ?? this;
         GL.UseProgram(pipeline._program);
         Matrix4 projection = viewProjection;
-        if (!decoration.HasValue)
+        if (!decoration.HasValue && !scene)
             projection.Row3 = new Vector4(0f, 0f, projection.Row3.Z, projection.Row3.W);
         // Submit the array from its queried location rather than deriving individual locations.
         GL.Uniform4(pipeline._viewProjection, 4, (float*)&projection);

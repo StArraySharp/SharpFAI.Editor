@@ -49,6 +49,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
     private readonly int _planetVao;
     private readonly int _planetVbo;
     private int _planetLvp;
+    private int _planetViewRight, _planetViewUp;
     private int _planetLcenter;
     private int _planetLhalf;
     private int _planetLrot;
@@ -65,6 +66,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
     private readonly int _particleVbo;
     private readonly int _particleInstanceVbo;
     private int _particleLvp;
+    private int _particleViewRight, _particleViewUp;
     private int _particleLtexture;
     private int _particleLcolumns;
     private int _particleLstraightAlpha;
@@ -124,6 +126,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
         _planetProgram = LinkProgram("Planet.vert", "Planet.frag");
 
         _planetLvp = GL.GetUniformLocation(_planetProgram, "uViewProjection");
+        _planetViewRight = GL.GetUniformLocation(_planetProgram, "uViewRight");
+        _planetViewUp = GL.GetUniformLocation(_planetProgram, "uViewUp");
         _planetLcenter = GL.GetUniformLocation(_planetProgram, "uCenter");
         _planetLhalf = GL.GetUniformLocation(_planetProgram, "uHalfSize");
         _planetLrot = GL.GetUniformLocation(_planetProgram, "uRotation");
@@ -147,6 +151,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
         _particleProgram = LinkProgram("Particle.vert", "Particle.frag");
 
         _particleLvp = GL.GetUniformLocation(_particleProgram, "uViewProjection");
+        _particleViewRight = GL.GetUniformLocation(_particleProgram, "uViewRight");
+        _particleViewUp = GL.GetUniformLocation(_particleProgram, "uViewUp");
         _particleLtexture = GL.GetUniformLocation(_particleProgram, "uParticleTex");
         _particleLcolumns = GL.GetUniformLocation(_particleProgram, "uColumns");
         _particleLstraightAlpha = GL.GetUniformLocation(_particleProgram, "uStraightAlpha");
@@ -197,7 +203,10 @@ public sealed unsafe class SpriteRenderer : IDisposable
     public Vector2 TextureSize { get; }
 
     /// <summary>Draw the planets.</summary>
-    public void DrawPlanets(in Matrix4 viewProjection, ReadOnlySpan<Planet> planets)
+    public void DrawPlanets(in Matrix4 viewProjection, ReadOnlySpan<Planet> planets) =>
+        DrawPlanets(viewProjection, planets, scene: null);
+
+    internal void DrawPlanets(in Matrix4 viewProjection, ReadOnlySpan<Planet> planets, SceneRenderView? scene)
     {
         if (planets.IsEmpty || _planetTexture == 0)
         {
@@ -208,6 +217,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
 
         Matrix4 vp = viewProjection;
         GL.UniformMatrix4(_planetLvp, false, ref vp);
+        GL.Uniform3(_planetViewRight, scene?.Right ?? Vector3.UnitX);
+        GL.Uniform3(_planetViewUp, scene?.Up ?? Vector3.UnitY);
 
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, _planetTexture);
@@ -262,11 +273,12 @@ public sealed unsafe class SpriteRenderer : IDisposable
         DrawParticleInstances(viewProjection, _convertedParticles.AsSpan(0, particles.Length));
     }
 
-    internal void DrawParticleInstances(in Matrix4 viewProjection, ReadOnlySpan<ParticleInstance> particles) =>
-        DrawParticleInstances(viewProjection, particles, _particleTexture, 1, straightAlpha: false);
+    internal void DrawParticleInstances(in Matrix4 viewProjection, ReadOnlySpan<ParticleInstance> particles,
+        SceneRenderView? scene = null) =>
+        DrawParticleInstances(viewProjection, particles, _particleTexture, 1, straightAlpha: false, scene);
 
     internal void DrawParticleInstances(in Matrix4 viewProjection, ReadOnlySpan<ParticleInstance> particles,
-        int texture, int columns, bool straightAlpha)
+        int texture, int columns, bool straightAlpha, SceneRenderView? scene = null)
     {
         if (particles.IsEmpty || texture == 0)
         {
@@ -277,6 +289,8 @@ public sealed unsafe class SpriteRenderer : IDisposable
 
         Matrix4 vp = viewProjection;
         GL.UniformMatrix4(_particleLvp, false, ref vp);
+        GL.Uniform3(_particleViewRight, scene?.Right ?? Vector3.UnitX);
+        GL.Uniform3(_particleViewUp, scene?.Up ?? Vector3.UnitY);
 
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, texture);

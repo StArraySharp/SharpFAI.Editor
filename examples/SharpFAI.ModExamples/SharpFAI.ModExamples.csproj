@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../SharpFAI.ModApi/SharpFAI.ModApi.csproj" Private="false" />
+    <ProjectReference Include="../SharpFAI.ModExamples.Shared/SharpFAI.ModExamples.Shared.csproj" />
+  </ItemGroup>
+  <Target Name="BuildModPackages" AfterTargets="Build">
+    <PropertyGroup>
+      <BasePackage>$(TargetDir)mods/Example.Base</BasePackage>
+      <ToolsPackage>$(TargetDir)mods/Example.Tools</ToolsPackage>
+    </PropertyGroup>
+    <Copy SourceFiles="$(TargetPath);base/Example.Base.json"
+          DestinationFiles="$(BasePackage)/Example.Base.dll;$(BasePackage)/Example.Base.json" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetPath);tools/Example.Tools.json"
+          DestinationFiles="$(ToolsPackage)/Example.Tools.dll;$(ToolsPackage)/Example.Tools.json" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)SharpFAI.ModExamples.Shared.dll" DestinationFolder="$(BasePackage)" SkipUnchangedFiles="true" />
+    <ZipDirectory SourceDirectory="$(BasePackage)" DestinationFile="$(TargetDir)Example.Base.sharpfaimod" Overwrite="true" />
+    <ZipDirectory SourceDirectory="$(ToolsPackage)" DestinationFile="$(TargetDir)Example.Tools.sharpfaimod" Overwrite="true" />
+  </Target>
+</Project>

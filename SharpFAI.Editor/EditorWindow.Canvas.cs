@@ -174,6 +174,13 @@ internal sealed unsafe partial class EditorWindow
     private void DrawEditCanvasToolbar(bool ready)
     {
         string mode = L.T(_tilesOnly ? "TilesOnly" : "Preview") + "###edit-scene-mode";
+        if (SceneViewAvailable)
+        {
+            if (ImGui.Button("3D##scene-view", default) != 0)
+                SetSceneView(true);
+            WidgetDraw.ItemTooltip(L.T("SceneView3D"));
+            ContinueToolbar(ButtonWidth(mode));
+        }
         if (ImGui.Button(mode, default) != 0)
         {
             _tilesOnly = !_tilesOnly;
@@ -218,6 +225,11 @@ internal sealed unsafe partial class EditorWindow
 
     private void DrawEditCanvas()
     {
+        if (_showSceneView)
+        {
+            DrawSceneView();
+            return;
+        }
         bool ready = HasCurrentPlayback;
         if (!_canvasOnly) DrawEditCanvasToolbar(ready);
         _playbackHovered = false;
@@ -282,6 +294,11 @@ internal sealed unsafe partial class EditorWindow
         }
 
         bool hovered = ImGui.IsItemHovered() != 0;
+        _modUi?.DrawContext(SharpFAI.ModApi.MenuSlot.TileContext, "###mod-tile-context", () =>
+        {
+            int target = renderer.PickFloor(cursor);
+            if (target >= 0) SelectFloor(target, false);
+        });
         ImDrawList* draw = ImGui.GetWindowDrawList();
         ImDrawList.PushClipRect(draw, origin, end, 1);
         float tileSize = renderer.TileSpacing;
@@ -582,6 +599,7 @@ internal sealed unsafe partial class EditorWindow
         _canvasPress = _canvasDrag = _playbackPan = false;
         _trackGestureDocument = null;
         _freeAngle = _freeAngleClick = false;
+        ResetSceneGesture();
         _playback?.ClearEditorAnglePreview();
     }
 
@@ -598,7 +616,8 @@ internal sealed unsafe partial class EditorWindow
             _dragDecoration is null && _trackGestureDocument is null && !ShortcutContextBlocked;
         if (!_freeAngle)
         {
-            if (!ready || !allowed || !hovered || ImGui.IsMouseClicked(right, 0) == 0) return false;
+            if (!ready || !allowed || !hovered || ImGui.IsMouseClicked(right, 0) == 0 ||
+                io->KeyShift != 0 && _modUi?.HasItems(SharpFAI.ModApi.MenuSlot.TileContext) == true) return false;
             ResetCanvasGesture();
             _freeAngle = true;
         }
@@ -646,7 +665,11 @@ internal sealed unsafe partial class EditorWindow
         _savedEditCamera = null;
         renderer.SelectFloor(floor);
         if (_centerEditFloor is int focus && renderer.TryGetFloorCenter(focus, out Vector2 center))
+        {
             previous.Position = center;
+            if (_showSceneView && renderer.TryGetSceneTile(focus, out var tile))
+                _sceneCamera.Focus(new Vector3d(tile.Center.X, tile.Center.Y, 0), resetDistance: false);
+        }
         RestoreEditCamera(renderer, previous);
         _centerEditFloor = null;
     }

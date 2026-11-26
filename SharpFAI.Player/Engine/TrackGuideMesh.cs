@@ -23,7 +23,7 @@ internal static class TrackGuideMesh
             Vector2.Lerp(a.Runtime, b.Runtime, t));
     }
 
-    public static Mesh? Build(IReadOnlyList<Floor> floors, FloorTrackState[] preview, FloorTrackState[] runtime,
+    public static Mesh? Build(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> preview, IReadOnlyList<FloorTrackState> runtime,
         LevelRenderer.PlaybackTimeline timeline, float spacing, CancellationToken token)
     {
         if (!timeline.PlanetTrack.Any(floor => floor.HasHold || floor.Count == 3))

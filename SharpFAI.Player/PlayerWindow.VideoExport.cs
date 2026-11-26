@@ -1,16 +1,20 @@
 using SharpFAI.Player.Engine;
+using SharpFAI.ModApi;
 
 namespace SharpFAI.Player;
 
 internal sealed unsafe partial class PlayerWindow
 {
     private readonly VideoExportSession _videoExport;
+    private LevelRenderer? _modExportRenderer;
+    private VideoExportSession? _modExportSession;
+    private VideoExportSession CurrentExport => _modExportSession ?? _videoExport;
     private bool _isInteractiveExport;
     private (double Time, float Zoom, bool HidePassedFloors) _previewBeforeExport;
 
     public VideoExporter.Request? ExportRequest
     {
-        get => _videoExport.Request;
+        get => CurrentExport.Request;
         set
         {
             if (value is { } request)
@@ -29,7 +33,20 @@ internal sealed unsafe partial class PlayerWindow
         _previewBeforeExport = (_renderer.PlayTime, _renderer.Camera.Zoom, _renderer.HidePassedFloors);
         _renderer.Pause();
         _panning = _pressPending = false;
-        _videoExport.Start(request, interactive: true);
+        if (_renderer.Mods is { } mods && (mods.HasLoadHooks(UiHost.Player) || mods.HasLoadHooks(UiHost.Export)))
+        {
+            _modExportRenderer = new LevelRenderer { Mods = mods, ModTarget = UiHost.Export, EnableAudioOutput = false,
+                SkipAudio = _renderer.SkipAudio };
+            _modExportRenderer.ApplyVisualSettings(WithCommandLineColors(_applicationSettings));
+            if (!_modExportRenderer.Load(levelPath))
+            {
+                mods.Report("SharpFAI", _modExportRenderer.LoadError ?? _modExportRenderer.Status);
+                ClearModExport();
+                return;
+            }
+            _modExportSession = new VideoExportSession(_modExportRenderer);
+        }
+        CurrentExport.Start(request, interactive: true);
     }
 
     private void CancelVideoExport()
@@ -37,13 +54,14 @@ internal sealed unsafe partial class PlayerWindow
         if (ExportRequest is null)
             return;
 
-        _videoExport.Cancel();
-        RestorePreviewAfterVideoRender();
+        CurrentExport.Cancel();
+        if (ExportRequest is null) RestorePreviewAfterVideoRender();
     }
 
     private void RenderExportFrame()
     {
-        _videoExport.Advance();
+        _modExportRenderer?.Tick(_clock.Elapsed.TotalSeconds);
+        CurrentExport.Advance();
         if (ExportRequest is not null)
             return;
 
@@ -59,6 +77,11 @@ internal sealed unsafe partial class PlayerWindow
 
     private void RestorePreviewAfterVideoRender()
     {
+        if (_modExportRenderer is not null)
+        {
+            ClearModExport();
+            return;
+        }
         if (!_videoExport.Armed)
             return;
 
@@ -67,5 +90,13 @@ internal sealed unsafe partial class PlayerWindow
         _renderer.Camera.MarkDirty();
         _renderer.HidePassedFloors = _previewBeforeExport.HidePassedFloors;
         _renderer.RestorePreviewAfterOfflineRender(_previewBeforeExport.Time);
+    }
+
+    private void ClearModExport()
+    {
+        _modExportSession?.Dispose();
+        _modExportRenderer?.Dispose();
+        _modExportSession = null;
+        _modExportRenderer = null;
     }
 }

@@ -18,7 +18,7 @@ internal static class EditorFileStorage
             chart.WriteTo(json);
         }, overwrite);
 
-    internal static void SaveChartWithAssets(string destination, Level level, string sourceDirectory)
+    internal static void SaveChartWithAssets(string destination, Level level, string sourceDirectory, bool overwrite = true)
     {
         string destinationDirectory = Path.GetDirectoryName(destination)!;
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -47,7 +47,7 @@ internal static class EditorFileStorage
                 copied.Add(target);
                 input.CopyTo(output);
             }
-            WriteChart(destination, level.root, overwrite: true);
+            WriteChart(destination, level.root, overwrite);
         }
         catch
         {

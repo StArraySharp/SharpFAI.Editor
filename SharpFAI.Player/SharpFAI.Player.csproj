@@ -69,6 +69,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SharpFAI\SharpFAI\SharpFAI.csproj" />
     <ProjectReference Include="..\Thrust\Thrust.csproj" />
+    <ProjectReference Include="..\SharpFAI.ModApi\SharpFAI.ModApi.csproj" />
     <ProjectReference Include="..\SharpFAI.SourceGenerator\SharpFAI.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <InternalsVisibleTo Include="SharpFAI.Player.Tests" />
     <InternalsVisibleTo Include="SharpFAI.Editor.Tests" />

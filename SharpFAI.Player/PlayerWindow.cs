@@ -1,4 +1,5 @@
 using ImGui4NET;
+using SharpFAI.ModApi;
 using ImGui4NET.Backend.OpenGL3;
 using NativeFileDialog;
 using OpenTK.Graphics.OpenGL4;
@@ -112,7 +113,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
                 return;
             }
 
-            if (ImGui.GetIO()->WantCaptureKeyboard != 0)
+            if (ImGui.GetIO()->WantCaptureKeyboard != 0 || _modUi?.HasFocus == true)
             {
                 return;
             }
@@ -307,6 +308,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
 
         LoadApplicationSettings();
+        InitializeMods();
         UpdateWindowTitle();
         _renderer.Resize(ClientSize.X, ClientSize.Y);
 
@@ -343,8 +345,10 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         _displayFrameLimit.Dispose();
         _inputMethod?.Dispose();
         _videoExport.Dispose();
+        ClearModExport();
         _audioCalibration.Dispose();
         _renderer.Dispose();
+        _modUi?.Shutdown();
 
         if (_context != null)
         {
@@ -412,6 +416,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         base.OnRenderFrame(e);
 
         ApplyPendingApplicationSettings();
+        TickMods();
 
         // 命令行导出接管整帧：不画 ImGui，一次回调里尽量多渲几帧
         // A command-line export owns the frame: no ImGui, and as many frames per callback as it can
@@ -465,13 +470,22 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         ImGui_ImplOpenGL3.NewFrame();
         _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
+        _modUi?.HandleShortcuts(rendering || _settingsWindow.IsOpen || _audioCalibration.IsOpen || _renderer.ManualPlayEnabled);
 
         float menuBottom = DrawMenuBar(rendering);
         _levelPanel.Draw(_renderer, menuBottom, rendering, _audioCalibration);
-        _videoRenderWindow.Draw(_videoExport.Status, RequestVideoExport, CancelVideoExport,
+        _videoRenderWindow.Draw(CurrentExport.Status, RequestVideoExport, CancelVideoExport,
             _renderer.Level is not null && !_renderer.IsLoading ? null : "请先加载关卡");
         _audioCalibration.Draw(_renderer);
         _settingsWindow.Draw(chinese: true, editor: false, ApplicationSettings.PlayerDefaults, TryApplyApplicationSettings);
+        _modUi?.DrawWindows(rendering || _settingsWindow.IsOpen);
+        if (!rendering && _modUi is { } ui)
+        {
+            var viewport = ImGui.GetMainViewport();
+            ui.DrawOverlay(ImGui.GetBackgroundDrawList(viewport), viewport->WorkPos,
+                new() { x = viewport->WorkPos.x + viewport->WorkSize.x, y = viewport->WorkPos.y + viewport->WorkSize.y },
+                _renderer, scene3D: false);
+        }
 
         if (_showDemo)
         {
@@ -593,6 +607,7 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
             {
                 Close();
             }
+            _modUi?.DrawItems(MenuSlot.File);
 
             ImGui.EndMenu();
         }
@@ -614,12 +629,16 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
             {
                 _showDemo = !_showDemo;
             }
+            _modUi?.DrawItems(MenuSlot.View);
+            _modUi?.DrawWindowMenu();
 
             ImGui.EndMenu();
         }
 
         if (ImGui.MenuItem("渲染") != 0)
             _videoRenderWindow.Open();
+        _modUi?.DrawPlayerRenderMenu();
+        _modUi?.DrawMenuBar();
 
         DrawSettingsMenuItem(rendering);
         _menuBarFrameRate.Draw(rendering ? "视频渲染中…" : _renderer.Status, _applicationSettings.ShowFrameRate);
@@ -636,7 +655,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         }
 
         // Loading happens in the background, so only kick it off; the UI stays responsive
-        _renderer.Load(path);
+        if (_renderer.Load(path))
+            _modDocumentId = Guid.NewGuid();
     }
 
     private static string? ShowOpenDialog()

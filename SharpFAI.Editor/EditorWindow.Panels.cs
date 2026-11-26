@@ -105,6 +105,8 @@ internal sealed unsafe partial class EditorWindow
                         SelectDecoration(item, ImGui.GetIO()->KeyCtrl != 0);
                         CenterOnDecoration(item);
                     }
+                    _modUi?.DrawContext(SharpFAI.ModApi.MenuSlot.DecorationContext, "###mod-decoration-context",
+                        () => SelectDecoration(item));
                     if (ImGui.BeginDragDropSource() != 0)
                     {
                         int original = i;
@@ -256,8 +258,10 @@ internal sealed unsafe partial class EditorWindow
                 {
                     DrawSelectionStatistics();
                     DrawFloorEvents();
+                    DrawModEvents();
                 }
             }
+            _modUi?.DrawInspectorFields();
         }
         ImGui.End();
     }

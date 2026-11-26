@@ -25,6 +25,7 @@ TestResults/
 /docs/*
 !/docs/build.md
 !/docs/mod-api.md
+!/docs/modding.md
 /GameFiles/*
 !/GameFiles/README.md
 /testlevels/

@@ -5,6 +5,8 @@
 layout(location = 0) in vec2 aCorner;
 
 uniform mat4 uViewProjection;
+uniform vec3 uViewRight;
+uniform vec3 uViewUp;
 uniform vec2 uCenter;
 uniform vec2 uHalfSize;
 uniform float uRotation;
@@ -25,7 +27,8 @@ void main()
     vec2 local = aCorner * uHalfSize;
     vec2 rotated = vec2(local.x * c - local.y * s, local.x * s + local.y * c);
 
-    gl_Position = uViewProjection * vec4(uCenter + rotated, 0.0, 1.0);
+    vec3 position = vec3(uCenter, 0.0) + uViewRight * rotated.x + uViewUp * rotated.y;
+    gl_Position = uViewProjection * vec4(position, 1.0);
 
     vec2 corner = aCorner * 0.5 + 0.5;
 

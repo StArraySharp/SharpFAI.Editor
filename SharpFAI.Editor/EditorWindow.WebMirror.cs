@@ -10,11 +10,13 @@ internal sealed unsafe partial class EditorWindow
     internal EditorWebMirror? WebMirror { get; set; }
     private EditorWebMirror.Connection? _webClient;
     private bool _webInputActive;
+    private bool _receivedWebInput;
     private readonly HashSet<Keys> _webKeys = [];
     private int _webButtons;
 
     private void FeedWebInput(ImGuiIO* io)
     {
+        _receivedWebInput = false;
         var client = WebMirror?.Client;
         if (client != _webClient)
         {
@@ -25,6 +27,7 @@ internal sealed unsafe partial class EditorWindow
 
         for (int i = 0; i < 128 && client.Input.Reader.TryRead(out var input); i++)
         {
+            _receivedWebInput = true;
             if (input.Type == "reset")
             {
                 ReleaseWebInput();

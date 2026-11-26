@@ -83,7 +83,7 @@ internal sealed class VisibleFloorIndex
             new FloorRegion(Bounds.Min.Xy, Bounds.Max.Xy), Shapes);
     }
 
-    public static VisibleFloorIndex Build(IReadOnlyList<Floor> floors, FloorTrackState[] preview,
+    public static VisibleFloorIndex Build(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> preview,
         RuntimeTrackTimeline runtime, HashSet<FloorMaterial>?[] materials, CancellationToken token,
         TrackStyleInfo? styleOverride = null, FloorRenderTransform[]? overrides = null, FloorShapeLibrary? existingShapes = null)
     {
@@ -185,6 +185,26 @@ internal sealed class VisibleFloorIndex
     }
 
     public int[] Select(FloorRegion region) => Select(region, FloorTimeRange.All);
+
+    internal void SelectNearby(FloorRegion region, int focus, int limit, List<int> result)
+    {
+        int origin = Math.Clamp(focus / FloorsPerGroup, 0, _groups.Length - 1);
+        for (int offset = 0; offset < _groups.Length && result.Count < limit; offset++)
+        {
+            Append(origin + offset);
+            if (offset != 0) Append(origin - offset);
+        }
+
+        void Append(int group)
+        {
+            if ((uint)group >= (uint)_groups.Length || !_groups[group].Intersects(region))
+                return;
+            int end = Math.Min((group + 1) * FloorsPerGroup, _regions.Length);
+            for (int i = group * FloorsPerGroup; i < end && result.Count < limit; i++)
+                if (_regions[i].Intersects(region))
+                    result.Add(i);
+        }
+    }
 
     public int[] Select(FloorRegion region, FloorTimeRange time)
     {

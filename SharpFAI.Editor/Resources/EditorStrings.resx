@@ -1074,4 +1074,12 @@
   <data name="Option_TrackStyle_Neon" xml:space="preserve"><value>Neon</value></data>
   <data name="Option_TrackStyle_NeonLight" xml:space="preserve"><value>Neon Light</value></data>
   <data name="Option_TrackStyle_Standard" xml:space="preserve"><value>Standard</value></data>
+  <data name="SceneView3D" xml:space="preserve"><value>3D Scene View</value></data>
+  <data name="SceneView2D" xml:space="preserve"><value>Return to the 2D chart view</value></data>
+  <data name="ScenePerspective" xml:space="preserve"><value>Perspective</value></data>
+  <data name="SceneOrthographic" xml:space="preserve"><value>Orthographic</value></data>
+  <data name="SceneProjectionHelp" xml:space="preserve"><value>Switch the projection. Click an axis for an orthographic view.</value></data>
+  <data name="SceneNavigationHelp" xml:space="preserve"><value>Left drag to orbit. Click to select. Middle drag to pan, scroll to zoom, or press F to frame the selection.</value></data>
+  <data name="ScenePlaybackNavigationHelp" xml:space="preserve"><value>Left drag to orbit. Middle drag to pan and stop following. Scroll to zoom. In manual play, use the keyboard or right click to hit.</value></data>
+  <data name="SceneFollowPlanets" xml:space="preserve"><value>Follow planets</value></data>
 </root>

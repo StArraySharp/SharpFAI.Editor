@@ -34,7 +34,8 @@ internal sealed class RuntimeTrackTimeline
                 Vector2.ComponentMin(MinScale, scale), Vector2.ComponentMax(MaxScale, scale), Overshoots || overshoots);
     }
 
-    private readonly FloorTrackState[] _baseline;
+    private readonly IReadOnlyList<FloorTrackState> _baseline;
+    private readonly FloorTrackStateTable? _recoloredStates;
     private readonly TrackAnimationWindow[] _animation;
     private readonly IReadOnlyList<Floor> _floors;
     private readonly double[] _entries;
@@ -49,7 +50,7 @@ internal sealed class RuntimeTrackTimeline
     private int _nextEvent;
     private double _time = double.NegativeInfinity;
 
-    public RuntimeTrackTimeline(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors, FloorTrackState[] baseline,
+    public RuntimeTrackTimeline(IReadOnlyList<PlaybackEvent> events, IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> baseline,
         double[] entries, double pitch, double[]? floorBpms = null)
     {
         _baseline = baseline;
@@ -70,12 +71,15 @@ internal sealed class RuntimeTrackTimeline
             if (first < _nextEvent)
                 Reset();
         };
-        States = Array.Exists(_events, item => item.Event is RecolorTrack)
-            ? (FloorTrackState[])baseline.Clone() : baseline;
+        if (Array.Exists(_events, item => item.Event is RecolorTrack))
+        {
+            _recoloredStates = new FloorTrackStateTable(baseline.Count);
+            for (int i = 0; i < baseline.Count; i++) _recoloredStates.Initialize(i, baseline[i]);
+        }
     }
 
-    public FloorTrackState[] States { get; }
-    internal FloorTrackState[] Baseline => _baseline;
+    public IReadOnlyList<FloorTrackState> States => _recoloredStates ?? _baseline;
+    internal IReadOnlyList<FloorTrackState> Baseline => _baseline;
     public int MaterialRevision { get; private set; }
 
     private TrackAnimationWindow CreateAnimation(int floor) => TrackAnimationWindow.Create(floor, _baseline[floor],
@@ -130,7 +134,7 @@ internal sealed class RuntimeTrackTimeline
     public HashSet<FloorMaterial>?[] PrepareMaterials(CancellationToken token)
     {
         Dictionary<int, FloorTrackState> states = [];
-        HashSet<FloorMaterial>?[] materials = new HashSet<FloorMaterial>?[_baseline.Length];
+        HashSet<FloorMaterial>?[] materials = new HashSet<FloorMaterial>?[_baseline.Count];
         foreach (Scheduled item in _events)
         {
             token.ThrowIfCancellationRequested();
@@ -163,7 +167,7 @@ internal sealed class RuntimeTrackTimeline
         {
             foreach (int floor in _colors.Keys)
             {
-                States[floor] = _baseline[floor];
+                _recoloredStates![floor] = _baseline[floor];
             }
             _motion.Clear();
             _colors.Clear();
@@ -183,7 +187,7 @@ internal sealed class RuntimeTrackTimeline
         bool hasRecolors = !ReferenceEquals(States, _baseline);
         int bytesPerFloor = Unsafe.SizeOf<KeyValuePair<int, Motion>>() + (hasRecolors
             ? Unsafe.SizeOf<KeyValuePair<int, ColorTransition>>() + Unsafe.SizeOf<FloorTrackState>() : 0);
-        int count = (int)Math.Min(48, budget / ((long)bytesPerFloor * _baseline.Length));
+        int count = (int)Math.Min(48, budget / ((long)bytesPerFloor * _baseline.Count));
         if (count == 0)
             return;
         _checkpointStride = Math.Max(128, _events.Length / (count + 1) + 1);
@@ -200,7 +204,7 @@ internal sealed class RuntimeTrackTimeline
                     Trigger(_events[_nextEvent++]);
                 }
                 checkpoints[i] = new SeekCheckpoint(_motion.ToArray(), _colors.ToArray(),
-                    _colors.Count == 0 ? null : (FloorTrackState[])States.Clone());
+                    _colors.Count == 0 ? null : States.ToArray());
             }
             _seekCheckpoints = checkpoints;
         }
@@ -237,7 +241,8 @@ internal sealed class RuntimeTrackTimeline
                     _motion.Add(item.Key, item.Value);
                 foreach (var item in checkpoint.Colors)
                     _colors.Add(item.Key, item.Value);
-                checkpoint.States?.CopyTo(States, 0);
+                if (checkpoint.States is { } states)
+                    for (int i = 0; i < states.Length; i++) _recoloredStates![i] = states[i];
                 _nextEvent = checkpoints * _checkpointStride;
                 MaterialRevision++;
                 rewind = false;
@@ -257,7 +262,7 @@ internal sealed class RuntimeTrackTimeline
 
     public (FloorRenderTransform Transform, float Opacity) TransformAt(int floor, double time, bool hidePassed)
     {
-        ref readonly FloorTrackState basis = ref _baseline[floor];
+        FloorTrackState basis = _baseline[floor];
         FloorRenderTransform transform = basis.Transform;
         float opacity = basis.Opacity;
         double opacityStart = double.NegativeInfinity;
@@ -310,7 +315,7 @@ internal sealed class RuntimeTrackTimeline
 
     public FloorAppearance AppearanceAt(int floor, double time, float opacity, float volume, Vector4? colorOverride)
     {
-        ref readonly FloorTrackState state = ref States[floor];
+        FloorTrackState state = States[floor];
         Vector4 color = colorOverride ?? state.EvaluateColor(floor, (float)time, volume);
         float glow = state.GlowMultiplier;
         if (_colors.TryGetValue(floor, out ColorTransition transition))
@@ -376,7 +381,7 @@ internal sealed class RuntimeTrackTimeline
         }
 
         _colors[floor] = new ColorTransition(ColorAt(floor, timing.Start), GlowAt(floor, timing.Start), timing);
-        States[floor] = next;
+        _recoloredStates![floor] = next;
         if (previous.Material != next.Material)
         {
             MaterialRevision++;
@@ -411,7 +416,7 @@ internal sealed class RuntimeTrackTimeline
     private (int Start, int End, long Step) ResolveRange(in Scheduled item)
     {
         TrackRangeEvent track = item.Event;
-        int last = States.Length - 1;
+        int last = States.Count - 1;
         int start = track.Enabled("startTile", track.StartTile)?.Resolve(item.Anchor, last) ?? item.Anchor;
         int end = track.Enabled("endTile", track.EndTile)?.Resolve(item.Anchor, last) ?? item.Anchor;
         if (end < start)

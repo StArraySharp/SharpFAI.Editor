@@ -21,7 +21,7 @@ internal sealed unsafe class PositionTrackGuides(GlMeshUploader uploader) : IDis
 
     internal bool HasGeometry => _mesh is not null;
 
-    public void Update(IReadOnlyList<Floor> floors, FloorTrackState[] states, PlanetTrackFloor[] planets,
+    public void Update(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> states, PlanetTrackFloor[] planets,
         IReadOnlyList<PlaybackEvent> events, float spacing)
     {
         Clear();
@@ -33,7 +33,7 @@ internal sealed unsafe class PositionTrackGuides(GlMeshUploader uploader) : IDis
             throw new InvalidOperationException("Position Track connector mesh upload failed.");
     }
 
-    internal static Mesh? Build(IReadOnlyList<Floor> floors, FloorTrackState[] states, PlanetTrackFloor[] planets,
+    internal static Mesh? Build(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> states, PlanetTrackFloor[] planets,
         IReadOnlyList<PlaybackEvent> events, float spacing)
     {
         Mesh? mesh = null;

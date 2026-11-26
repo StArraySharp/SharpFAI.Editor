@@ -66,12 +66,14 @@ internal sealed class ImageDecorationRenderer : IDisposable
         {
             pixelFootprint = vec2(0.0);
             inverseFootprint = vec2(0.0);
-            if (_SmoothEdges != 0)
+            vec4 center = _Clip[3];
+            if (_SmoothEdges != 0 && center.w > 1e-6)
             {
                 // Project a one-pixel footprint into the quad's UV axes. Expand the
                 // rasterized quad so pixels whose centers miss the edge can still contribute.
-                vec2 x = _Clip[0].xy * (_ViewportSize * 0.5);
-                vec2 y = _Clip[1].xy * (_ViewportSize * 0.5);
+                vec2 position = center.xy / center.w;
+                vec2 x = (_Clip[0].xy - position * _Clip[0].w) * (_ViewportSize * 0.5 / center.w);
+                vec2 y = (_Clip[1].xy - position * _Clip[1].w) * (_ViewportSize * 0.5 / center.w);
                 float area = abs(x.x * y.y - x.y * y.x);
                 if (area > 1e-8)
                 {
@@ -191,6 +193,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         """;
 
     private readonly int _program;
+    private int _depthSpriteProgram;
+    private SpriteUniforms? _depthSprite;
     private readonly int _layerProgram;
     private readonly int _vao;
     private readonly int _vbo;
@@ -415,7 +419,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
         float authoredZoom, Func<int, bool, (Vector2 Center, Vector2 Scale, float Rotation)> floor,
         Func<string, Vector2> planet, bool collectEditorQuads = false, Func<int, float>? floorOpacity = null,
         DecorationKinds visibleKinds = DecorationKinds.All, Func<float>? readVolume = null,
-        bool forceFloorOutlines = false, bool animateSpeedIcons = true)
+        bool forceFloorOutlines = false, bool animateSpeedIcons = true, SceneRenderView? scene = null)
     {
         _visible.Clear();
         _painterOrder.Clear();
@@ -451,10 +455,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
             Matrix4 model = ModelFor(pose.ObjectFloor is null ? pixels : Vector2.One,
                 item, pose, camera, tileSize, authoredZoom, floor, planet);
             bool screen = IsScreenRelative(pose);
-            Matrix4 clip = screen ? model : model * view;
+            Matrix4 clip = Project(model, pose, screen);
             if (item.Particles is { } particles)
             {
-                if (collectEditorQuads && item.DecorationIndex >= 0 && !IsOutsideViewport(clip))
+                if (collectEditorQuads && item.DecorationIndex >= 0 && !Outside(clip, screen))
                     _editorQuads[item.DecorationIndex] = clip;
                 particles.Collect(time, _particleSamples);
                 Matrix4 axes = ModelFor(Vector2.One, item, pose with { Scale = Vector2.One }, camera,
@@ -475,8 +479,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     // Authored size in percent of one Unity unit already equals the diameter in player units.
                     Matrix4 particleModel = Matrix4.CreateScale(particle.Size) *
                         Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(particle.Rotation)) * basis;
-                    Matrix4 particleClip = anchorScreen ? particleModel : particleModel * view;
-                    if (!IsOutsideViewport(particleClip))
+                    Matrix4 particleClip = Project(particleModel, anchor, anchorScreen);
+                    if (!Outside(particleClip, anchorScreen))
                     {
                         AddVisible(new(item, pose with { Tint = pose.Tint * particle.Tint }, particleClip) { ParticleOrder = i });
                     }
@@ -484,7 +488,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 continue;
             }
             // Floor meshes are in world units, so their unit transform covers more than a sprite quad.
-            if (!IsOutsideViewport(pose.ObjectFloor is null ? clip : Matrix4.CreateScale(400f, 400f, 1f) * clip))
+            if (!Outside(pose.ObjectFloor is null ? clip : Matrix4.CreateScale(400f, 400f, 1f) * clip, screen))
             {
                 var decoration = new VisibleDecoration(item, pose, clip);
                 AddVisible(decoration);
@@ -502,6 +506,12 @@ internal sealed class ImageDecorationRenderer : IDisposable
             return floor == 0 ? left.Item.Index.CompareTo(right.Item.Index) : floor;
         });
         PrefetchTextures(timeline, time);
+
+        Matrix4 Project(Matrix4 model, ImageDecorationTimeline.Pose pose, bool screen) => screen ? model
+            : scene is { } sceneView ? sceneView.ProjectDecoration(model, pose.SyncFloorDepth ? 0 : pose.Depth) : model * view;
+
+        bool Outside(Matrix4 clip, bool screen) => !screen && scene.HasValue
+            ? SceneRenderView.OutsideClip(clip, new Vector3(.5f, .5f, 0)) : IsOutsideViewport(clip);
     }
 
     private void AddVisible(VisibleDecoration decoration)
@@ -793,7 +803,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
             Box2i? scissor = null;
             if (clampWithSampler && image.AlphaBounds is { } alpha)
             {
-                scissor = scissors.Clip(clip, alpha, viewport, pose.Smoothing);
+                if (clip.Row0.W == 0 && clip.Row1.W == 0 && clip.Row3.W == 1)
+                    scissor = scissors.Clip(clip, alpha, viewport, pose.Smoothing);
                 if (scissor is { } region && (region.Size.X == 0 || region.Size.Y == 0))
                     continue;
             }
@@ -1348,7 +1359,58 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
         GL.DeleteProgram(_program);
+        if (_depthSpriteProgram != 0) GL.DeleteProgram(_depthSpriteProgram);
         GL.DeleteProgram(_layerProgram);
         GL.DeleteProgram(_blendProgram);
+    }
+
+    internal void DrawDepth(ImageDecorationTimeline timeline, Camera2D camera, bool perspective)
+    {
+        if (_visible.Count == 0) return;
+        if (_depthSpriteProgram == 0)
+        {
+            _depthSpriteProgram = SpriteRenderer.LinkSources(SpriteVertex, SpriteFragmentHeader + """
+                void main()
+                {
+                    if (SampleSprite().a * _Color.a * EdgeCoverage() * MaskCoverage() <= 0.001)
+                        discard;
+                    fragColor = vec4(1.0);
+                }
+                """);
+            _depthSprite = new(_depthSpriteProgram);
+            GL.UseProgram(_depthSpriteProgram);
+            GL.Uniform1(GL.GetUniformLocation(_depthSpriteProgram, "_MaskTex"), 2);
+        }
+        var viewport = new Vector2(camera.ViewportWidth, camera.ViewportHeight);
+        var depthSprite = _depthSprite!;
+        foreach (var decoration in _visible)
+        {
+            var item = decoration.Item;
+            var pose = decoration.Pose;
+            if (IsScreenRelative(pose) || pose.Masking == DecorationMasking.Mask || IsTransparent(pose)) continue;
+            int mask = IsMaskRecipient(pose) ? FindMask(item, pose) : 0;
+            if (pose.Masking == DecorationMasking.VisibleInsideMask && mask == 0) continue;
+            Matrix4 clip = decoration.Clip;
+            if (!perspective) clip.Row3.Z = pose.SyncFloorDepth ? 0 : (float)(Math.Atan(pose.Depth / 10d) * .5);
+            if (pose.ObjectFloor is { } floor)
+            {
+                int maskMode = mask == 0 ? 0 : pose.Masking == DecorationMasking.VisibleOutsideMask ? 2 : 1;
+                FloorObjects.Draw(floor, _floorObjectTime, _editFloorIcons, clip, viewport, pose.Tint, pose.Opacity,
+                    _forceFloorOutlines, mask, maskMode);
+                continue;
+            }
+            if (!timeline.Images.ContainsKey(pose.Image)) continue;
+            GL.UseProgram(_depthSpriteProgram);
+            GL.BindVertexArray(_vao);
+            var repeat = _frameState.Repeat(pose.Image);
+            TextureFor(timeline, pose, repeat).Bind(0);
+            var tint = pose.Tint;
+            tint.W *= pose.Opacity;
+            bool clampWithSampler = item.Tile == Vector2.One && repeat == (false, false);
+            depthSprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport,
+                !timeline.LegacyMasks && item.Tile != Vector2.One, clampWithSampler);
+            BindMask(depthSprite, pose.Masking, mask);
+            GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+        }
     }
 }

@@ -1,6 +1,8 @@
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using SharpFAI.Player.Engine;
+using SharpFAI.ModApi;
+using SharpFAI.Player.ModSupport;
 using System.Diagnostics;
 
 namespace SharpFAI.Player;
@@ -18,11 +20,24 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         if (Request is not { } request)
             return;
 
+        if (_finalizing is { } finalizing)
+        {
+            if (finalizing.IsCompleted) CompleteFinalization(request, finalizing);
+            return;
+        }
         try { RenderExportSteps(FramesPerCallback); }
         catch (Exception error) when (Request is not null) { FinishExport(request, error); }
     }
 
-    public void Dispose() => Cancel();
+    public void Dispose()
+    {
+        Cancel();
+        if (_finalizing is { } finalizing && Request is { } request)
+            CompleteFinalization(request, finalizing);
+    }
+
+    private Task? _finalizing;
+    private CancellationTokenSource? _finalizationCancellation;
 
     /// <summary>导出过程中的状态字段。</summary>
     private bool _exportArmed;
@@ -136,7 +151,10 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
                 seconds,
                 path,
                 _renderer.PlaybackRate,
-                hitsoundRate: 1.0);
+                hitsoundRate: 1.0, processMix: _renderer.Mods?.Entries<AudioHook>(UiHost.Export)
+                    .Any(entry => entry.Value.Bus == AudioBus.Mix) == true
+                    ? audio => _renderer.ProcessModAudio(audio, AudioBus.Mix, CancellationToken.None, UiHost.Export)! : null,
+                realtimeMix: _renderer.RenderOfflineModMix(music, hitsound, seconds));
 
             return path;
         }
@@ -172,7 +190,7 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             _renderer.Camera.MarkDirty();
         }
 
-        _renderer.RenderAfterClear(background);
+        _renderer.RenderModExportFrame(background);
     }
 
     private float _exportZoom = 0.5f;
@@ -303,6 +321,11 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         if (Request is null)
             return;
 
+        if (_finalizing is not null)
+        {
+            _finalizationCancellation?.Cancel();
+            return;
+        }
         Request = null;
         _cancelled = true;
         _exportOutputPath = null;
@@ -400,8 +423,6 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
     /// <summary>导出结束：混音、编码、清理。</summary>
     private void FinishExport(VideoExporter.Request request, Exception? failure = null)
     {
-        Request = null;
-
         try
         {
             if (failure is not null)
@@ -410,13 +431,9 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             {
                 while (readback.Pending > 0 && !writer.Failed)
                     writer.Enqueue(readback.Take());
-                writer.Finish();
-
-                double elapsed = _clock.Elapsed.TotalSeconds - _exportStartedAt;
-                Console.Out.WriteLine(FormattableString.Invariant(
-                    $"exported {_exportFrame} frames in {elapsed:F2}s ({_exportFrame / elapsed:F1} frames/s)"));
-                Console.Out.WriteLine($"video -> {_exportOutputPath ?? request.OutputPath}");
-                _lastExportError = null;
+                var cancellation = _finalizationCancellation = new CancellationTokenSource();
+                _finalizing = Task.Run(() => writer.Finish(_renderer.PostprocessModExport, cancellation.Token));
+                return;
             }
         }
         catch (Exception ex)
@@ -424,8 +441,37 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             ReportExportFailure(ex);
         }
 
+        Request = null;
         ReleaseVideoResources();
         ReleaseOffscreenTarget();
+    }
+
+    private void CompleteFinalization(VideoExporter.Request request, Task task)
+    {
+        try
+        {
+            task.GetAwaiter().GetResult();
+            double elapsed = _clock.Elapsed.TotalSeconds - _exportStartedAt;
+            Console.Out.WriteLine(FormattableString.Invariant(
+                $"exported {_exportFrame} frames in {elapsed:F2}s ({_exportFrame / elapsed:F1} frames/s)"));
+            Console.Out.WriteLine($"video -> {_exportOutputPath ?? request.OutputPath}");
+            _lastExportError = null;
+        }
+        catch (OperationCanceledException) when (_finalizationCancellation?.IsCancellationRequested == true)
+        {
+            _cancelled = true;
+            _exportOutputPath = null;
+        }
+        catch (Exception error) { ReportExportFailure(error); }
+        finally
+        {
+            Request = null;
+            _finalizing = null;
+            _finalizationCancellation?.Dispose();
+            _finalizationCancellation = null;
+            ReleaseVideoResources();
+            ReleaseOffscreenTarget();
+        }
     }
 
     private void ReportExportFailure(Exception error)

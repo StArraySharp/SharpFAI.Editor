@@ -121,6 +121,32 @@ public class TestPlanetTrack
         Assert.That(timeline.PlanetTrack[4].Pivot, Is.EqualTo(timeline.PlanetTrack[3].Orbit));
     }
 
+    [Test]
+    public void CompactTwirlEventsPreserveIconsAndTimingWithSameFloorDuplicates()
+    {
+        Level level = Chart(
+            """{"floor":1,"eventType":"Twirl"}""",
+            """{"floor":1,"eventType":"SetSpeed","speedType":"Bpm","beatsPerMinute":150}""",
+            """{"floor":1,"eventType":"Twirl"}""",
+            """{"floor":3,"eventType":"Twirl"}""");
+        Level snapshot = level.CreateSnapshot(null, action =>
+            (string?)action["eventType"] == "Twirl"
+                ? TwirlEventToken.Create((int)action["floor"]!) : action.DeepClone());
+        var coreEvents = FloorCoreEvents.Read(snapshot);
+        var timing = FloorTimingCalculator.Calculate(snapshot, coreEvents);
+        var compactFloors = snapshot.CreatePlaybackFloors(coreEvents);
+        var expectedTiming = FloorTimingCalculator.Calculate(level);
+        var expectedFloors = level.CreateFloors(default, false, false);
+
+        Assert.That(timing.Select(f => (f.IsCCW, f.EntryTime)),
+            Is.EqualTo(expectedTiming.Select(f => (f.IsCCW, f.EntryTime))));
+        Assert.That(compactFloors.Select(f => (f.isCW, f.icon, f.iconAngle, f.bpm)),
+            Is.EqualTo(expectedFloors.Select(f => (f.isCW, f.icon, f.iconAngle, f.bpm))));
+        Assert.That(JToken.DeepEquals(JArray.Parse(snapshot.actions.ToString()), level.actions), Is.True);
+        Assert.That(snapshot.DeserializeEvents().Select(e => (e.EventType, e.Floor)),
+            Is.EqualTo(level.DeserializeEvents().Select(e => (e.EventType, e.Floor))));
+    }
+
     [TestCase("Forward", 90)]
     [TestCase("Backward", -90)]
     [TestCase("None", 0)]

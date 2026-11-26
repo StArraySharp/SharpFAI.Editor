@@ -99,6 +99,8 @@ internal static class PlaybackEventBinder
 
     private static PlaybackEvent? BindEditorAction(JObject action, int index, JsonSerializer serializer, JObject? settings)
     {
+        // The core timing pass already resolved Twirl. It has no separate playback layer.
+        if ((string?)action["eventType"] == "Twirl") return null;
         if (RemovesFromPlayback(action)) return null;
         // MoveDecorations is fully represented by its typed playback model.
         BaseEvent? source = (string?)action["eventType"] switch
@@ -141,26 +143,6 @@ internal static class PlaybackEventBinder
         return relocated;
     }
 
-    // Floor construction and timing use the core events. The remaining events are consumed
-    // by the separately bound playback layers, which retain their original source indices.
-    internal static Level ForEditorFloorTiming(Level level)
-    {
-        JArray actions = new();
-        foreach (JObject action in level.actions.OfType<JObject>())
-            if ((string?)action["eventType"] is { } name &&
-                Enum.TryParse<EventType>(name, out var type) &&
-                type is (EventType.SetSpeed or EventType.Twirl or EventType.Hold or EventType.MultiPlanet or
-                         EventType.Pause or EventType.FreeRoam) && !RemovesFromPlayback(action))
-                actions.Add(action);
-
-        return new Level(new Dictionary<string, object>
-        {
-            ["angleData"] = level.angleData,
-            ["settings"] = level.root["settings"]!,
-            ["actions"] = actions,
-        });
-    }
-
     private static PlaybackEvent[] Bind(Level level, bool includeDecorations, bool playbackOnly)
     {
         IReadOnlyList<BaseEvent> parsed = level.DeserializeEvents();
@@ -168,8 +150,22 @@ internal static class PlaybackEventBinder
         List<PlaybackEvent> result = new(playbackOnly ? Math.Min(parsed.Count, 4096) : parsed.Count);
         JObject? settings = level.root["settings"] as JObject;
         int index = 0;
-        foreach (JObject action in level.actions.OfType<JObject>())
+        foreach (JToken token in level.actions)
         {
+            JObject action;
+            if (token is JObject sourceAction)
+                action = sourceAction;
+            else if (TwirlEventToken.TryGetFloor(token, out int floor))
+            {
+                if (playbackOnly)
+                {
+                    index++;
+                    continue;
+                }
+                action = new JObject { ["floor"] = floor, ["eventType"] = "Twirl" };
+            }
+            else
+                continue;
             BaseEvent source = parsed[index++];
             Type type = ResolveType(source.EventType);
             if (playbackOnly && (type == typeof(ParsedPreviewEvent) || type == typeof(ParsedRuntimeEvent)))

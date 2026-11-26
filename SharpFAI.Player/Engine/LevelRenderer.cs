@@ -171,7 +171,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
     /// <summary>每块砖解析后的外观，含消失延迟（<see cref="FloorTrackState.BeatsBehind"/>）。</summary>
     /// <remarks>与 <c>_floors</c> 平行；渲染时用来判断某块砖是否已经消失。</remarks>
-    private FloorTrackState[] _trackStates = [];
+    private IReadOnlyList<FloorTrackState> _trackStates = [];
 
     private int _currentIndex;
 
@@ -324,6 +324,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     /// </summary>
     private sealed class LevelLoadResult
     {
+        public CompiledModEffect[] ModEffects { get; init; } = [];
         public required string Path { get; init; }
         public required Level Level { get; init; }
         public required List<Floor> Floors { get; init; }
@@ -334,7 +335,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public Mesh? Guides { get; init; }
 
         /// <summary>Resolved per-floor appearance, parallel to <see cref="Floors"/>.</summary>
-        public required FloorTrackState[] TrackStates { get; init; }
+        public required IReadOnlyList<FloorTrackState> TrackStates { get; init; }
         public required RuntimeTrackTimeline TrackRuntime { get; init; }
         public required HashSet<FloorMaterial>?[] TrackMaterialOptions { get; init; }
         public required LevelPlaybackSettings Settings { get; init; }
@@ -470,6 +471,8 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         _shaderWatcher?.Dispose();
         _shaderWatcher = null;
 
+        StopModAudio();
+        _modSceneDepth?.Dispose();
         _music?.Dispose();
         _hitsound?.Dispose();
         ClearFloorChunks();

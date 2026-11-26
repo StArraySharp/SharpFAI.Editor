@@ -19,6 +19,7 @@ public sealed unsafe partial class LevelRenderer
 // Level loading: background parse, GPU upload, scene commit.
 
     internal string? LevelPath { get; private set; }
+    internal const long CompactChartFileSize = 128L * 1024 * 1024;
     private bool _keepSceneDuringLoad;
     private nint _effectWarmupFence;
 
@@ -37,7 +38,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         string fullPath = Path.GetFullPath(path);
-        return BeginLoad(fullPath, () => new Level(fullPath));
+        return BeginLoad(fullPath, () => new Level(fullPath, new FileInfo(fullPath).Length >= CompactChartFileSize));
     }
 
     /// <summary>Load an independent in-memory chart snapshot using its source path for relative assets.</summary>
@@ -180,20 +181,22 @@ public sealed unsafe partial class LevelRenderer
         _loadPhase = "解析关卡";
         phaseClock.Restart();
 
-        Level level = readLevel();
-        Level playbackLevel = editorSnapshot ? PlaybackEventBinder.ForEditorFloorTiming(level) : PlaybackEventBinder.ForPlayback(level);
+        Level level = PrepareModChart(readLevel(), path, token);
+        CheckModRequirements(level);
         LevelPlaybackSettings settings = LevelPlaybackSettings.Read(level) with { SkipAudio = skipAudio };
         string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
 
         token.ThrowIfCancellationRequested();
         MarkPhase("生成砖块");
 
-        List<Floor> floors = CreatePlaybackFloors(playbackLevel, settings);
+        var coreEvents = FloorCoreEvents.Read(level, token);
+        List<Floor> floors = CreatePlaybackFloors(level, settings, coreEvents);
         token.ThrowIfCancellationRequested();
         MarkPhase("计算时间轴");
-        PlaybackEvent[] events = editorSnapshot ? PlaybackEventBinder.BindForEditor(level, token)
-            : PlaybackEventBinder.BindForPlayback(playbackLevel);
-        PlaybackTimeline timeline = BuildTimeline(playbackLevel, floors, events);
+        PlaybackEvent[] events = PlaybackEventBinder.BindForEditor(level, token);
+        PlaybackTimeline timeline = BuildTimeline(level, floors, events, coreEvents);
+        var preparedData = RunChartProcessors(SharpFAI.ModApi.ChartPreparationStage.PrepareBoundData, level, timeline.EntryTimes, token);
+        var modEffects = CompileModEffects(level, timeline.EntryTimes, timeline.FloorBpms, preparedData, token);
         var (floorPositionRemainders, trackStates, runtimeStates) = PlacePlaybackFloors(level, settings, events, floors, timeline, token);
         CameraTimeline? cameraTimeline = BuildCameraTimeline(events, floors, timeline, settings,
             Floor.length * 2f * settings.TileLength, runtimeStates);
@@ -215,15 +218,21 @@ public sealed unsafe partial class LevelRenderer
         var rawSettings = level.root["settings"];
         bool legacyMasks = (rawSettings?["version"]?.ToObject<int>() ?? 0) < 15
             || rawSettings?["disableV15Features"]?.ToObject<bool>() == true;
+        bool prepareAssets = Mods?.Entries<SharpFAI.Player.ModSupport.AssetProcessor>(ModTarget).Count > 0;
         var decorationsTask = Task.Run(() => ImageDecorationTimeline.Build(events, floors, timeline.EntryTimes,
             timeline.FloorBpms, directory, warnings, token, legacyMasks, Floor.length * 2f * settings.TileLength,
-            editable: editorSnapshot, texturePercent: decorationTexturePercent), token);
+            editable: editorSnapshot, texturePercent: decorationTexturePercent, prepareImage: prepareAssets
+                ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Image, token) : null), token);
         (string? musicPath, DecodedAudio? music, DecodedAudio? hitsound) = BuildAudio(level, path, floors, timeline,
-            settings, (phase, milliseconds) => timings.Add((phase, milliseconds)));
+            settings, (phase, milliseconds) => timings.Add((phase, milliseconds)), prepareMusic: prepareAssets
+                ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Music, token) : null);
+        music = ProcessModAudio(music, SharpFAI.ModApi.AudioBus.Music, token);
+        hitsound = ProcessModAudio(hitsound, SharpFAI.ModApi.AudioBus.Hitsounds, token);
         MarkPhase("构建装饰与背景");
         var decorations = decorationsTask.GetAwaiter().GetResult();
         var backdrop = BackdropTimeline.Build(settings, events, floors, timeline.EntryTimes, timeline.FloorBpms,
-            directory, warnings, token: token);
+            directory, warnings, token: token, prepareImage: prepareAssets
+                ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Image, token) : null);
         decorations?.BindTimedEffects(floors, timeline.FloorBpms, filters, backgroundFilters,
             cameraTimeline, backdrop, sceneEffects, trackRuntime);
         token.ThrowIfCancellationRequested();
@@ -252,6 +261,7 @@ public sealed unsafe partial class LevelRenderer
         {
             Path = path,
             Level = level,
+            ModEffects = modEffects,
             Floors = floors,
             FloorPositionRemainders = floorPositionRemainders,
             Geometry = geometry,
@@ -280,33 +290,20 @@ public sealed unsafe partial class LevelRenderer
         };
     }
 
-    private static List<Floor> CreatePlaybackFloors(Level level, LevelPlaybackSettings settings)
+    private static List<Floor> CreatePlaybackFloors(Level level, LevelPlaybackSettings settings, FloorCoreEvents coreEvents)
     {
         if (level.angles.Count == 0)
             return [new Floor(0, -180, default) { angle = 180, bpm = ReadSetting(level, "bpm", 120.0), isCW = true }];
 
         bool leadingMidspin = level.angles[0] == 999;
-        if (leadingMidspin)
-        {
-            // Existing charts may already contain a leading midspin. Geometry needs a
-            // finite heading at the origin; the original token still drives the chart clock.
-            var angles = (JArray)level.angleData.DeepClone();
-            angles[0] = 180;
-            level = new Level(new Dictionary<string, object>
-            {
-                ["angleData"] = angles,
-                ["settings"] = level.root["settings"]!,
-                ["actions"] = level.actions,
-            });
-        }
-        var floors = level.CreateFloors(default, usePositionTrack: false, calculateLegacyEntryTimes: false);
+        var floors = level.CreatePlaybackFloors(coreEvents);
         if (leadingMidspin) floors[0].isMidspin = true;
         if (floors.Count < VisibleFloorIndex.MinimumFloorCount && settings.TileLength != 1f)
             foreach (var floor in floors) floor.position *= settings.TileLength;
         return floors;
     }
 
-    private static (Vector2[]? Remainders, FloorTrackState[] States, FloorTrackState[] RuntimeStates) PlacePlaybackFloors(
+    private static (Vector2[]? Remainders, FloorTrackStateTable States, FloorTrackStateTable RuntimeStates) PlacePlaybackFloors(
         Level level, LevelPlaybackSettings settings, PlaybackEvent[] events, List<Floor> floors, PlaybackTimeline timeline,
         CancellationToken token)
     {
@@ -316,11 +313,11 @@ public sealed unsafe partial class LevelRenderer
             remainders = BuildPreciseFloorPositions(floors, timeline.PlanetTrack, spacing, token);
         else
             PlanetTrackFloor.ApplySpacing(floors, timeline.PlanetTrack, spacing);
-        var states = FloorTrackStateResolver.Resolve(level, floors, events, includeEditorOnly: true, timeline.FloorBpms);
+        var states = FloorTrackStateResolver.ResolveForPlayback(level, floors, events, includeEditorOnly: true, timeline.FloorBpms);
         bool hasEditorOffsets = events.Any(item => item is PositionTrack position && position.IsActive &&
             position.Enabled("editorOnly", position.EditorOnly) == true);
         var runtimeStates = hasEditorOffsets
-            ? FloorTrackStateResolver.Resolve(level, floors, events, includeEditorOnly: false, timeline.FloorBpms)
+            ? FloorTrackStateResolver.ResolveForPlayback(level, floors, events, includeEditorOnly: false, timeline.FloorBpms)
             : states;
         ApplyHoldIcons(floors, timeline.PlanetTrack, states);
         if (hasEditorOffsets) ApplyHoldIcons(floors, timeline.PlanetTrack, runtimeStates);
@@ -329,7 +326,7 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private static (HashSet<FloorMaterial>?[] Materials, VisibleFloorIndex? Visibility, FloorGeometry? Geometry, Mesh? Guides)
-        BuildTrackGeometry(List<Floor> floors, FloorTrackState[] states, RuntimeTrackTimeline runtime,
+        BuildTrackGeometry(List<Floor> floors, IReadOnlyList<FloorTrackState> states, RuntimeTrackTimeline runtime,
             PlaybackTimeline timeline, LevelPlaybackSettings settings, string? directory, int textureCapacity, CancellationToken token)
     {
         bool resident = floors.Count >= VisibleFloorIndex.MinimumResidentFloorCount;
@@ -356,7 +353,7 @@ public sealed unsafe partial class LevelRenderer
         }
     }
 
-    private static bool CanBakeLevelStream(List<Floor> floors, FloorTrackState[] states,
+    private static bool CanBakeLevelStream(List<Floor> floors, IReadOnlyList<FloorTrackState> states,
         HashSet<FloorMaterial>?[] materials, FloorShapeLibrary shapes, CancellationToken token)
     {
         // Bound the persistent element buffer, including alternative track materials.
@@ -416,6 +413,7 @@ public sealed unsafe partial class LevelRenderer
         _trackMaterialOptions = result.TrackMaterialOptions;
         _trackRuntime = result.TrackRuntime;
         _cameraTimeline = result.CameraTimeline;
+        _modEffects = result.ModEffects;
         _filterTimeline = result.FilterTimeline;
         _backgroundFilterTimeline = result.BackgroundFilterTimeline;
         _sceneEffects = result.SceneEffects;
@@ -822,6 +820,12 @@ public sealed unsafe partial class LevelRenderer
 
     public void Unload()
     {
+        StopModAudio();
+        InvalidateModHistory();
+        _filterBackend?.ResetModHistory();
+        _modSceneDepth?.Dispose();
+        _modSceneDepth = null;
+        _modEffects = [];
         CancelPendingLoad();
         ClearScene();
         _level = null;

@@ -94,6 +94,12 @@ internal sealed unsafe partial class EditorWindow
                 StartFromShortcut();
             return;
         }
+        if (_showSceneView && _sceneHovered && _playbackView == PlaybackView.Edit && !shift && !alt &&
+            io->KeyCtrl == 0 && io->KeySuper == 0 && Pressed(ImGuiKey.ImGuiKey_F))
+        {
+            _sceneFocus = true;
+            return;
+        }
         if (io->KeyCtrl != 0 || io->KeySuper != 0)
         {
             HandleControlShortcuts(shift, alt);
@@ -339,7 +345,7 @@ internal sealed unsafe partial class EditorWindow
     {
         if (!float.IsFinite(_arbitraryAngle))
             return;
-        bool reverse = _document.ActionsOfType("Twirl").Count(item => EditorDocument.Floor(item) <= _floor && Enabled(item)) % 2 != 0;
+        bool reverse = _document.IsReversedAt(_floor);
         double delta = (180 - _arbitraryAngle) * (reverse ? -1 : 1);
         InsertTile((_document.IncomingAngle(_floor) + delta + 360) % 360);
     }

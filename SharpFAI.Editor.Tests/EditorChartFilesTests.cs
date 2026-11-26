@@ -4,6 +4,7 @@ using SharpFAI.Editor;
 using SharpFAI.Player.Engine;
 using SharpFAI.Player.Engine.Events;
 using SharpFAI.Util;
+using ChartJson = SharpFAI.Serialization.SimpleJSON;
 
 namespace SharpFAI.Editor.Tests;
 
@@ -17,6 +18,51 @@ public sealed class EditorChartFilesTests
 
     [TearDown]
     public void TearDown() => _directory.Delete(recursive: true);
+
+    [TestCase(32766)]
+    [TestCase(32768)]
+    [TestCase(32773)]
+    public void LoadingFromDiskPreservesTokensAcrossBufferBoundaries(int padding)
+    {
+        string path = Path.Combine(_directory.FullName, "buffer.adofai");
+        string json = new string(' ', padding) +
+            """
+            {"angleData":[-180,90.125,1e2],"settings":{"song":"谱面\u2603\"歌"},"actions":[
+                {"floor":2,"eventType":"Twirl"}],"custom":[null,true,false]}
+            """;
+        File.WriteAllText(path, json);
+        Assert.That(JToken.DeepEquals(ChartJson.DeserializeToken(json), ChartJson.DeserializeTokenFile(path)), Is.True);
+    }
+
+    [Test]
+    public void CompactTwirlsCanBeSelectedAfterDeletingTilesAndStillUndoAndRedo()
+    {
+        string path = Path.Combine(_directory.FullName, "twirls.adofai");
+        const string original = """
+            {"angleData":[0,45,90,0,0],"settings":{"bpm":100},"actions":[
+             {"floor":1,"eventType":"Twirl"},
+             {"floor":3,"eventType":"Twirl"},
+             {"floor":4,"eventType":"Twirl"},
+             {"floor":5,"eventType":"Twirl","active":false}
+            ],"decorations":[]}
+            """;
+        File.WriteAllText(path, original);
+        var chart = new EditorDocument(path, compactTwirls: true);
+        Assert.That(chart.SnapshotForPlayback().actions[0], Is.TypeOf<JRaw>());
+        Assert.That(chart.IsReversedAt(5), Is.True);
+        Assert.That(chart.CopyTiles(2, 4).Actions.Select(EditorDocument.Floor), Is.EqualTo(new[] { 1, 2 }));
+        chart.DeleteTiles(1, 1);
+        Assert.That(chart.Events(3).Single()["eventType"]!.Value<string>(), Is.EqualTo("Twirl"));
+        chart.Undo();
+        Assert.That(chart.Events(4).Single()["eventType"]!.Value<string>(), Is.EqualTo("Twirl"));
+        Assert.That(chart.Events(1).Single()["eventType"]!.Value<string>(), Is.EqualTo("Twirl"));
+        chart.Redo();
+        Assert.That(chart.Events(1), Is.Empty);
+        chart.Undo();
+        Assert.That(chart.Events(1), Has.Count.EqualTo(1));
+        chart.Save(path);
+        Assert.That(JToken.DeepEquals(JObject.Parse(original), JObject.Parse(File.ReadAllText(path))), Is.True);
+    }
 
     [Test]
     public void AMinuteCreatesARollingSnapshotWithoutSavingTheOriginalChart()
@@ -261,7 +307,7 @@ public sealed class EditorChartFilesTests
         Assert.That(EditorDocument.Floor(decoration), Is.EqualTo(8));
 
         var full = PlaybackEventBinder.ForPlayback(patched);
-        var reduced = PlaybackEventBinder.ForEditorFloorTiming(patched);
+        var coreEvents = FloorCoreEvents.Read(patched);
         var fullyBound = PlaybackEventBinder.BindForEditor(patched);
         var relocated = PlaybackEventBinder.RelocateEditorEvents(original, patched, oldEvents, CancellationToken.None);
         Assert.That(relocated.Select(e => (e.EventType, e.Floor, e.SourceIndex)),
@@ -271,10 +317,10 @@ public sealed class EditorChartFilesTests
         var position = relocated.OfType<PositionTrack>().Single();
         Assert.That(position.RelativeTo!.Value.Resolve(position.Floor, chart.LastFloor), Is.EqualTo(8));
         var fullFloors = full.CreateFloors(default, false, false);
-        var reducedFloors = reduced.CreateFloors(default, false, false);
+        var reducedFloors = patched.CreatePlaybackFloors(coreEvents);
         Assert.That(reducedFloors.Select(f => (f.index, f.angle, f.bpm, f.icon, f.isCW)),
             Is.EqualTo(fullFloors.Select(f => (f.index, f.angle, f.bpm, f.icon, f.isCW))));
-        Assert.That(LevelRenderer.BuildTimeline(reduced, reducedFloors, relocated).EntryTimes,
+        Assert.That(LevelRenderer.BuildTimeline(patched, reducedFloors, relocated, coreEvents).EntryTimes,
             Is.EqualTo(LevelRenderer.BuildTimeline(full, fullFloors, fullyBound).EntryTimes));
 
         chart.Undo();

@@ -6,6 +6,7 @@ using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using SharpFAI.Editor.Widgets;
+using SharpFAI.ModApi;
 using SharpFAI.Player;
 using SharpFAI.Player.Engine;
 using Thrust.Graphics;
@@ -15,7 +16,7 @@ namespace SharpFAI.Editor;
 internal sealed unsafe partial class EditorWindow
 {
     private enum PlaybackView { Edit, Preview, Auto, Manual }
-    private readonly record struct PlaybackRevision(EditorDocument Document, int Version, string SourcePath, double Speed);
+    private readonly record struct PlaybackRevision(EditorDocument Document, int Version, string SourcePath, double Speed, int ModGeneration);
     private readonly record struct EditSelection(int Floor, bool HasFloor, int? RangeAnchor, int EventPage,
         bool InspectDecoration, JObject? Decoration, JObject[] Decorations);
 
@@ -53,7 +54,7 @@ internal sealed unsafe partial class EditorWindow
     private int _playbackHeight;
 
     private PlaybackRevision CurrentPlaybackRevision => new(_document, _document.PlaybackVersion,
-        _document.PlaybackPath, _appliedPlaybackSpeed);
+        _document.PlaybackPath, _appliedPlaybackSpeed, _modUi?.Host.LoadGeneration ?? 0);
     private bool HasCurrentPlayback => _playback is { IsLoading: false, LoadError: null, Level: not null }
                                       && _displayedRevision == CurrentPlaybackRevision;
     private PlaybackView SelectedPlaybackMode => _manualPlay ? PlaybackView.Manual : PlaybackView.Auto;
@@ -158,7 +159,7 @@ internal sealed unsafe partial class EditorWindow
         bool editing = _playbackView == PlaybackView.Edit;
         if (_playback is null)
         {
-            _playback = new LevelRenderer();
+            _playback = new LevelRenderer { Mods = _modUi?.Host, ModTarget = UiHost.Editor };
             ApplyPreviewSettings(_playback);
         }
         LevelRenderer renderer = _playback;
@@ -205,12 +206,13 @@ internal sealed unsafe partial class EditorWindow
         if (_displayedRevision != target)
         {
             if (_failedRevision == target) return;
-            if (!renderer.IsLoading && renderer.Level is not null && _displayedRevision is { } current &&
+            if (renderer.CanUpdateModEditorRevision &&
+                !renderer.IsLoading && renderer.Level is not null && _displayedRevision is { } current &&
                 SamePlaybackSource(current, target))
             {
                 try
                 {
-                    bool effects = !effectsFailed && current.Speed == target.Speed &&
+                    bool effects = !renderer.HasModIncrements && !effectsFailed && current.Speed == target.Speed &&
                         renderer.BeginEditorEffectUpdate(_document.EffectChangesSince(current.Version));
                     if (effects && !FinishPlaybackRevision(renderer, target, target, effects: true, out effectsFailed))
                         return;
@@ -361,7 +363,7 @@ internal sealed unsafe partial class EditorWindow
     }
 
     private static bool SamePlaybackSource(PlaybackRevision first, PlaybackRevision second) =>
-        first.Document == second.Document && first.SourcePath == second.SourcePath;
+        first.Document == second.Document && first.SourcePath == second.SourcePath && first.ModGeneration == second.ModGeneration;
 
     private bool FinishPlaybackRevision(LevelRenderer renderer, PlaybackRevision pending, PlaybackRevision target,
         bool effects, out bool effectsFailed)
@@ -415,21 +417,26 @@ internal sealed unsafe partial class EditorWindow
         if (!_canvasOnly && !DrawPlaybackCanvasToolbar(ready, renderer))
             return;
 
-        ImVec2 size = ImGui.GetContentRegionAvail();
-        size.x = Math.Max(1, size.x);
-        size.y = Math.Max(1, size.y);
-        if (ready && renderer is not null)
-            RenderPlaybackFrame(renderer, size);
-
-        DrawPlaybackImage(size);
-        _playbackHovered = ImGui.IsItemHovered() != 0;
-
-        if (ready && renderer is not null && _playbackView == PlaybackView.Preview)
-            NavigatePlaybackPreview(renderer, selectTiles: !_canvasOnly);
-        if (ready && renderer is { CanNavigateEditorPlayback: true } && _playbackView is PlaybackView.Auto or PlaybackView.Manual)
-            NavigateActivePlayback(renderer);
+        if (_showSceneView)
+            DrawSceneView(editing: false);
         else
-            _playbackPan = false;
+        {
+            ImVec2 size = ImGui.GetContentRegionAvail();
+            size.x = Math.Max(1, size.x);
+            size.y = Math.Max(1, size.y);
+            if (ready && renderer is not null)
+                RenderPlaybackFrame(renderer, size);
+
+            DrawPlaybackImage(size);
+            _playbackHovered = ImGui.IsItemHovered() != 0;
+
+            if (ready && renderer is not null && _playbackView == PlaybackView.Preview)
+                NavigatePlaybackPreview(renderer, selectTiles: !_canvasOnly);
+            if (ready && renderer is { CanNavigateEditorPlayback: true } && _playbackView is PlaybackView.Auto or PlaybackView.Manual)
+                NavigateActivePlayback(renderer);
+            else
+                _playbackPan = false;
+        }
 
         if (!_canvasOnly && ready && renderer is not null && _playbackView == PlaybackView.Manual)
         {
@@ -450,6 +457,13 @@ internal sealed unsafe partial class EditorWindow
             return false;
         }
 
+        if (SceneViewAvailable)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button(_showSceneView ? "2D##playback-scene" : "3D##playback-scene", default) != 0)
+                SetSceneView(!_showSceneView);
+            WidgetDraw.ItemTooltip(L.T(_showSceneView ? "SceneView2D" : "SceneView3D"));
+        }
         ImGui.SameLine();
         if (!ready || renderer is null)
         {
@@ -484,7 +498,12 @@ internal sealed unsafe partial class EditorWindow
     private void DrawPlaybackImage(ImVec2 size)
     {
         if (_playbackFrameAvailable)
+        {
             ImGui.Image(new ImTextureRef { _TexID = (uint)_playbackTexture }, size, WidgetDraw.V2(0, 1), WidgetDraw.V2(1, 0));
+            if (!_canvasOnly && HasCurrentPlayback && _playback is { } renderer)
+                _modUi?.DrawOverlay(ImGui.GetWindowDrawList(), ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+                    renderer, scene3D: false);
+        }
         else
             ImGui.Dummy(size);
         if (!_canvasOnly)
@@ -533,7 +552,7 @@ internal sealed unsafe partial class EditorWindow
         }
     }
 
-    private void RenderPlaybackFrame(LevelRenderer renderer, ImVec2 size)
+    private void RenderPlaybackFrame(LevelRenderer renderer, ImVec2 size, SceneRenderView? scene = null)
     {
         ImVec2 scale = ImGui.GetIO()->DisplayFramebufferScale;
         int width = Math.Max(1, (int)(size.x * scale.x));
@@ -581,7 +600,7 @@ internal sealed unsafe partial class EditorWindow
             GL.Disable(EnableCap.DepthTest);
             GL.Disable(EnableCap.ScissorTest);
             bool editing = _playbackView == PlaybackView.Edit;
-            bool tilesOnly = editing && _tilesOnly;
+            bool tilesOnly = scene is null && editing && _tilesOnly;
             renderer.SetEditorTilesOnly(tilesOnly);
             var background = tilesOnly ? new Vector4(.059f, .065f, .083f, 1) : renderer.BackgroundColor;
             background.W = 1;
@@ -590,7 +609,8 @@ internal sealed unsafe partial class EditorWindow
             renderer.ShowDecorations = !editing || (!_hideAllDecorations && !tilesOnly);
             renderer.ShowPositionTrackGuides = editing && !_canvasOnly;
             renderer.CollectDecorationQuads = editing && !tilesOnly && !_canvasOnly;
-            if (tilesOnly) renderer.RenderEditorTiles();
+            if (scene is { } view) renderer.RenderEditorScene(background, view);
+            else if (tilesOnly) renderer.RenderEditorTiles();
             else renderer.RenderAfterClear(background);
             _playbackFrameAvailable = true;
         }
@@ -711,7 +731,8 @@ internal sealed unsafe partial class EditorWindow
     private void FeedPlaybackMouse(MouseButton button, bool pressed)
     {
         if (_playbackView != PlaybackView.Manual || !HasCurrentPlayback || _playback is not { } renderer ||
-            pressed && (!_playbackHovered || _settingsWindow.IsOpen))
+            pressed && (!_playbackHovered || _settingsWindow.IsOpen ||
+                        _showSceneView && button is MouseButton.Left or MouseButton.Middle))
             return;
         if (pressed && renderer.PlaySession.Failed)
             renderer.Play();

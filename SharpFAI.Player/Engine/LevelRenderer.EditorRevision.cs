@@ -8,6 +8,7 @@ using SharpFAI.Serialization;
 using Thrust.Audio;
 using Thrust.Graphics;
 using SharpFAI.Util;
+using SharpFAI.ModApi;
 
 namespace SharpFAI.Player.Engine;
 
@@ -28,7 +29,7 @@ public sealed unsafe partial class LevelRenderer
     internal sealed record EditorChartPatch(Action<JObject> Apply, bool TileInsertion, bool PreservesBindings,
         EditorEventAppend[]? AppendedEvents);
 
-    private sealed record EditorTrackUpdate(List<Floor> Floors, Vector2[]? Remainders, FloorTrackState[] States,
+    private sealed record EditorTrackUpdate(List<Floor> Floors, Vector2[]? Remainders, IReadOnlyList<FloorTrackState> States,
         RuntimeTrackTimeline Runtime, HashSet<FloorMaterial>?[] Materials, VisibleFloorIndex? Visibility,
         FloorGeometry? Geometry, Mesh? Guides);
 
@@ -48,6 +49,7 @@ public sealed unsafe partial class LevelRenderer
         public ImageDecorationTimeline? Decoration;
         public BackdropTimeline? Backdrop;
         public ManualTrack? Manual;
+        public CompiledModEffect[]? ModEffects;
         public (string? Path, DecodedAudio? Music, DecodedAudio? Hitsound)? Audio;
         public List<string> Warnings { get; } = [];
 
@@ -91,6 +93,7 @@ public sealed unsafe partial class LevelRenderer
 
     private static EditorLayers EditorActionLayers(JToken? token)
     {
+        if (TwirlEventToken.TryGetFloor(token, out _)) return EditorLayers.Timing | EditorLayers.Track;
         if (token is not JObject action) return EditorLayers.None;
         return (string?)action["eventType"] switch
         {
@@ -115,10 +118,10 @@ public sealed unsafe partial class LevelRenderer
     {
         int length = Math.Min(before.Count, after.Count);
         int first = 0;
-        while (first < length && JToken.DeepEquals(before[first], after[first])) first++;
+        while (first < length && SameAction(before[first], after[first])) first++;
         if (first == before.Count && first == after.Count) return EditorLayers.None;
         int oldEnd = before.Count - 1, newEnd = after.Count - 1;
-        while (oldEnd >= first && newEnd >= first && JToken.DeepEquals(before[oldEnd], after[newEnd]))
+        while (oldEnd >= first && newEnd >= first && SameAction(before[oldEnd], after[newEnd]))
         {
             oldEnd--;
             newEnd--;
@@ -129,6 +132,11 @@ public sealed unsafe partial class LevelRenderer
         // Insertion/removal shifts the source slots even for events outside the changed range.
         if (first != before.Count && before.Count != after.Count) result |= TimedLayers;
         return result;
+
+        static bool SameAction(JToken before, JToken after) =>
+            TwirlEventToken.TryGetFloor(before, out int floor)
+                ? TwirlEventToken.TryGetFloor(after, out int other) && floor == other
+                : JToken.DeepEquals(before, after);
     }
 
     internal static EditorLayers PlanEditorRevision(Level before, Level? after, JObject settings,
@@ -184,7 +192,7 @@ public sealed unsafe partial class LevelRenderer
         bool tileInsertion = patch?.TileInsertion == true;
         EditorLayers immediate = snapshot is null && patch is null
             ? PlanEditorRevision(level, null, settingsJson) : EditorLayers.Bindings;
-        if ((immediate & ~(EditorLayers.Mixer | EditorLayers.CameraState)) == 0)
+        if (!HasModIncrements && (immediate & ~(EditorLayers.Mixer | EditorLayers.CameraState)) == 0)
             _editorRevisionReady = Build(snapshot, immediate, CancellationToken.None);
         else
         {
@@ -248,14 +256,14 @@ public sealed unsafe partial class LevelRenderer
                 model = level.CreateSnapshot(path);
             if (!ReferenceEquals(model, level)) WriteEditorSettings(model, settingsJson);
             var view = ReferenceEquals(model, level) ? LevelPlaybackSettings.Read(settingsJson) : LevelPlaybackSettings.Read(model);
-            var playbackModel = Has(EditorLayers.Track | EditorLayers.Timing) ? PlaybackEventBinder.ForEditorFloorTiming(model) : model;
+            var coreEvents = Has(EditorLayers.Track | EditorLayers.Timing) ? FloorCoreEvents.Read(model, token) : null;
             var events = preserveBindings ? previousEvents :
                 relocateBindings ? PlaybackEventBinder.RelocateEditorEvents(level, model, previousEvents, token) :
                 appendedEvents is not null ? PlaybackEventBinder.AppendEditorEvents(previousEvents, appendedEvents, settingsJson) :
                 Has(EditorLayers.Bindings) ? PlaybackEventBinder.BindForEditor(model, token) : previousEvents;
             var settings = view with { SkipAudio = previousSettings.SkipAudio };
-            var nextFloors = Has(EditorLayers.Track) ? CreatePlaybackFloors(playbackModel, settings) : floors;
-            var timeline = Has(EditorLayers.Timing) ? BuildTimeline(playbackModel, nextFloors, events) : previousTimeline;
+            var nextFloors = Has(EditorLayers.Track) ? CreatePlaybackFloors(model, settings, coreEvents!) : floors;
+            var timeline = Has(EditorLayers.Timing) ? BuildTimeline(model, nextFloors, events, coreEvents) : previousTimeline;
             if (Has(EditorLayers.Rate)) timeline = timeline with { Pitch = ReadPlaybackPitch(settingsJson) };
             var update = new EditorRevisionUpdate(model, settingsJson, settings, layers, events, timeline)
             {
@@ -265,6 +273,19 @@ public sealed unsafe partial class LevelRenderer
             try
             {
                 token.ThrowIfCancellationRequested();
+                if (HasModIncrements)
+                {
+                    JObject? effectiveChart = null;
+                    if (patchOnCommit is not null && ModReadsActions)
+                    {
+                        effectiveChart = (JObject)model.root.DeepClone();
+                        patchOnCommit.Apply(effectiveChart);
+                    }
+                    RunChartProcessors(ChartPreparationStage.ValidateSource, model, null, token, settingsJson, effectiveChart);
+                    var prepared = RunChartProcessors(ChartPreparationStage.PrepareBoundData, model, timeline.EntryTimes,
+                        token, settingsJson, effectiveChart);
+                    update.ModEffects = CompileModEffects(model, timeline.EntryTimes, timeline.FloorBpms, prepared, token);
+                }
                 if (Has(EditorLayers.Track))
                     update.Track = BuildEditorTrack(model, settings, events, nextFloors, timeline, directory, textureCapacity, token);
                 else if (Has(EditorLayers.Timing | EditorLayers.Rate))
@@ -393,6 +414,8 @@ public sealed unsafe partial class LevelRenderer
 
     private void ApplyEditorRevision(EditorRevisionUpdate update)
     {
+        if (update.ModEffects is { } effects) _modEffects = effects;
+        InvalidateModHistory();
         var layers = LastEditorRevisionLayers = update.Layers;
         bool Has(EditorLayers layer) => (layers & layer) != 0;
         bool rebindTriggers = Has(EditorLayers.Decoration | EditorLayers.Filter | EditorLayers.Camera |

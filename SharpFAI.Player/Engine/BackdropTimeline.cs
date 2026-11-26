@@ -42,7 +42,7 @@ internal sealed class BackdropTimeline
     public static BackdropTimeline Build(LevelPlaybackSettings settings, IReadOnlyList<PlaybackEvent> events,
         IReadOnlyList<Floor> floors, double[] times, double[]? bpms, string? directory, List<string> warnings,
         IReadOnlyDictionary<string, ImageDecoder.RgbaImage?>? cached = null, VideoBackgroundSource? cachedVideo = null,
-        CancellationToken token = default)
+        CancellationToken token = default, Func<string, string>? prepareImage = null)
     {
         var images = new Dictionary<string, ImageDecoder.RgbaImage?>(StringComparer.OrdinalIgnoreCase);
         var initial = new ImageState(settings, Load(settings.BackgroundImage));
@@ -72,7 +72,7 @@ internal sealed class BackdropTimeline
             try
             {
                 string path = Path.GetFullPath(name.Trim().Replace('\\', Path.DirectorySeparatorChar), directory);
-                var image = ImageDecoder.Decode(File.ReadAllBytes(path));
+                var image = ImageDecoder.Decode(File.ReadAllBytes(prepareImage?.Invoke(path) ?? path));
                 ImageDecoder.FlipVertically(image.Pixels, image.Width, image.Height);
                 result = image;
             }

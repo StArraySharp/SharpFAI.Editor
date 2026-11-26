@@ -8,7 +8,7 @@ public sealed unsafe partial class LevelRenderer
 {
     internal static CameraTimeline? BuildCameraTimeline(IReadOnlyList<PlaybackEvent> events,
         IReadOnlyList<Floor> floors, PlaybackTimeline timeline, LevelPlaybackSettings settings, float spacing,
-        FloorTrackState[]? runtimeStates = null)
+        IReadOnlyList<FloorTrackState>? runtimeStates = null)
     {
         if (!events.OfType<MoveCameraEvent>().Any() || floors.Count == 0)
             return null;
