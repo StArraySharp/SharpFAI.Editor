@@ -130,6 +130,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     private double[] _sweepDelta = [];
     private PlanetTrackFloor[] _planetTrack = [];
     private Dictionary<int, PauseAngleCorrection>? _pauseAngles;
+    private Dictionary<int, PauseStartTiming>? _pauseStarts;
     private CameraTimeline? _cameraTimeline;
     private Filters.FilterTimeline? _filterTimeline;
     private Filters.FilterTimeline? _backgroundFilterTimeline;
@@ -332,7 +333,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public FloorGeometry? Geometry { get; init; }
         public IReadOnlyDictionary<FloorTexture, ImageDecoder.RgbaImage>? FloorTextures { get; init; }
         public VisibleFloorIndex? Visibility { get; init; }
-        public Mesh? Guides { get; init; }
+        public TrackGuideMesh? Guides { get; init; }
 
         /// <summary>Resolved per-floor appearance, parallel to <see cref="Floors"/>.</summary>
         public required IReadOnlyList<FloorTrackState> TrackStates { get; init; }
@@ -368,6 +369,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public PlanetTrackFloor[] PlanetTrack { get; init; } = [];
         public Dictionary<int, PauseAngleCorrection>? PauseAngles { get; init; }
         public Dictionary<int, double>? PauseLocks { get; init; }
+        public Dictionary<int, PauseStartTiming>? PauseStarts { get; init; }
         public double LevelDuration { get; init; }
         public double OffsetSeconds { get; init; }
         public double SeparateCountdownLead { get; init; }
@@ -487,7 +489,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         _spriteRenderer = null;
 
         _uploader.Dispose();
-        AudioEngine.Shutdown();
+        if (EnableAudioOutput) AudioEngine.Shutdown();
         _level = null;
     }
 }

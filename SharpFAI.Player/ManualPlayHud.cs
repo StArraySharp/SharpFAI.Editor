@@ -37,6 +37,8 @@ public static unsafe class ManualPlayHud
             return;
 
         DrawJudgments(draw, max.x, top, session.Stats, localize);
+        if (renderer.IsPlaying)
+            DrawErrorMeter(draw, min, max, session.ErrorMeter, renderer.ErrorMeterTime);
 
         ImVec2 center = new()
         {
@@ -55,6 +57,60 @@ public static unsafe class ManualPlayHud
             DrawCentered(draw, center, remaining == 0 ? "GO!" : remaining.ToString(), ImGui.GetFontSize() * 4f);
         }
     }
+
+    private static void DrawErrorMeter(ImDrawList* draw, ImVec2 min, ImVec2 max, HitErrorMeter meter, double time)
+    {
+        const float referenceWidth = 2560;
+        const float halfWidth = 150;
+        float width = max.x - min.x, height = max.y - min.y;
+        if (width <= 0 || height <= 0) return;
+        float scale = Math.Min(width / referenceWidth, height / 680f);
+        float center = (min.x + max.x) * .5f;
+        float y = max.y - 80f * scale;
+        float barHalfHeight = 6f * scale;
+        float unit = halfWidth * scale;
+
+        ImDrawList.AddRectFilled(draw, Point(center - 1.08f * unit, y - 10f * scale),
+            Point(center + 1.08f * unit, y + 10f * scale), 0xED221F21, 4f * scale, 0);
+
+        Band(-1.05f, -1, HitMargin.TooEarly);
+        Band(-1, -.75f, HitMargin.VeryEarly);
+        Band(-.75f, -.5f, HitMargin.EarlyPerfect);
+        Band(-.5f, .5f, HitMargin.Perfect);
+        Band(.5f, .75f, HitMargin.LatePerfect);
+        Band(.75f, 1, HitMargin.VeryLate);
+        Band(1, 1.05f, HitMargin.TooLate);
+
+        ImDrawList.AddLine(draw, Point(center, y - barHalfHeight), Point(center, y + barHalfHeight),
+            0xBFFFFFFF, Math.Max(1, 2f * scale));
+        for (int i = 0; i < meter.Count; i++)
+        {
+            var tick = meter[i];
+            uint alpha = (uint)(tick.OpacityAt(time) * 255);
+            if (alpha == 0) continue;
+            float x = center + tick.Offset * unit;
+            ImDrawList.AddLine(draw, Point(x, y - 19f * scale), Point(x, y - 3f * scale),
+                (MeterColor(tick.Margin) & 0x00FFFFFF) | (alpha << 24), Math.Max(1f, 3f * scale));
+        }
+
+        float hand = center + meter.HandAt(time) * unit;
+        ImDrawList.AddTriangleFilled(draw, Point(hand, y + 9f * scale),
+            Point(hand - 7f * scale, y + 19f * scale), Point(hand + 7f * scale, y + 19f * scale), 0xFFFCF8F5);
+
+        void Band(float left, float right, HitMargin margin) => ImDrawList.AddRectFilled(draw,
+            Point(center + left * unit, y - barHalfHeight), Point(center + right * unit, y + barHalfHeight),
+            MeterColor(margin), 0, 0);
+
+        static ImVec2 Point(float x, float y) => new() { x = x, y = y };
+    }
+
+    private static uint MeterColor(HitMargin margin) => margin switch
+    {
+        HitMargin.Perfect => 0xFF7EE15D,
+        HitMargin.EarlyPerfect or HitMargin.LatePerfect => 0xFF6EE3F1,
+        HitMargin.VeryEarly or HitMargin.VeryLate => 0xFF6A8BF4,
+        _ => 0xFF5656F3,
+    };
 
     private static void DrawJudgments(ImDrawList* draw, float rightEdge, float topEdge, HitStats stats, Func<string, string>? localize)
     {

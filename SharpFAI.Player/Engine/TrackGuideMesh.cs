@@ -5,15 +5,18 @@ using Thrust.Graphics;
 
 namespace SharpFAI.Player.Engine;
 
-internal static class TrackGuideMesh
+internal sealed class TrackGuideMesh(Mesh mesh, int[] holdFloors) : IDisposable
 {
+    public Mesh Mesh { get; } = mesh;
+    public int[] HoldFloors { get; } = holdFloors;
+
     private static readonly VertexDeclaration Layout = new(
         (VertexAttribute.Position, VertexFormat.Float2),
         (VertexAttribute.Normal, VertexFormat.Float2),
         (VertexAttribute.TexCoord0, VertexFormat.Float2),
         (VertexAttribute.Tangent, VertexFormat.Float4),
         (VertexAttribute.Color0, VertexFormat.Float4),
-        (VertexAttribute.TexCoord1, VertexFormat.Float2),
+        (VertexAttribute.TexCoord1, VertexFormat.Float3),
         (VertexAttribute.Custom0, VertexFormat.Float2));
 
     private readonly record struct Point(Vector2 Preview, Vector2 Runtime)
@@ -23,7 +26,7 @@ internal static class TrackGuideMesh
             Vector2.Lerp(a.Runtime, b.Runtime, t));
     }
 
-    public static Mesh? Build(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> preview, IReadOnlyList<FloorTrackState> runtime,
+    public static TrackGuideMesh? Build(IReadOnlyList<Floor> floors, IReadOnlyList<FloorTrackState> preview, IReadOnlyList<FloorTrackState> runtime,
         LevelRenderer.PlaybackTimeline timeline, float spacing, CancellationToken token)
     {
         if (!timeline.PlanetTrack.Any(floor => floor.HasHold || floor.Count == 3))
@@ -32,6 +35,7 @@ internal static class TrackGuideMesh
         }
 
         Mesh mesh = new(Layout, indexFormat: IndexFormat.UInt32) { Name = "TrackGuides" };
+        List<int> holdFloors = [];
         try
         {
             int previousCount = 2;
@@ -39,27 +43,31 @@ internal static class TrackGuideMesh
             {
                 token.ThrowIfCancellationRequested();
                 PlanetTrackFloor state = timeline.PlanetTrack[i];
+                bool hold = state.HasHold && i + 1 < floors.Count;
+                if (state.Count == previousCount && !hold)
+                    continue;
                 Point origin = Center(i);
                 float start = (float)timeline.EntryTimes[i];
                 float end = i + 1 < floors.Count ? (float)timeline.EntryTimes[i + 1] : start;
-                Vector2 opacity = new(preview[i].Hidden ? 0f : preview[i].Opacity,
-                    runtime[i].Hidden ? 0f : runtime[i].Opacity);
+                Vector3 appearance = new(preview[i].Hidden ? 0f : preview[i].Opacity,
+                    runtime[i].Hidden ? 0f : runtime[i].Opacity, holdFloors.Count);
 
                 if (state.Count != previousCount)
                 {
                     float bearing = (i > 0 ? floors[i - 1].angle : floors[i].angle) + 180f;
                     AddPlanetChange(mesh, origin, start, bearing, PlanetTrackFloor.ThirdAngle(floors[i].isCW),
-                        spacing * state.Radius, state.Count > previousCount, opacity);
+                        spacing * state.Radius, state.Count > previousCount, appearance);
                 }
                 previousCount = state.Count;
 
-                if (state.HasHold && i + 1 < floors.Count)
+                if (hold)
                 {
-                    AddHold(mesh, origin, Center(i + 1), floors[i].angle, timeline, i, spacing, opacity);
+                    holdFloors.Add(i);
+                    AddHold(mesh, origin, Center(i + 1), floors[i].angle, timeline, i, spacing, appearance);
                     if (state.LandingAnimation)
                     {
                         Ring(mesh, Center(i + 1), spacing * .42f, spacing * .034f,
-                            new Vector4(0f, start, end, 2f), new Vector4(.89f, .94f, 1f, .85f), opacity);
+                            new Vector4(0f, start, end, 2f), new Vector4(.89f, .94f, 1f, .85f), appearance);
                     }
                 }
             }
@@ -71,7 +79,7 @@ internal static class TrackGuideMesh
             }
 
             mesh.AddSubMeshForAll();
-            return mesh;
+            return new TrackGuideMesh(mesh, holdFloors.ToArray());
         }
         catch
         {
@@ -87,8 +95,10 @@ internal static class TrackGuideMesh
         }
     }
 
+    public void Dispose() => Mesh.Dispose();
+
     private static void AddHold(Mesh mesh, Point origin, Point landing, float exit,
-        LevelRenderer.PlaybackTimeline timeline, int index, float spacing, Vector2 opacity)
+        LevelRenderer.PlaybackTimeline timeline, int index, float spacing, Vector3 appearance)
     {
         double sweep = timeline.SweepDelta[index];
         double startAngle = timeline.SweepStart[index];
@@ -109,9 +119,9 @@ internal static class TrackGuideMesh
             float width = spacing * .043f;
             Vector4 color = new(.54f, .82f, 1f, 1f);
             Vertex(mesh, new Point(point.Preview + normal.Preview * width, point.Runtime + normal.Runtime * width),
-                1f, data, color, opacity);
+                1f, data, color, appearance);
             Vertex(mesh, new Point(point.Preview - normal.Preview * width, point.Runtime - normal.Runtime * width),
-                -1f, data, color, opacity);
+                -1f, data, color, appearance);
         }
         AppendStrip(mesh, first, segments);
 
@@ -120,7 +130,7 @@ internal static class TrackGuideMesh
     }
 
     private static void AddPlanetChange(Mesh mesh, Point origin, float time, float entry, float side,
-        float spacing, bool entering, Vector2 opacity)
+        float spacing, bool entering, Vector3 appearance)
     {
         if (!(spacing > 1e-5f))
         {
@@ -133,33 +143,33 @@ internal static class TrackGuideMesh
         Vector4 color = new(.84f, .92f, 1f, .55f);
         if (entering)
         {
-            Dash(mesh, origin, previous, spacing, meta, color, opacity);
-            Dash(mesh, previous, extra, spacing, meta, color, opacity);
-            Dash(mesh, extra, origin, spacing, meta, color, opacity);
-            Dot(mesh, extra, spacing * .24f, meta, new Vector4(.88f, .92f, 1f, .85f), opacity);
+            Dash(mesh, origin, previous, spacing, meta, color, appearance);
+            Dash(mesh, previous, extra, spacing, meta, color, appearance);
+            Dash(mesh, extra, origin, spacing, meta, color, appearance);
+            Dot(mesh, extra, spacing * .24f, meta, new Vector4(.88f, .92f, 1f, .85f), appearance);
         }
         else
         {
             for (int i = 0; i < 24; i++)
             {
                 Point dot = extra.Offset(PlanetTrackFloor.Direction(i * 15f) * (spacing * .23f));
-                Dot(mesh, dot, spacing * .017f, meta, color, opacity);
+                Dot(mesh, dot, spacing * .017f, meta, color, appearance);
             }
         }
     }
 
-    private static void Dash(Mesh mesh, Point start, Point end, float spacing, Vector4 meta, Vector4 color, Vector2 opacity)
+    private static void Dash(Mesh mesh, Point start, Point end, float spacing, Vector4 meta, Vector4 color, Vector3 appearance)
     {
         const int count = 7;
         for (int i = 0; i < count; i++)
         {
             Point a = Point.Lerp(start, end, (float)i / count);
             Point b = Point.Lerp(start, end, (i + .55f) / count);
-            Stroke(mesh, a, b, spacing * .013f, meta, color, opacity);
+            Stroke(mesh, a, b, spacing * .013f, meta, color, appearance);
         }
     }
 
-    private static void Ring(Mesh mesh, Point center, float radius, float width, Vector4 data, Vector4 color, Vector2 opacity)
+    private static void Ring(Mesh mesh, Point center, float radius, float width, Vector4 data, Vector4 color, Vector3 appearance)
     {
         const int segments = 48;
         uint start = (uint)mesh.VertexCount;
@@ -168,21 +178,21 @@ internal static class TrackGuideMesh
             Vector2 unit = PlanetTrackFloor.Direction(i * 360f / segments);
             Vector2 outer = unit * (radius + width);
             Vector2 inner = unit * (radius - width);
-            Vertex(mesh, center, 1f, data, color, opacity, outer);
-            Vertex(mesh, center, -1f, data, color, opacity, inner);
+            Vertex(mesh, center, 1f, data, color, appearance, outer);
+            Vertex(mesh, center, -1f, data, color, appearance, inner);
         }
         AppendStrip(mesh, start, segments);
     }
 
-    private static void Dot(Mesh mesh, Point center, float radius, Vector4 data, Vector4 color, Vector2 opacity)
+    private static void Dot(Mesh mesh, Point center, float radius, Vector4 data, Vector4 color, Vector3 appearance)
     {
         const int segments = 16;
         uint start = (uint)mesh.VertexCount;
-        Vertex(mesh, center, 0f, data, color, opacity);
+        Vertex(mesh, center, 0f, data, color, appearance);
         for (int i = 0; i <= segments; i++)
         {
             Vertex(mesh, center.Offset(PlanetTrackFloor.Direction(i * 360f / segments) * radius),
-                1f, data, color, opacity);
+                1f, data, color, appearance);
         }
 
         for (uint i = 0; i < segments; i++)
@@ -201,15 +211,15 @@ internal static class TrackGuideMesh
         }
     }
 
-    private static void Stroke(Mesh mesh, Point a, Point b, float width, Vector4 data, Vector4 color, Vector2 opacity)
+    private static void Stroke(Mesh mesh, Point a, Point b, float width, Vector4 data, Vector4 color, Vector3 appearance)
     {
         Vector2 preview = Normal(a.Preview, b.Preview) * width;
         Vector2 runtime = Normal(a.Runtime, b.Runtime) * width;
         uint start = (uint)mesh.VertexCount;
-        Vertex(mesh, new Point(a.Preview + preview, a.Runtime + runtime), 1f, data, color, opacity);
-        Vertex(mesh, new Point(a.Preview - preview, a.Runtime - runtime), -1f, data, color, opacity);
-        Vertex(mesh, new Point(b.Preview + preview, b.Runtime + runtime), 1f, data, color, opacity);
-        Vertex(mesh, new Point(b.Preview - preview, b.Runtime - runtime), -1f, data, color, opacity);
+        Vertex(mesh, new Point(a.Preview + preview, a.Runtime + runtime), 1f, data, color, appearance);
+        Vertex(mesh, new Point(a.Preview - preview, a.Runtime - runtime), -1f, data, color, appearance);
+        Vertex(mesh, new Point(b.Preview + preview, b.Runtime + runtime), 1f, data, color, appearance);
+        Vertex(mesh, new Point(b.Preview - preview, b.Runtime - runtime), -1f, data, color, appearance);
         QuadIndices(mesh, start);
     }
 
@@ -219,7 +229,7 @@ internal static class TrackGuideMesh
         return delta.LengthSquared > 1e-8f ? new Vector2(-delta.Y, delta.X).Normalized() : Vector2.UnitY;
     }
 
-    private static void Vertex(Mesh mesh, Point point, float profile, Vector4 data, Vector4 color, Vector2 opacity,
+    private static void Vertex(Mesh mesh, Point point, float profile, Vector4 data, Vector4 color, Vector3 appearance,
         Vector2 cueOffset = default)
     {
         VertexWriter vertex = mesh.AppendVertex();
@@ -228,7 +238,7 @@ internal static class TrackGuideMesh
         vertex.SetTexCoord(0, new Vector2(profile, 0f));
         vertex.SetVector4(VertexAttribute.Tangent, data);
         vertex.SetColor(0, color);
-        vertex.SetTexCoord(1, opacity);
+        vertex.SetVector3(VertexAttribute.TexCoord1, appearance);
         vertex.SetVector2(VertexAttribute.Custom0, cueOffset);
     }
 

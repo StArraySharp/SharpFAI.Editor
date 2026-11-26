@@ -80,8 +80,8 @@ internal sealed record EditorPropertyEdit(EditorDocument Document, JObject Owner
         value = JValue.CreateNull();
         if (string.IsNullOrWhiteSpace(text) && field.AllowEmpty) return true;
         bool whole = field.Type is "Int" or "Tile";
-        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) ||
-            !double.IsFinite(number) || number < (field.Minimum ?? double.NegativeInfinity) ||
+        if (!EditorNumberExpression.TryEvaluate(text, out double number) ||
+            number < (field.Minimum ?? double.NegativeInfinity) ||
             number > (field.Maximum ?? double.PositiveInfinity) ||
             whole && (number != Math.Truncate(number) || number < int.MinValue || number > int.MaxValue)) return false;
         value = whole ? new JValue((int)number) : new JValue(number);

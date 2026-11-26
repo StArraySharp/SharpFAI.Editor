@@ -97,6 +97,12 @@
   <data name="EditParticle" xml:space="preserve"><value>编辑粒子…</value></data>
   <data name="AddDecoration" xml:space="preserve"><value>添加装饰</value></data>
   <data name="SearchDecorations" xml:space="preserve"><value>按砖块、类型或标签筛选</value></data>
+  <data name="DecorationActions" xml:space="preserve"><value>装饰操作</value></data>
+  <data name="DecorationTypeImage" xml:space="preserve"><value>图片</value></data>
+  <data name="DecorationTypeText" xml:space="preserve"><value>文字</value></data>
+  <data name="DecorationTypeObject" xml:space="preserve"><value>物件</value></data>
+  <data name="DecorationTypeParticle" xml:space="preserve"><value>粒子</value></data>
+  <data name="DecorationTypeOther" xml:space="preserve"><value>其他</value></data>
   <data name="HideAll" xml:space="preserve"><value>隐藏全部</value></data>
   <data name="ShowAll" xml:space="preserve"><value>恢复显示</value></data>
   <data name="LockAll" xml:space="preserve"><value>锁定全部</value></data>
@@ -385,7 +391,7 @@
   <data name="ResetPlaybackSpeed" xml:space="preserve"><value>恢复 100% 播放速度</value></data>
   <data name="TilesOnly" xml:space="preserve"><value>纯砖块</value></data>
   <data name="EditSceneModeHelp" xml:space="preserve"><value>切换纯砖块与特效预览，不影响实际播放</value></data>
-  <data name="InlineNumberHelp" xml:space="preserve"><value>点击输入，左右拖动调值</value></data>
+  <data name="InlineNumberHelp" xml:space="preserve"><value>点击输入数值或算式，左右拖动调值。</value></data>
   <data name="Name_artistLinks" xml:space="preserve"><value>艺术家链接</value></data>
   <data name="Name_artistPermission" xml:space="preserve"><value>授权凭证图片</value></data>
   <data name="Name_autoPlay" xml:space="preserve"><value>开始时播放</value></data>

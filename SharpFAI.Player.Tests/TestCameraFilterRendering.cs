@@ -42,6 +42,13 @@ public sealed class TestCameraFilterRendering
                     }
                 }
                 """);
+            File.WriteAllText(Path.Combine(filters.FullName, "CameraSize.frag"), """
+                #version 410 core
+                out vec4 color;
+                uniform vec4 _ScreenParams;
+                uniform vec4 _MainTex_TexelSize;
+                void main() { color = vec4(vec3(_ScreenParams.xy, _MainTex_TexelSize.z) * vec3(8.0, 16.0, 8.0) / 255.0, 1.0); }
+                """);
             ShaderLibrary.DiskDirectory = fixture.FullName;
             ShaderLibrary.InvalidateCache();
 
@@ -63,6 +70,27 @@ public sealed class TestCameraFilterRendering
             DrawAndCheck(defaults, 64);
             DrawAndCheck(overrideMaterial, 159);
             DrawAndCheck(defaults, 64);
+
+            var small = (OpenGlFilterBackend.Target)backend.RentTarget(2, 1, 0);
+            var cameraSize = backend.CreateMaterial(backend.FindShader("CameraSize"));
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            GL.Viewport(0, 0, 8, 4);
+            backend.Draw(1, 1, 0, [], () => CheckCameraSize([64, 64, 64, 255]),
+                clearSource: System.Numerics.Vector4.Zero);
+            CheckCameraSize([16, 16, 64, 255]);
+
+            void CheckCameraSize(byte[] expected)
+            {
+                int drawFramebuffer = GL.GetInteger(GetPName.DrawFramebufferBinding);
+                int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
+                backend.Blit(source, small, cameraSize);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, small.Framebuffer);
+                byte[] pixel = new byte[4];
+                GL.ReadPixels(0, 0, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
+                GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, drawFramebuffer);
+                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+                Assert.That(pixel, Is.EqualTo(expected));
+            }
 
             void DrawAndCheck(IFilterMaterial material, byte blue)
             {

@@ -6,6 +6,7 @@ namespace SharpFAI.Player.ModSupport;
 
 public sealed record RegisteredCommand(CommandDescriptor Descriptor, ModCommand Run);
 public sealed record RegisteredWindow(ToolWindowDescriptor Descriptor, Func<IToolWindow> Create);
+internal sealed record RegisteredSettings(Action Draw);
 public sealed record ChartProcessor(ChartPreparationStage Stage, Func<ChartPreparationContext, CancellationToken, ValueTask<ChartPreparationResult>> Run,
     ChartPreprocessorReads? Reads = null);
 public sealed record AssetProcessor(AssetKind Kind, Func<AssetPreparationContext, CancellationToken, ValueTask<PreparedAsset?>> Run);

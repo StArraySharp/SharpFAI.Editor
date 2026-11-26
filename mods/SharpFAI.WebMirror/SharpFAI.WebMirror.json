@@ -1,0 +1,20 @@
+{
+  "manifestVersion": 1,
+  "id": "com.sharpfai.web-mirror",
+  "name": "SharpFAI Web Mirror",
+  "version": "1.0.0",
+  "api": "[1.0.0,2.0.0)",
+  "entryType": "SharpFAI.WebMirror.WebMirrorMod",
+  "translations": {
+    "zh-Hans": {
+      "Web Mirror": "Web 镜像",
+      "Running": "镜像服务已启动",
+      "Stopped": "镜像服务已停止",
+      "Open in Browser": "在浏览器中打开",
+      "Start Automatically": "启用 Mod 时自动启动",
+      "Maximum Frame Rate": "镜像最大帧率",
+      "Start": "启动",
+      "Stop": "停止"
+    }
+  }
+}

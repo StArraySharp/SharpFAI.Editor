@@ -80,7 +80,9 @@ dotnet test .\SharpFAI.Editor.slnx -c Release
 | `publish/SharpFAI.Editor-linux-x64-<版本>` | Linux x64 |
 | `publish/SharpFAI.Editor-osx-x64-<版本>` | macOS x64 |
 | `publish/SharpFAI.Editor-osx-arm64-<版本>` | macOS arm64 |
-| `publish/SharpFAI.Editor-MultiPlatforms-<版本>.zip` | 四个可执行文件和字体许可证 |
+| `publish/Mods/SharpFAI.Mcp.sharpfaimod` | MCP Mod |
+| `publish/Mods/SharpFAI.WebMirror.sharpfaimod` | Web 镜像 Mod |
+| `publish/SharpFAI.Editor-MultiPlatforms-<版本>.zip` | 所选平台的可执行文件、字体许可证和 `Mods/` 下的两个 Mod |
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1
@@ -92,7 +94,7 @@ pwsh -NoProfile -File .\publish.ps1
 pwsh -NoProfile -File .\publish.ps1 -Runtime linux-x64,osx-arm64
 ```
 
-维护者可使用本地 `release.ps1` 发布。先提交并推送对应版本的源码。脚本从 Git 凭据助手读取 GitHub 登录凭据，从本地脚本配置读取 ATL 登录信息。它调用一次 `publish.ps1`，将各平台可执行文件上传到 GitHub Releases，将 MultiPlatforms ZIP 上传到 ATL。需要预览操作时加 `-WhatIf`。
+维护者可使用本地 `release.ps1` 发布。先提交并推送对应版本的源码。脚本从 Git 凭据助手读取 GitHub 登录凭据，从本地脚本配置读取 ATL 登录信息。它调用一次 `publish.ps1`，将各平台可执行文件和两个 Mod 包上传到 GitHub Releases，将 MultiPlatforms ZIP 上传到 ATL。需要预览操作时加 `-WhatIf`。
 
 ```powershell
 pwsh -NoProfile -File .\release.ps1 -Tag stable -Changelog "中文更新说明"

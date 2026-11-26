@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using OpenTK.Graphics.OpenGL4;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace SharpFAI.Player;
@@ -11,6 +12,22 @@ namespace SharpFAI.Player;
 /// </summary>
 internal static unsafe class FrameCapture
 {
+    public static byte[] EncodePng(byte[] pixels, int width, int height)
+    {
+        using var image = Image.LoadPixelData<Rgba32>(pixels, width, height);
+        using var output = new MemoryStream();
+        image.SaveAsPng(output);
+        return output.ToArray();
+    }
+
+    public static byte[] EncodeJpeg(byte[] pixels, int width, int height)
+    {
+        using var image = Image.LoadPixelData<Rgba32>(pixels, width, height);
+        using var output = new MemoryStream();
+        image.SaveAsJpeg(output, new JpegEncoder { Quality = 85 });
+        return output.ToArray();
+    }
+
     /// <summary>
     /// Grab the back buffer and write it as a PNG. OpenGL returns rows bottom-up, so they are
     /// flipped on the way out.

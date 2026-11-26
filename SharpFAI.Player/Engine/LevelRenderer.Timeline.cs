@@ -52,13 +52,12 @@ public sealed unsafe partial class LevelRenderer
             ? FloorTimingCalculator.Calculate(level) : FloorTimingCalculator.Calculate(level, coreEvents);
         events ??= PlaybackEventBinder.BindForPlayback(level);
         PlanetTrackFloor[] planetTrack = PlanetTrackFloor.Resolve(timing, events);
-        Dictionary<int, EventEnums.AngleCorrectionDirection> pauseDirections = [];
+        Dictionary<int, (EventEnums.AngleCorrectionDirection Direction, int Ticks)> pauseOptions = [];
         foreach (PauseAngleEvent pause in events.OfType<PauseAngleEvent>().Where(pause => pause.IsActive))
         {
-            if (pause.Enabled("angleCorrectionDir", pause.AngleCorrectionDir) is { } correction)
-                pauseDirections[pause.Floor] = correction;
-            else
-                pauseDirections.TryAdd(pause.Floor, EventEnums.AngleCorrectionDirection.Backward);
+            var previous = pauseOptions.GetValueOrDefault(pause.Floor, (EventEnums.AngleCorrectionDirection.Backward, 0));
+            pauseOptions[pause.Floor] = (pause.Enabled("angleCorrectionDir", pause.AngleCorrectionDir) ?? previous.Item1,
+                pause.Enabled("countdownTicks", pause.CountdownTicks) ?? 0);
         }
 
         double offsetSeconds = ReadLevelOffset(level);
@@ -138,14 +137,19 @@ public sealed unsafe partial class LevelRenderer
 
         Dictionary<int, PauseAngleCorrection>? pauseAngles = null;
         Dictionary<int, double>? pauseLocks = null;
-        foreach ((int i, EventEnums.AngleCorrectionDirection correction) in pauseDirections)
+        Dictionary<int, PauseStartTiming>? pauseStarts = null;
+        foreach (var (i, (correction, ticks)) in pauseOptions)
         {
             if (i <= 0 || i >= floors.Count - 1 || i >= timing.Count || floors[i].isMidspin
                 || !(timing[i].ExtraBeats > 0.0))
                 continue;
 
             double direction = floors[i].isCW ? -1.0 : 1.0;
-            double inputLock = (timing[i].ExtraBeats + .2) * 60.0 / floorBpms[i];
+            double beat = 60.0 / floorBpms[i];
+            double pauseBeats = timing[i].ExtraBeats;
+            int leadBeats = ticks > 1 && pauseBeats >= ticks ? ticks : 4;
+            (pauseStarts ??= [])[i] = new(entryTimes[i] + pauseBeats * beat, beat, leadBeats);
+            double inputLock = (pauseBeats + .2) * beat;
             if (entryTimes[i + 1] - entryTimes[i] - inputLock >= .05)
                 (pauseLocks ??= [])[i] = inputLock;
 
@@ -195,6 +199,7 @@ public sealed unsafe partial class LevelRenderer
             PlanetTrack = planetTrack,
             PauseAngles = pauseAngles,
             PauseLocks = pauseLocks,
+            PauseStarts = pauseStarts,
             LevelDuration = Math.Max(entryTimes[^1], 0.0),
             OffsetSeconds = offsetSeconds,
             SeparateCountdownLead = audioLead,
@@ -217,6 +222,7 @@ public sealed unsafe partial class LevelRenderer
         _sweepDelta = timeline.SweepDelta;
         _planetTrack = timeline.PlanetTrack;
         _pauseAngles = timeline.PauseAngles;
+        _pauseStarts = timeline.PauseStarts;
         _levelDuration = timeline.LevelDuration;
         _offsetSeconds = timeline.OffsetSeconds;
         _videoCountdownLead = timeline.SeparateCountdownLead;
@@ -227,6 +233,7 @@ public sealed unsafe partial class LevelRenderer
     {
         SetTimelineData(timeline);
         _currentIndex = 0;
+        _startFromSelectedFloor = false;
         _playTime = 0.0;
         _isPlaying = false;
         _playbackZoomNeedsReset = true;

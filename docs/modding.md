@@ -26,6 +26,10 @@ dotnet build .\examples\SharpFAI.ModExamples -c Release
 
 接口签名、能力声明和处理阶段见 [Mod API 参考](mod-api.md)。
 
+本机 MCP 接入和抓帧工具见 [SharpFAI MCP Mod](mcp-mod.md)。
+
+在浏览器中查看和操作编辑器见 [SharpFAI Web 镜像 Mod](web-mirror.md)。
+
 用 `[MenuItem("Tools/我的命令")]` 标记静态方法就能注册菜单。需要其他宿主服务时，实现 `ISharpFaiMod`，在 `ActivateAsync` 中用 `GetRequiredService<T>()` 获取必需服务，或用 `GetService<T>()` 检查可选服务。以示例项目为模板，编译时引用 `SharpFAI.ModApi` 1.0.0。[示例项目](../examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj)
 
 新包使用下面的布局。把目录内容压缩成 ZIP，再使用 `.sharpfaimod` 扩展名。入口 DLL 由同名 JSON 推断，依赖 DLL 放在同一目录。`entryType` 在入口程序集只有一个 Mod 类型时可省略。翻译可写入清单的 `translations`，包内素材可放在 `assets/`。原有 `mod.json`、`entryAssembly` 和 `assemblies/` 布局仍可读取。

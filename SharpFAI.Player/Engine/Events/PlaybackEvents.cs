@@ -5,6 +5,9 @@ namespace SharpFAI.Player.Engine.Events;
 
 internal sealed class PauseAngleEvent : PreviewEvent
 {
+    [JsonProperty("countdownTicks")]
+    public int? CountdownTicks { get; set; }
+
     [JsonProperty("angleCorrectionDir")]
     public EventEnums.AngleCorrectionDirection? AngleCorrectionDir { get; set; }
 }

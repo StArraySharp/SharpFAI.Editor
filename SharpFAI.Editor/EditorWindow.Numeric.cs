@@ -49,6 +49,45 @@ internal sealed unsafe partial class EditorWindow
     private static float NumberUnitWidth(string unit) =>
         unit.Length == 0 ? 0 : ImGui.CalcTextSize(unit).x + ImGui.GetStyle()->ItemInnerSpacing.x;
 
+    private bool DrawIntegerExpression(string label, ref int value, ref string? draft, int fastStep, out bool submitted)
+    {
+        const string id = "##number-expression";
+        ImGui.PushID(label);
+        float button = ImGui.GetFrameHeight();
+        float buttonsWidth = 2 * (button + ImGui.GetStyle()->ItemSpacing.x);
+        float width = ImGui.CalcItemWidth();
+        bool showSteps = width > buttonsWidth + 35 * _uiScale;
+        ImGui.SetNextItemWidth(Math.Max(1, width - (showSteps ? buttonsWidth : 0)));
+        string text = draft ?? value.ToString(CultureInfo.InvariantCulture);
+        submitted = ImGui.GetCurrentContext()->ActiveId == ImGui.GetID(id) &&
+            (Pressed(ImGuiKey.ImGuiKey_Enter) || Pressed(ImGuiKey.ImGuiKey_KeypadEnter));
+        text = EditText(id, "", text, live: true, extraFlags: (int)ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll) ?? text;
+        draft = ImGui.IsItemActive() != 0 ? text : null;
+        bool valid = EditorNumberExpression.TryEvaluate(text, out double number) &&
+            number is >= int.MinValue and <= int.MaxValue && number == Math.Truncate(number);
+        if (valid) value = (int)number;
+        else WidgetDraw.ItemTooltip(L.T("InvalidNumber"));
+        if (showSteps)
+        {
+            ImGui.SameLine();
+            bool minus = ImGui.Button("−", WidgetDraw.V2(button, button)) != 0;
+            ImGui.SameLine();
+            bool plus = ImGui.Button("+", WidgetDraw.V2(button, button)) != 0;
+            if (plus || minus)
+            {
+                int step = ImGui.GetIO()->KeyCtrl != 0 ? fastStep : 1;
+                value = (int)Math.Clamp((long)value + (plus ? step : -step), int.MinValue, int.MaxValue);
+                draft = null;
+                valid = true;
+            }
+        }
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(label);
+        ImGui.PopID();
+        return valid;
+    }
+
     private void DrawVectorInput(JObject target, EditorField field, JArray? value)
     {
         bool range = field.Type == "Vector2Range";

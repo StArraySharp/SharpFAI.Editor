@@ -25,29 +25,32 @@ public sealed unsafe partial class LevelRenderer
     internal bool EditorInsertedTrackNeedsUpdate(int version, bool tilesOnly) =>
         version != _editorInsertedVersion || tilesOnly != _editorInsertedTilesOnly;
 
-    internal void SetEditorInsertedTrack(int version, int anchor, IReadOnlyList<EditorInsertedFloor> inserted, bool tilesOnly)
+    internal void SetEditorInsertedTrack(int version, int anchor, IReadOnlyList<EditorInsertedFloor> inserted, bool tilesOnly,
+        Vector2 anchorCenter, bool anchorMidspin)
     {
         if (inserted.Count == 0 || (uint)anchor >= (uint)_trackStates.Count)
         {
             ClearEditorInsertedTrack();
             return;
         }
-        var floors = new Floor[inserted.Count];
-        var states = new FloorTrackState[inserted.Count];
+        var floors = new Floor[inserted.Count + 1];
+        var states = new FloorTrackState[floors.Length];
         var anchorState = _trackStates[anchor];
         var state = anchorState with { Icon = FloorIcon.None, ReverseIcon = false, Hidden = false };
+        floors[0] = CopyEditorFloor(_floors[anchor], inserted[0].Incoming, _floors[anchor].exitAngle, anchorCenter, anchorMidspin);
+        states[0] = anchorState;
         for (int i = 0; i < inserted.Count; i++)
         {
             var tile = inserted[i];
             int index = anchor + 1 + i;
-            floors[i] = new Floor(tile.Outgoing, tile.Incoming - 180, new(tile.Center.X, tile.Center.Y))
+            floors[i + 1] = new Floor(tile.Outgoing, tile.Incoming - 180, new(tile.Center.X, tile.Center.Y))
             {
                 index = index,
                 renderOrder = -index,
                 isMidspin = tile.Midspin,
                 angle = (float)tile.Outgoing,
             };
-            states[i] = state;
+            states[i + 1] = state;
         }
 
         _officialRenderer ??= new OfficialFloorRenderer(_uploader, _floorTextureCapacity);
@@ -65,17 +68,20 @@ public sealed unsafe partial class LevelRenderer
             geometry.Dispose();
             throw;
         }
-        var transform = state.Transform with { Offset = Vector2.Zero };
-        if (tilesOnly)
-            transform = transform with { Scale = new(transform.Scale.X == 0f ? 1f : transform.Scale.X,
-                transform.Scale.Y == 0f ? 1f : transform.Scale.Y) };
         float volume = state.Mode == TrackColorMode.Volume ? ReadTrackVolume() : 0f;
         for (int i = 0; i < floors.Length; i++)
         {
-            Vector4 color = state.EvaluateColor(floors[i].index, (float)_playTime, volume);
-            if (tilesOnly) color.W = 1f;
+            var visual = states[i];
+            var transform = visual.Transform with { Offset = Vector2.Zero };
+            Vector4 color = visual.EvaluateColor(floors[i].index, (float)_playTime, volume);
+            if (tilesOnly)
+            {
+                color.W = 1f;
+                transform = transform with { Scale = new(transform.Scale.X == 0f ? 1f : transform.Scale.X,
+                    transform.Scale.Y == 0f ? 1f : transform.Scale.Y) };
+            }
             _editorInsertedTrack.SetFloorVisual(i, transform,
-                new FloorAppearance(color, tilesOnly ? 1f : state.Opacity));
+                new FloorAppearance(color, tilesOnly ? 1f : visual.Opacity));
         }
         _editorInsertedVersion = version;
         _editorInsertedAnchor = anchor;
@@ -101,14 +107,14 @@ public sealed unsafe partial class LevelRenderer
         if (anchor + 1 < _floors.Count)
         {
             int next = anchor + 1;
-            boundary = [WithAngles(selected, angle, selected.exitAngle), WithAngles(_floors[next], _floors[next].entryAngle, angle - 180)];
+            boundary = [CopyEditorFloor(selected, angle, selected.exitAngle), CopyEditorFloor(_floors[next], _floors[next].entryAngle, angle - 180)];
             states = [_trackStates[anchor], _trackStates[next]];
             float distance = TileSpacing * (_planetTrack[next].Radius + _planetTrack[anchor].HoldDistance);
             offset = Direction(angle) * TileSpacing - Direction(selected.angle) * distance;
         }
         else
         {
-            boundary = [WithAngles(selected, angle, selected.exitAngle)];
+            boundary = [CopyEditorFloor(selected, angle, selected.exitAngle)];
             states = [_trackStates[anchor]];
         }
 
@@ -132,12 +138,20 @@ public sealed unsafe partial class LevelRenderer
         _editorAngleOffset = offset;
         _floorVisualTime = double.NaN;
 
-        static Floor WithAngles(Floor floor, double outgoing, double incoming) => new(outgoing, incoming, floor.position)
+        static Vector2 Direction(double degrees)
+        {
+            (double sin, double cos) = Math.SinCos(degrees * Math.PI / 180);
+            return new((float)cos, (float)sin);
+        }
+    }
+
+    private static Floor CopyEditorFloor(Floor floor, double outgoing, double incoming, Vector2? center = null, bool? midspin = null) =>
+        new(outgoing, incoming, center is { } position ? new(position.X, position.Y) : floor.position)
         {
             index = floor.index,
             renderOrder = floor.renderOrder,
             angle = (float)outgoing,
-            isMidspin = floor.isMidspin,
+            isMidspin = midspin ?? floor.isMidspin,
             icon = floor.icon,
             iconAngle = floor.iconAngle,
             iconFlipped = floor.iconFlipped,
@@ -146,13 +160,6 @@ public sealed unsafe partial class LevelRenderer
             textureOffsetX = floor.textureOffsetX,
             textureOffsetY = floor.textureOffsetY,
         };
-
-        static Vector2 Direction(double degrees)
-        {
-            (double sin, double cos) = Math.SinCos(degrees * Math.PI / 180);
-            return new((float)cos, (float)sin);
-        }
-    }
 
     internal void ClearEditorAnglePreview()
     {

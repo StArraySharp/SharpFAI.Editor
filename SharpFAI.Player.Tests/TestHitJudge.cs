@@ -139,6 +139,44 @@ public class TestManualPlay
         Assert.That(session.CurrentFloor, Is.EqualTo(2));
         Assert.That(session.GetResult(1), Is.EqualTo(HitMargin.Perfect));
         Assert.That(session.GetResult(2), Is.EqualTo(HitMargin.Perfect));
+        Assert.That(session.ErrorMeter.Count, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ErrorMeterUsesTheWindowFromTheHitFloorAndClearsOnRestart()
+    {
+        ManualTrack track = Track(events: [new ScaleMarginEvent { Floor = 1, Scale = 50 }]);
+        PlaySession session = Start(track);
+        Advance(session, .48, Press(.475));
+        var tick = session.ErrorMeter[0];
+        Assert.Multiple(() =>
+        {
+            Assert.That(session.ErrorMeter.Count, Is.EqualTo(1));
+            Assert.That(tick.Offset, Is.EqualTo(-.3f).Within(.00001));
+            Assert.That(tick.OpacityAt(tick.Time + 1.5), Is.EqualTo(.75f));
+        });
+        session.Start(track, 0, 0);
+        Assert.That(session.ErrorMeter.Count, Is.Zero);
+        Assert.That(session.ErrorMeter.HandAt(2), Is.Zero);
+    }
+
+    [Test]
+    public void ErrorMeterSmoothsTheAverageAndKeepsOnlyRecentTicks()
+    {
+        var meter = new HitErrorMeter();
+        var bounds = HitJudge.GetBoundaries(120);
+        meter.Add(30, bounds, 0);
+        Assert.That(meter.HandAt(.125), Is.EqualTo(.0875f).Within(.00001));
+        for (int i = 1; i <= HitErrorMeter.Capacity; i++)
+            meter.Add(-90, bounds, i);
+        Assert.Multiple(() =>
+        {
+            Assert.That(meter.Count, Is.EqualTo(HitErrorMeter.Capacity));
+            Assert.That(meter[0].Time, Is.EqualTo(1));
+            Assert.That(meter[0].Offset, Is.InRange(-1.051f, -.999f));
+            Assert.That(meter.HandAt(HitErrorMeter.Capacity + .25), Is.EqualTo(.1f).Within(.00001));
+            Assert.That(meter[0].OpacityAt(4), Is.Zero);
+        });
     }
 
     [Test]
@@ -230,6 +268,30 @@ public class TestManualPlay
     }
 
     [Test]
+    public void StartingOnPauseGatesInputsAndFadesMusicUntilTheEndOfThePause()
+    {
+        ManualTrack track = Track(entries: [0, .5, 1, 5.5, 6],
+            pauseStarts: new() { [2] = new PauseStartTiming(5, .5, 6) });
+        var session = new PlaySession();
+        session.Start(track, 2);
+        Assert.That(session.Time, Is.EqualTo(2));
+        Assert.That(session.CurrentFloor, Is.EqualTo(2));
+        Assert.That(session.PauseStartMusicGain, Is.Zero);
+        Advance(session, 3.5, Press(3.25));
+        Assert.That(session.PauseStartMusicGain, Is.EqualTo(.5f));
+        Assert.That(session.Stats.Total, Is.Zero);
+        Advance(session, 5, Press(4.99));
+        Assert.That(session.PauseStartMusicGain, Is.EqualTo(1));
+        Assert.That(session.Stats.Total, Is.Zero);
+        Advance(session, 5.5, Press(5.5));
+        Assert.That(session.GetResult(3), Is.EqualTo(HitMargin.Perfect));
+
+        session.Start(track, 2, seekTime: 4.5);
+        Assert.That(session.Time, Is.EqualTo(4.5));
+        Assert.That(session.PauseStartMusicGain, Is.EqualTo(1));
+    }
+
+    [Test]
     public void AutoplayScaleMarginAndMultitapUseTheAuthoredTargetFloor()
     {
         Level level = new(new Dictionary<string, object>
@@ -300,7 +362,8 @@ public class TestManualPlay
     }
 
     private static ManualTrack Track(double[]? entries = null, int midspin = -1, int hold = -1,
-        double pauseLock = 0, PlaybackEvent[]? events = null, double bpm = 120, int countdownTicks = 4)
+        double pauseLock = 0, PlaybackEvent[]? events = null, double bpm = 120, int countdownTicks = 4,
+        Dictionary<int, PauseStartTiming>? pauseStarts = null)
     {
         entries ??= [0, .5, 1, 1.5];
         Floor[] floors = Enumerable.Range(0, entries.Length)
@@ -313,6 +376,7 @@ public class TestManualPlay
             PlanetTrack = Enumerable.Range(0, entries.Length)
                 .Select(i => new PlanetTrackFloor(1, 2, 0, 1, 2, i == hold ? 1 : -1, 0, false)).ToArray(),
             PauseLocks = new Dictionary<int, double> { [1] = pauseLock },
+            PauseStarts = pauseStarts,
         };
         return new ManualTrack(floors, timeline, events ?? []);
     }

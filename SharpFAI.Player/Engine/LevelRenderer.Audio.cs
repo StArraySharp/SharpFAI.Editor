@@ -66,7 +66,7 @@ public sealed unsafe partial class LevelRenderer
         _audioBackendReady = EnableAudioOutput && !_settings.SkipAudio && PlaybackAudio.Initialize();
         if (_audioBackendReady)
         {
-            _music = new AudioClip { Name = "Music", Volume = _musicVolume * _musicOutputGain };
+            _music = new AudioClip { Name = "Music", Volume = PlaybackMusicGain };
             _hitsound = new AudioClip { Name = "Hitsound", Volume = _hitsoundVolume * _hitsoundOutputGain };
             if (result.Music is { } music)
                 _music.LoadDecoded(AtPlaybackRate(music));
@@ -101,7 +101,7 @@ public sealed unsafe partial class LevelRenderer
             if (hitsoundChanged)
                 _hitsound = hitsoundClip = UpdateEditorClip(hitsoundClip, hitsound);
 
-            float musicGain = _musicVolume * _musicOutputGain;
+            float musicGain = PlaybackMusicGain;
             if (musicClip.Volume != musicGain)
                 musicClip.Volume = musicGain;
             float hitsoundGain = _hitsoundVolume * _hitsoundOutputGain;
@@ -252,6 +252,11 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
+        if (_music is { } music)
+        {
+            float gain = PlaybackMusicGain;
+            if (music.Volume != gain) music.Volume = gain;
+        }
         SyncClip(_music, _musicEnabled, AudioClockShift);
         SyncClip(_hitsound, _hitsoundEnabled, HitsoundClockShift);
 
@@ -326,6 +331,8 @@ public sealed unsafe partial class LevelRenderer
 
     private float _musicOutputGain = 1f;
     private float _hitsoundOutputGain = 1f;
+    private float PlaybackMusicGain => _musicVolume * _musicOutputGain *
+        (ManualAttemptActive ? PlaySession.PauseStartMusicGain : 1);
 
     // Local monitoring gains are independent of the chart and the export mix.
     public void SetPlaybackOutputVolumes(int master, int music, int hitsound)
@@ -333,7 +340,7 @@ public sealed unsafe partial class LevelRenderer
         float gain = Math.Clamp(master, 0, 100) / 100f;
         _musicOutputGain = gain * (Math.Clamp(music, 0, 100) / 100f);
         _hitsoundOutputGain = gain * (Math.Clamp(hitsound, 0, 100) / 100f);
-        _music?.Volume = _musicVolume * _musicOutputGain;
+        _music?.Volume = PlaybackMusicGain;
         _hitsound?.Volume = _hitsoundVolume * _hitsoundOutputGain;
     }
 
@@ -344,7 +351,7 @@ public sealed unsafe partial class LevelRenderer
         set
         {
             _musicVolume = Math.Clamp(value, 0f, 1f);
-            _music?.Volume = _musicVolume * _musicOutputGain;
+            _music?.Volume = PlaybackMusicGain;
         }
     }
 

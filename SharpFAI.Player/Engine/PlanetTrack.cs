@@ -14,6 +14,12 @@ internal readonly record struct PauseAngleCorrection(double Offset, double Durat
     }
 }
 
+internal readonly record struct PauseStartTiming(double ReadyTime, double BeatLength, int LeadBeats)
+{
+    internal double StartTime(double minimumTime, bool manual) =>
+        Math.Max(minimumTime, ReadyTime - (manual ? LeadBeats * BeatLength : 0));
+}
+
 internal readonly record struct PlanetTrackFloor(
     float Radius, int Count, int Pivot, int Orbit, int Third,
     int HoldLength, float HoldDistance, bool LandingAnimation)

@@ -14,8 +14,17 @@ internal sealed partial class ModScope(ModHost host, ModActivation owner) : IMod
 {
     private readonly Dictionary<string, Dictionary<string, string>> _translations = new(StringComparer.OrdinalIgnoreCase);
     private int _nextSubscription;
+    private ModSettingsPanel? _settings;
     internal List<ModRegistration> Registrations { get; } = [];
     internal bool IsActivating { get; set; } = true;
+
+    internal void RegisterSettings(IModSettings ownerSettings)
+    {
+        var settings = _settings = new ModSettingsPanel(ownerSettings, owner.Package.SettingsPath, this);
+        settings.Load();
+        if (settings.HasVisibleFields)
+            Add(new(Id + "/settings", UiHost.Editor), new RegisteredSettings(settings.Draw));
+    }
 
     public string Id => owner.Package.Manifest.Id;
     public string Version => owner.Package.Manifest.Version;
@@ -57,6 +66,7 @@ internal sealed partial class ModScope(ModHost host, ModActivation owner) : IMod
         if (Host != UiHost.Editor || !service.IsInterface || service.Assembly != typeof(IModContext).Assembly ||
             service == typeof(IModContext))
             return null;
+        if (service == typeof(IModSettingsStore)) return _settings as T;
         return this as T ?? host.ExternalService?.Invoke(service) as T;
     }
 

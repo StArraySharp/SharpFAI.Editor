@@ -26,23 +26,24 @@ public sealed unsafe partial class LevelRenderer
         EditorLayers.Decoration | EditorLayers.Backdrop;
 
     internal readonly record struct EditorEventAppend(int Index, bool Decoration, JObject Value);
-    internal sealed record EditorChartPatch(Action<JObject> Apply, bool TileInsertion, bool PreservesBindings,
+    internal sealed record EditorChartPatch(Action<JObject> Apply, bool TrackChanged, bool PreservesBindings,
         EditorEventAppend[]? AppendedEvents);
 
     private sealed record EditorTrackUpdate(List<Floor> Floors, Vector2[]? Remainders, IReadOnlyList<FloorTrackState> States,
         RuntimeTrackTimeline Runtime, HashSet<FloorMaterial>?[] Materials, VisibleFloorIndex? Visibility,
-        FloorGeometry? Geometry, Mesh? Guides);
+        FloorGeometry? Geometry, TrackGuideMesh? Guides);
 
     private sealed record EditorRevisionUpdate(Level Level, JObject SettingsJson, LevelPlaybackSettings Settings,
         EditorLayers Layers, PlaybackEvent[] Events, PlaybackTimeline Timeline)
     {
         public EditorChartPatch? PatchOnCommit;
+        public JArray? TrackAngles;
         public bool ReusesEventSlots;
         public bool TriggersPrepared;
         public EditorTrackUpdate? Track;
         public RuntimeTrackTimeline? Runtime;
         public VisibleFloorIndex? Visibility;
-        public Mesh? Guides;
+        public TrackGuideMesh? Guides;
         public CameraTimeline? Camera;
         public FilterTimeline? Filter, BackgroundFilter;
         public SceneEffectTimeline? Scene;
@@ -189,7 +190,7 @@ public sealed unsafe partial class LevelRenderer
         int textureCapacity = _floorTextureCapacity;
         var audio = new EditorAudioReuse(_audioMusicPath, _audioMusic, _audioHitsound, previousTimeline.Pitch);
         var previousSettings = _settings;
-        bool tileInsertion = patch?.TileInsertion == true;
+        bool trackChanged = patch?.TrackChanged == true;
         EditorLayers immediate = snapshot is null && patch is null
             ? PlanEditorRevision(level, null, settingsJson) : EditorLayers.Bindings;
         if (!HasModIncrements && (immediate & ~(EditorLayers.Mixer | EditorLayers.CameraState)) == 0)
@@ -213,9 +214,16 @@ public sealed unsafe partial class LevelRenderer
                 {
                     return Build(null, appendLayers, token, appendedEvents: appends, patchOnCommit: patch);
                 }
+                bool anglesOnly = trackChanged && compatibleBindings && patch!.PreservesBindings && !HasModIncrements;
                 if (patch is not null)
                 {
-                    var root = (JObject)level.root.DeepClone();
+                    // These edits only need the path and settings on the worker. Keep the existing
+                    // action, decoration, and extension arrays intact until the revision commits.
+                    var root = anglesOnly ? new JObject
+                    {
+                        ["angleData"] = level.angleData.DeepClone(),
+                        ["settings"] = settingsJson.DeepClone(),
+                    } : (JObject)level.root.DeepClone();
                     token.ThrowIfCancellationRequested();
                     patch.Apply(root);
                     // Transfer the detached tokens directly to Level so its cached angles and event
@@ -228,9 +236,9 @@ public sealed unsafe partial class LevelRenderer
                     }
                     next = new Level(fields);
                 }
-                // Inserting tiles invalidates timing and all its dependent layers. Tile patches
+                // Editing the path invalidates timing and all its dependent layers. Tile patches
                 // already identify the change, so a token-by-token diff adds no information.
-                if (!tileInsertion)
+                if (!trackChanged)
                 {
                     var planned = appends is not null ? appendLayers :
                         next is null ? immediate : PlanEditorRevision(level, next, settingsJson);
@@ -239,14 +247,14 @@ public sealed unsafe partial class LevelRenderer
                 var layers = settingsLayers | EditorLayers.Track | EditorLayers.Timing | EditorLayers.Bindings |
                     TimedLayers | EditorLayers.Manual | EditorLayers.Audio;
                 return Build(next, layers, token, relocateBindings: compatibleBindings,
-                    preserveBindings: compatibleBindings && patch!.PreservesBindings);
+                    preserveBindings: compatibleBindings && patch!.PreservesBindings, anglesOnly: anglesOnly);
             }, token);
         }
         return true;
 
         EditorRevisionUpdate Build(Level? next, EditorLayers layers, CancellationToken token,
             bool relocateBindings = false, bool preserveBindings = false, EditorEventAppend[]? appendedEvents = null,
-            EditorChartPatch? patchOnCommit = null)
+            EditorChartPatch? patchOnCommit = null, bool anglesOnly = false)
         {
             bool Has(EditorLayers layer) => (layers & layer) != 0;
             var model = next ?? level;
@@ -254,9 +262,10 @@ public sealed unsafe partial class LevelRenderer
             if (next is null && patchOnCommit is null &&
                 Has(EditorLayers.Track | EditorLayers.Timing | EditorLayers.Bindings | EditorLayers.Audio))
                 model = level.CreateSnapshot(path);
-            if (!ReferenceEquals(model, level)) WriteEditorSettings(model, settingsJson);
+            if (!anglesOnly && !ReferenceEquals(model, level)) WriteEditorSettings(model, settingsJson);
             var view = ReferenceEquals(model, level) ? LevelPlaybackSettings.Read(settingsJson) : LevelPlaybackSettings.Read(model);
-            var coreEvents = Has(EditorLayers.Track | EditorLayers.Timing) ? FloorCoreEvents.Read(model, token) : null;
+            var coreEvents = Has(EditorLayers.Track | EditorLayers.Timing)
+                ? FloorCoreEvents.Read(anglesOnly ? level.actions : model.actions, model.angles.Count + 1, token) : null;
             var events = preserveBindings ? previousEvents :
                 relocateBindings ? PlaybackEventBinder.RelocateEditorEvents(level, model, previousEvents, token) :
                 appendedEvents is not null ? PlaybackEventBinder.AppendEditorEvents(previousEvents, appendedEvents, settingsJson) :
@@ -265,7 +274,7 @@ public sealed unsafe partial class LevelRenderer
             var nextFloors = Has(EditorLayers.Track) ? CreatePlaybackFloors(model, settings, coreEvents!) : floors;
             var timeline = Has(EditorLayers.Timing) ? BuildTimeline(model, nextFloors, events, coreEvents) : previousTimeline;
             if (Has(EditorLayers.Rate)) timeline = timeline with { Pitch = ReadPlaybackPitch(settingsJson) };
-            var update = new EditorRevisionUpdate(model, settingsJson, settings, layers, events, timeline)
+            var update = new EditorRevisionUpdate(anglesOnly ? level : model, settingsJson, settings, layers, events, timeline)
             {
                 ReusesEventSlots = relocateBindings || ReferenceEquals(events, previousEvents),
                 PatchOnCommit = patchOnCommit,
@@ -273,7 +282,7 @@ public sealed unsafe partial class LevelRenderer
             try
             {
                 token.ThrowIfCancellationRequested();
-                if (HasModIncrements)
+                if (!anglesOnly && HasModIncrements)
                 {
                     JObject? effectiveChart = null;
                     if (patchOnCommit is not null && ModReadsActions)
@@ -320,15 +329,20 @@ public sealed unsafe partial class LevelRenderer
                 if (Has(EditorLayers.Audio | EditorLayers.Rate))
                     update.Audio = BuildAudio(model, path, nextFloors, timeline, settings, reuse: audio,
                         reuseHitsound: !Has(EditorLayers.Timing) && settings.Hitsound == previousSettings.Hitsound);
-                // A tile insertion rebuilt every dependent timeline. Bind the new schedules
+                // A track edit rebuilt every dependent timeline. Bind the new schedules
                 // together before publishing them to the render thread.
-                if (tileInsertion && update.Decoration is { } decorations)
+                if (trackChanged && update.Decoration is { } decorations)
                 {
                     decorations.BindTimedEffects(nextFloors, timeline.FloorBpms, update.Filter, update.BackgroundFilter,
                         update.Camera, update.Backdrop, update.Scene, update.Track!.Runtime);
                     update.TriggersPrepared = true;
                 }
                 token.ThrowIfCancellationRequested();
+                if (anglesOnly)
+                {
+                    update.TrackAngles = model.angleData;
+                    model.root["angleData"] = JValue.CreateNull();
+                }
                 return update;
             }
             catch
@@ -423,6 +437,7 @@ public sealed unsafe partial class LevelRenderer
         if (rebindTriggers)
             ResetDecorationTriggers();
         _level = update.Level;
+        if (update.TrackAngles is { } path) _level.ReplaceAngleData(path);
         if (!JToken.DeepEquals(_level.root["settings"], update.SettingsJson)) WriteEditorSettings(_level, update.SettingsJson);
         if (Has(EditorLayers.Backdrop)) SetBackdrop(update.Backdrop);
         if (Has(EditorLayers.Camera)) _cameraTimeline = update.Camera;

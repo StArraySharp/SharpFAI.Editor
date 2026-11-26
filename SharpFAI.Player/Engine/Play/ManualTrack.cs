@@ -61,6 +61,12 @@ internal sealed class ManualTrack
     public bool IsMidspin(int floor) => _floors[floor].isMidspin;
     public bool IsHold(int floor) => _timeline.PlanetTrack[floor].HasHold;
     public double PauseLock(int floor) => _timeline.PauseLocks?.GetValueOrDefault(floor) ?? 0.0;
+    internal bool TryGetPauseStart(int floor, out PauseStartTiming timing)
+    {
+        timing = default;
+        return _timeline.PauseStarts?.TryGetValue(floor, out timing) == true;
+    }
+    internal double MinimumPauseStartTime => _timeline.OffsetSeconds;
     public int Taps(int floor) => _taps.GetValueOrDefault(floor, 1);
     public int CheckpointAt(int floor) => _checkpoints.GetValueOrDefault(floor, -1);
 

@@ -11,14 +11,20 @@
     <PackageReference Include="NUnit3TestAdapter" Version="6.1.0" />
     <ProjectReference Include="..\SharpFAI.Editor\SharpFAI.Editor.csproj" />
     <ProjectReference Include="../examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../mods/SharpFAI.Mcp/SharpFAI.Mcp.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../mods/SharpFAI.WebMirror/SharpFAI.WebMirror.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyTestModPackages" AfterTargets="Build">
     <MSBuild Projects="../examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs" ItemName="ExampleModAssembly" />
     </MSBuild>
+    <MSBuild Projects="../mods/SharpFAI.Mcp/SharpFAI.Mcp.csproj;../mods/SharpFAI.WebMirror/SharpFAI.WebMirror.csproj" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="FirstPartyModAssembly" />
+    </MSBuild>
     <ItemGroup>
       <TestModPackage Include="@(ExampleModAssembly->'%(RootDir)%(Directory)Example.Base.sharpfaimod')" />
       <TestModPackage Include="@(ExampleModAssembly->'%(RootDir)%(Directory)Example.Tools.sharpfaimod')" />
+      <TestModPackage Include="@(FirstPartyModAssembly->'%(RootDir)%(Directory)%(Filename).sharpfaimod')" />
     </ItemGroup>
     <Copy SourceFiles="@(TestModPackage)" DestinationFolder="$(TargetDir)ModFixtures" SkipUnchangedFiles="true" />
   </Target>

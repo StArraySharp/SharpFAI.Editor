@@ -325,7 +325,7 @@ public sealed unsafe partial class LevelRenderer
         return (remainders, states, runtimeStates);
     }
 
-    private static (HashSet<FloorMaterial>?[] Materials, VisibleFloorIndex? Visibility, FloorGeometry? Geometry, Mesh? Guides)
+    private static (HashSet<FloorMaterial>?[] Materials, VisibleFloorIndex? Visibility, FloorGeometry? Geometry, TrackGuideMesh? Guides)
         BuildTrackGeometry(List<Floor> floors, IReadOnlyList<FloorTrackState> states, RuntimeTrackTimeline runtime,
             PlaybackTimeline timeline, LevelPlaybackSettings settings, string? directory, int textureCapacity, CancellationToken token)
     {

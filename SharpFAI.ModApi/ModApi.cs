@@ -10,6 +10,12 @@ public interface ISharpFaiMod : IAsyncDisposable
     ValueTask ActivateAsync(IModContext context, CancellationToken cancellationToken);
 }
 
+/// <summary>Starts services after this activation is published and the replaced instance has been disposed.</summary>
+public interface IModActivationObserver
+{
+    ValueTask OnActivatedAsync(CancellationToken cancellationToken);
+}
+
 public interface IModContext
 {
     string Id { get; }
@@ -146,6 +152,9 @@ public sealed record SetChartSetting(string Key, JsonElement Value) : ChartOpera
 public sealed record AddChartEvent(int Floor, string Type, JsonElement Fields) : ChartOperation;
 public sealed record UpdateChartEvent(int Floor, int Index, JsonElement Fields) : ChartOperation;
 public sealed record RemoveChartEvent(int Floor, int Index) : ChartOperation;
+public sealed record AddChartDecoration(int Floor, string Type, JsonElement Fields) : ChartOperation;
+public sealed record UpdateChartDecoration(int Index, JsonElement Fields) : ChartOperation;
+public sealed record RemoveChartDecoration(int Index) : ChartOperation;
 public sealed record ChartEditRequest(string Description, IReadOnlyList<ChartOperation> Operations);
 
 public interface IChartEdits
@@ -166,7 +175,7 @@ public interface IPlaybackEvents
     IDisposable SubscribeJudgments(Action<PlaybackJudgment> callback);
 }
 
-public enum TransportAction { Play, Pause, Seek }
+public enum TransportAction { Play, Pause, Seek, Edit }
 public interface IPlaybackControl
 {
     ValueTask<bool> RequestAsync(TransportAction action, double time, CancellationToken cancellationToken);

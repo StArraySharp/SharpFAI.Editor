@@ -203,20 +203,41 @@ public sealed class TrackEditingRegressionTests
     }
 
     [Test]
-    public void FreeAngleBacktracksOnlyFromOrdinaryTiles()
+    public void BackwardDirectionProtectsMidspinsAndExistingFullTurns()
     {
         var document = Chart(0);
         document.InsertTiles(0, [0, 0, 999, 90, 270, 90]);
         Assert.Multiple(() =>
         {
-            Assert.That(document.IsFreeAngleBacktrack(0, 180), Is.False);
-            Assert.That(document.IsFreeAngleBacktrack(1, 180), Is.True);
-            Assert.That(document.IsFreeAngleBacktrack(1, 179), Is.False);
-            Assert.That(document.IsFreeAngleBacktrack(2, 180), Is.False);
-            Assert.That(document.IsFreeAngleBacktrack(3, 0), Is.True);
-            Assert.That(document.IsFreeAngleBacktrack(4, 270), Is.False);
-            Assert.That(document.IsFreeAngleBacktrack(6, 270), Is.True);
+            Assert.That(document.IsTileBacktrack(0, 180), Is.True);
+            Assert.That(document.IsTileBacktrack(1, 180), Is.True);
+            Assert.That(document.IsTileBacktrack(1, 179), Is.False);
+            Assert.That(document.IsTileBacktrack(2, 180), Is.False);
+            Assert.That(document.IsTileBacktrack(3, 0), Is.True);
+            Assert.That(document.IsTileBacktrack(4, 270), Is.False);
+            Assert.That(document.IsTileBacktrack(6, 270), Is.True);
+            Assert.That(document.FullSpinAngle(0), Is.Null);
+            Assert.That(document.FullSpinAngle(3), Is.EqualTo(999));
         });
+    }
+
+    [Test]
+    public void FullTurnTakesTwoBeatsAndPlainTailDeletionKeepsTheTrackPatch()
+    {
+        var document = Chart(0);
+        document.InsertTiles(0, [0]);
+        int version = document.PlaybackVersion;
+        var before = document.SnapshotForPlayback();
+        document.InsertTiles(1, [document.FullSpinAngle(1)!.Value]);
+        var timing = FloorTimingCalculator.Calculate(document.SnapshotForPlayback());
+        double beat = 60 / document.Settings.Value<double>("bpm");
+        Assert.That(timing[2].EntryTime - timing[1].EntryTime, Is.EqualTo(2 * beat).Within(1e-6));
+        Assert.That(document.IsTileBacktrack(2, 0), Is.True);
+        document.DeleteTiles(2, 2);
+        var patch = document.PlaybackPatchSince(version)!;
+        Assert.That(patch.PreservesBindings, Is.True);
+        patch.Apply(before.root);
+        Assert.That(JToken.DeepEquals(before.root, document.SnapshotForPlayback().root), Is.True);
     }
 
     [Test]

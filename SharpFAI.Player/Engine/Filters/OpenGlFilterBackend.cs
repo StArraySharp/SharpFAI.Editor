@@ -220,6 +220,7 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
     public int ScreenHeight { get; private set; }
     internal OpenTK.Mathematics.Matrix4 CameraView { get; set; }
     private double _time;
+    private Vector4? _cameraScreenParams;
 
     public IFilterShader FindShader(string name) => new Shader(name);
 
@@ -472,7 +473,9 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         SetTargetSampling(input.Sampling);
         SetVector(program, "_MainTex_ST", new Vector4(1, 1, 0, 0));
         SetVector(program, "_MainTex_TexelSize", new Vector4(1f / input.Width, 1f / input.Height, input.Width, input.Height));
-        SetVector(program, "_ScreenParams", new Vector4(output.Width, output.Height, 1f + 1f / output.Width, 1f + 1f / output.Height));
+        // Unity's camera dimensions stay fixed across reduced-resolution Graphics.Blit passes.
+        SetVector(program, "_ScreenParams", parameters is not null && _cameraScreenParams is { } cameraScreen
+            ? cameraScreen : ScreenParams(output.Width, output.Height));
         float seconds = (float)_time;
         SetVector(program, "_Time", new Vector4(seconds / 20f, seconds, seconds * 2, seconds * 3));
         if (modColor is { } color)
@@ -681,6 +684,9 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
 
     private static void SetVector(Program program, string name, Vector4 value) =>
         program.SetVector(name, value);
+
+    private static Vector4 ScreenParams(int width, int height) =>
+        new(width, height, 1f + 1f / width, 1f + 1f / height);
 
     internal static int[] ShaderPasses(string shader) => shader switch
     {
@@ -945,6 +951,8 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         DeltaTime = delta;
         ScreenWidth = screen.Width;
         ScreenHeight = screen.Height;
+        Vector4? previousScreenParams = _cameraScreenParams;
+        _cameraScreenParams = ScreenParams(screen.Width, screen.Height);
         int rentedBefore = _borrowed.Count;
         try
         {
@@ -995,6 +1003,7 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         }
         finally
         {
+            _cameraScreenParams = previousScreenParams;
             ReleaseSince(rentedBefore);
         }
     }

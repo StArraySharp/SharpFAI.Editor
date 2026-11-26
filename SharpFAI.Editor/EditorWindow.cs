@@ -38,6 +38,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private bool _showBrickNumbers = true;
     private bool _openFindFloor;
     private int _findFloor;
+    private string? _findFloorDraft;
     private bool _allowClose;
     private bool _closeRequested;
     private bool _openConfirm;
@@ -96,7 +97,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         TextInput += e => ImGuiIO.AddInputCharacter(io, (uint)e.Unicode);
         MouseWheel += e =>
         {
-            ReleaseWebInput();
+            ReleaseRemoteInput();
             FeedEditorWheel(io, e.OffsetX, e.OffsetY,
                 KeyboardState.IsKeyDown(Keys.LeftControl) || KeyboardState.IsKeyDown(Keys.RightControl),
                 KeyboardState.IsKeyDown(Keys.LeftShift) || KeyboardState.IsKeyDown(Keys.RightShift));
@@ -104,8 +105,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         MouseMove += _ => FeedMouse();
         MouseDown += e => { FeedMouse(); FeedPlaybackMouse(e.Button, true); };
         MouseUp += e => { FeedMouse(); FeedPlaybackMouse(e.Button, false); };
-        KeyDown += e => { ReleaseWebInput(); FeedEditorKey(e, true); };
-        KeyUp += e => { ReleaseWebInput(); FeedEditorKey(e, false); };
+        KeyDown += e => { ReleaseRemoteInput(); FeedEditorKey(e, true); };
+        KeyUp += e => { ReleaseRemoteInput(); FeedEditorKey(e, false); };
         UpdateTitle();
     }
 
@@ -118,12 +119,13 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         if (ClientSize.X <= 0 || ClientSize.Y <= 0)
             return;
         UpdateVideoRender();
+        UpdateModFrameCapture();
         ImGuiIO* io = ImGui.GetIO();
         io->DisplaySize = WidgetDraw.V2(ClientSize.X, ClientSize.Y);
         io->DisplayFramebufferScale = WidgetDraw.V2(FramebufferSize.X / (float)ClientSize.X, FramebufferSize.Y / (float)ClientSize.Y);
         io->DeltaTime = Math.Clamp((float)args.Time, 0.0001f, 0.1f);
         ImGui_ImplOpenGL3.NewFrame();
-        if (WebMirror is not null) FeedWebInput(io);
+        FeedRemoteInput(io);
         _settingsWindow.BeginFrame(io);
         ImGui.NewFrame();
         if (_closeRequested)
@@ -141,8 +143,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             DrawMenu();
             DrawDockspace();
         }
+        KeyModifiers? spaceModifiers = _spacePressModifiers;
+        _spacePressModifiers = null;
         if (_modUi?.HandleShortcuts(ShortcutContextBlocked || _canvasOnly) != true && _modUi?.HasFocus != true)
-            HandleShortcuts();
+            HandleShortcuts(spaceModifiers);
         _numericDrawn = false;
         UpdatePlayback();
         if (_canvasOnly)
@@ -193,7 +197,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         GL.Clear(ClearBufferMask.ColorBufferBit);
         ImGui.Render();
         ImGui_ImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
-        WebMirror?.CaptureFrame(FramebufferSize.X, FramebufferSize.Y);
+        _windowStream.Current?.Capture(FramebufferSize.X, FramebufferSize.Y);
         SwapBuffers();
     }
 
@@ -228,6 +232,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ImGuiIO.AddFocusEvent(ImGui.GetIO(), (byte)(e.IsFocused ? 1 : 0));
         if (!e.IsFocused)
         {
+            _spacePressModifiers = null;
             _inputMethod?.Restore();
             ResetCanvasGesture();
             _dragDecoration = null;
@@ -243,8 +248,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         _inputMethod?.Dispose();
         _audioCalibration.Dispose();
         DisposeVideoRender();
+        DisposeModFrameCapture();
         DisposePlayback();
         _modUi?.Shutdown();
+        _windowStream.Dispose();
         DisposeRichLevelTextPreviews();
         if (_backendInitialized)
             ImGui_ImplOpenGL3.Shutdown();
@@ -408,14 +415,19 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (_particle?.Parent is null)
             _showParticle = false;
+        if (_dragDecoration?.Parent is null)
+            _dragDecoration = null;
     }
 
     private void DeleteSelection(bool backwards = true)
     {
         _pendingTiles.Clear();
         if (_inspectDecoration && _decoration is not null)
-            _document.RemoveDecorations(_selectedDecorations.Where(item => !DecorationLocked(item)));
-        else if (_hasFloorSelection)
+        {
+            DeleteDecorations(_selectedDecorations);
+            return;
+        }
+        if (_hasFloorSelection)
         {
             var (first, last) = FloorRange;
             if (first == last && !backwards)
@@ -423,6 +435,12 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             else
                 DeleteFloorRange(first, last, backwards ? first - 1 : first);
         }
+        ClampSelection();
+    }
+
+    private void DeleteDecorations(IEnumerable<JObject> decorations)
+    {
+        _document.RemoveDecorations(decorations.Where(item => !DecorationLocked(item)));
         ClampSelection();
     }
 
@@ -499,7 +517,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     private void ShowError(Exception error) { _error = error.Message; _openError = true; }
 
-    private void OpenFindFloor() { _findFloor = _floor; _openFindFloor = true; }
+    private void OpenFindFloor() { _findFloor = _floor; _findFloorDraft = null; _openFindFloor = true; }
 
     private void DrawDialogs()
     {
@@ -512,11 +530,11 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (ImGui.BeginPopupModal(L.T("FindFloor")) != 0)
         {
-            int floor = _findFloor;
-            bool submitted = ImGui.InputInt(L.T("FloorNumber"), ref floor, 1, 10,
-                (int)ImGuiInputTextFlags.ImGuiInputTextFlags_EnterReturnsTrue) != 0;
-            _findFloor = floor;
-            if (ImGui.Button(L.T("Locate"), default) != 0 || submitted)
+            bool valid = DrawIntegerExpression(L.T("FloorNumber"), ref _findFloor, ref _findFloorDraft, 10, out bool submitted);
+            ImGui.BeginDisabled((byte)(valid ? 0 : 1));
+            bool locate = ImGui.Button(L.T("Locate"), default) != 0;
+            ImGui.EndDisabled();
+            if (valid && (locate || submitted))
             {
                 SelectFloor(_findFloor, true);
                 ImGui.CloseCurrentPopup();
@@ -579,7 +597,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     private void FeedMouse()
     {
-        ReleaseWebInput();
+        ReleaseRemoteInput();
         ImGuiIO* io = ImGui.GetIO();
         ImGuiIO.AddMousePosEvent(io, MouseState.X, MouseState.Y);
         ImGuiIO.AddMouseButtonEvent(io, 0, (byte)(MouseState.IsButtonDown(MouseButton.Left) ? 1 : 0));

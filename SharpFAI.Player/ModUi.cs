@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using ImGui4NET;
 using NativeFileDialog;
@@ -51,6 +52,8 @@ internal sealed class ModUi : IModWindowOperations, IUiDialogs, IMainWindowServi
     private CancellationTokenSource? _customExportCancellation;
     private readonly ExportProgress _exportProgress = new();
     private string? _status;
+    private IReadOnlyList<ModNotice> _displayedNotices = [];
+    private byte[] _logText = [];
     private (string Title, Func<Task> Run)? _confirmation;
     private PendingDialog? _dialog;
 
@@ -710,7 +713,7 @@ internal sealed class ModUi : IModWindowOperations, IUiDialogs, IMainWindowServi
         catch (Exception error) { _status = error.Message; }
     }
 
-    private ValueTask<T> Dispatch<T>(Func<T> action, CancellationToken token)
+    internal ValueTask<T> Dispatch<T>(Func<T> action, CancellationToken token)
     {
         if (_shuttingDown) return ValueTask.FromResult(default(T)!);
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -849,12 +852,14 @@ internal sealed class ModUi : IModWindowOperations, IUiDialogs, IMainWindowServi
                     Confirm(Tr("移除选定 Mod，并停用依赖它的 Mod", "Remove this Mod and disable its dependents"), () => Host.RemoveAsync(manifest.Id));
             }
             ImGui.EndDisabled();
+            if (item.Enabled)
+                DrawModConfiguration(manifest.Id);
             ImGui.PopID();
         }
         DrawShortcutSettings(acceptLocalInput);
         var notices = Host.Notices;
         if (notices.Count != 0 && ImGui.CollapsingHeader(Tr("Mod 日志", "Mod log"), 0) != 0)
-            foreach (var notice in notices.Reverse()) ImGui.TextUnformatted($"[{notice.ModId}] {notice.Message}");
+            DrawLog(notices);
 
         const string popup = "###mod-confirm";
         // The popup ID must be resolved outside the per-Mod PushID scope on both calls.
@@ -883,6 +888,37 @@ internal sealed class ModUi : IModWindowOperations, IUiDialogs, IMainWindowServi
         else if (ImGui.IsPopupOpen(popup) == 0)
             _confirmation = null;
         ImGui.EndDisabled();
+    }
+
+    private void DrawModConfiguration(string id)
+    {
+        var settings = Host.Entries<RegisteredSettings>(Host.Target)
+            .FirstOrDefault(entry => entry.ModId == id && entry.IsRegistered);
+        if (settings is null || ImGui.CollapsingHeader(Tr("设置###mod-config", "Settings###mod-config"), 0) == 0)
+            return;
+        using var lease = settings.Acquire();
+        if (lease is null) return;
+        ImGui.BeginDisabled((byte)(_operation is null ? 0 : 1));
+        try { settings.Value.Draw(); }
+        catch (Exception error) { settings.Report(error); }
+        finally { ImGui.EndDisabled(); }
+    }
+
+    private unsafe void DrawLog(IReadOnlyList<ModNotice> notices)
+    {
+        if (!_displayedNotices.SequenceEqual(notices))
+        {
+            string text = string.Join('\n', notices.Reverse().Select(notice => $"[{notice.ModId}] {notice.Message}"));
+            _logText = Encoding.UTF8.GetBytes(text + '\0');
+            _displayedNotices = notices;
+        }
+
+        float lineHeight = ImGui.GetTextLineHeightWithSpacing();
+        var size = new ImVec2 { x = -1, y = Math.Clamp(ImGui.GetContentRegionAvail().y, lineHeight * 4, lineHeight * 10) };
+        const ImGuiInputTextFlags flags = ImGuiInputTextFlags.ImGuiInputTextFlags_ReadOnly |
+            ImGuiInputTextFlags.ImGuiInputTextFlags_WordWrap;
+        fixed (byte* buffer = _logText)
+            ImGui.InputTextMultiline("##mod-log", (sbyte*)buffer, (nuint)_logText.Length, size, (int)flags);
     }
 
     private void DrawShortcutSettings(bool acceptLocalInput)

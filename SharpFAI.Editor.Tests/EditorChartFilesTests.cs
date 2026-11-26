@@ -298,7 +298,7 @@ public sealed class EditorChartFilesTests
         chart.InsertTiles(2, [45]);
         chart.InsertTiles(3, [90, 135]);
         chart.InsertTiles(5, [0]);
-        Assert.That(chart.HasOnlyTileInsertionsSince(version), Is.True);
+        Assert.That(chart.HasOnlyTileEditsSince(version), Is.True);
         var patched = original.CreateSnapshot(chart.PlaybackPath);
         chart.PlaybackPatchSince(version)!.Apply(patched.root);
         patched = patched.CreateSnapshot(chart.PlaybackPath);

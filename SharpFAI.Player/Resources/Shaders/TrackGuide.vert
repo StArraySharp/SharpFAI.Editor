@@ -5,12 +5,14 @@ layout(location = 1) in vec2 aPlaybackPosition;
 layout(location = 2) in vec2 aProfile;
 layout(location = 3) in vec4 aTiming;
 layout(location = 4) in vec4 aColor;
-layout(location = 5) in vec2 aOpacity;
+layout(location = 5) in vec3 aAppearance;
 layout(location = 6) in vec2 aCueOffset;
 
 uniform mat4 uViewProjection;
 uniform bool uPlaying;
+uniform bool uTilesOnly;
 uniform float uTime;
+uniform sampler2D uRuntimeOpacity;
 
 out vec4 vColor;
 out float vProfile;
@@ -22,11 +24,25 @@ void main()
 {
     vec2 position = uPlaying ? aPlaybackPosition : aPreviewPosition;
     vColor = aColor;
-    vColor.a *= uPlaying ? aOpacity.y : aOpacity.x;
     vKind = aTiming.w;
     vPhase = aTiming.x;
     vProfile = aProfile.x;
     vProgress = uPlaying ? clamp((uTime - aTiming.y) / max(aTiming.z - aTiming.y, 0.0001), 0.0, 1.0) : 0.0;
+    if (vKind == 0.0)
+    {
+        vColor.a *= uTilesOnly ? 0.0 : (uPlaying ? aAppearance.y : aAppearance.x);
+    }
+    else if (uPlaying)
+    {
+        int index = int(aAppearance.z);
+        int width = textureSize(uRuntimeOpacity, 0).x;
+        vec2 opacity = texelFetch(uRuntimeOpacity, ivec2(index % width, index / width), 0).xy;
+        vColor.a *= vKind == 1.0 ? mix(opacity.x, opacity.y, vPhase) : opacity.y;
+    }
+    else if (!uTilesOnly)
+    {
+        vColor.a *= aAppearance.x;
+    }
 
     if (vKind == 2.0)
     {

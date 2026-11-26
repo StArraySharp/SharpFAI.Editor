@@ -21,13 +21,13 @@ internal sealed partial class EditorDocument
     private readonly record struct Edit(Action Redo, Action Undo, bool Events, JObject? Effect = null,
         object? Group = null, bool SettingsOnly = false, bool EditorOnly = false,
         ValueChange? Value = null, TileInsertion? Insertion = null,
-        LevelRenderer.EditorEventAppend? EventAppend = null, bool DecorationList = false);
+        LevelRenderer.EditorEventAppend? EventAppend = null, bool DecorationList = false, int TailRemoval = 0);
     private sealed record ValueChange(JObject Target, string Name, JToken? Before, JToken? After);
     private sealed record TileInsertion(int Floor, double[] Angles, bool MovesEvents);
     private readonly record struct PlaybackChange(int Version, TileInsertion? Insertion,
-        LevelRenderer.EditorEventAppend? EventAppend);
+        LevelRenderer.EditorEventAppend? EventAppend, int TailRemoval);
     private int _lastChartChange;
-    private int _lastNonInsertionChange;
+    private int _lastNonTileEditChange;
     private int _lastNonAppendChange;
     private int _lastUnpatchableChange;
     private readonly List<PlaybackChange> _playbackPatches = [];
@@ -76,7 +76,7 @@ internal sealed partial class EditorDocument
     public bool IsLargeChart => LastFloor >= 10_000 || _actions.Count + _decorations.Count >= 10_000;
     public double IncomingAngle(int floor)
     {
-        if (_angles.Count == 0)
+        if (floor <= 0 || _angles.Count == 0)
             return 0;
         int index = Math.Clamp(floor - 1, 0, _angles.Count - 1);
         double angle = 0;
@@ -311,8 +311,16 @@ internal sealed partial class EditorDocument
         int count = last - first + 1;
         int newLast = LastFloor - count;
         var references = ReferenceChanges(LastFloor, newLast,
-            target => target > last ? target - count : target >= first ? Math.Min(first, newLast) : target);
-        JToken[] angles = _angles.Skip(first - 1).Take(count).ToArray();
+            target => target > last ? target - count : target >= first ? Math.Min(first, newLast) : target,
+            insertionFloor: first - 1);
+        JToken[] angles = new JToken[count];
+        for (int i = 0; i < count; i++) angles[i] = _angles[first - 1 + i]!;
+        if (last == LastFloor && references.Length == 0 && !(_floorNumbers ??= IndexFloorNumbers()).HasAfter(first - 1))
+        {
+            Apply(new(() => RemoveTailAngles(_angles, count), () => { foreach (var angle in angles) _angles.Add(angle); },
+                false, TailRemoval: count));
+            return;
+        }
         var moved = AnchorsAfter(last);
         var removed = _actions.Select((token, index) => (token, index))
             .Where(entry => TryReadFloor(entry.token, out int floor) && floor >= first && floor <= last).ToArray();
@@ -609,8 +617,8 @@ internal sealed partial class EditorDocument
     public bool HasOnlyEffectChangesSince(int version) => version >= _lastFullPlaybackChange;
     public bool CanReusePlaybackChart(int version) => version >= _lastChartChange;
 
-    public bool HasOnlyTileInsertionsSince(int version) =>
-        version >= _lastNonInsertionChange && version < _lastChartChange;
+    public bool HasOnlyTileEditsSince(int version) =>
+        version >= _lastNonTileEditChange && version < _lastChartChange;
 
     public bool HasOnlyEventAppendsSince(int version) =>
         version >= _lastNonAppendChange && version < _lastChartChange;
@@ -620,17 +628,22 @@ internal sealed partial class EditorDocument
         if (version < _lastUnpatchableChange || CanReusePlaybackChart(version)) return null;
         var patches = _playbackPatches.Where(patch => patch.Version > version).ToArray();
         if (patches.Length == 0) return null;
-        bool tileInsertions = Array.TrueForAll(patches, patch => patch.Insertion is not null);
-        bool preservesBindings = tileInsertions && Array.TrueForAll(patches, patch => !patch.Insertion!.MovesEvents);
+        bool tileEdits = Array.TrueForAll(patches, patch => patch.Insertion is not null || patch.TailRemoval != 0);
+        bool preservesBindings = tileEdits && Array.TrueForAll(patches, patch => patch.Insertion is not { MovesEvents: true });
         var appends = Array.TrueForAll(patches, patch => patch.EventAppend.HasValue)
             ? Array.ConvertAll(patches, patch => patch.EventAppend!.Value) : null;
-        return new(ApplyPatch, tileInsertions, preservesBindings, appends);
+        return new(ApplyPatch, tileEdits, preservesBindings, appends);
 
         void ApplyPatch(JObject root)
         {
             for (int index = 0; index < patches.Length; index++)
             {
                 var patch = patches[index];
+                if (patch.TailRemoval != 0)
+                {
+                    RemoveTailAngles((JArray)root["angleData"]!, patch.TailRemoval);
+                    continue;
+                }
                 if (patch.Insertion is not { } insert)
                 {
                     var append = patch.EventAppend!.Value;
@@ -683,6 +696,12 @@ internal sealed partial class EditorDocument
         {
             foreach (var angle in angles) path.Insert(floor++, angle);
         }
+    }
+
+    private static void RemoveTailAngles(JArray path, int count)
+    {
+        for (int end = path.Count - count; path.Count > end;)
+            path.RemoveAt(path.Count - 1);
     }
 
     public LevelRenderer.EditorEffectPatch[] EffectChangesSince(int version)
@@ -790,12 +809,12 @@ internal sealed partial class EditorDocument
         if (!edit.SettingsOnly)
         {
             _lastChartChange = ChangeVersion;
-            if (undo || edit.Insertion is null)
-                _lastNonInsertionChange = ChangeVersion;
+            if (undo || edit.Insertion is null && edit.TailRemoval == 0)
+                _lastNonTileEditChange = ChangeVersion;
             if (undo || edit.EventAppend is null)
                 _lastNonAppendChange = ChangeVersion;
-            if (!undo && (edit.EventAppend is not null || edit.Insertion is not null))
-                _playbackPatches.Add(new(ChangeVersion, edit.Insertion, edit.EventAppend));
+            if (!undo && (edit.EventAppend is not null || edit.Insertion is not null || edit.TailRemoval != 0))
+                _playbackPatches.Add(new(ChangeVersion, edit.Insertion, edit.EventAppend, edit.TailRemoval));
             else
             {
                 _lastUnpatchableChange = ChangeVersion;
@@ -811,7 +830,7 @@ internal sealed partial class EditorDocument
         }
         if (edit.Events)
             IndexEvents();
-        if (edit.Value is null && edit.EventAppend is null && edit.Insertion is null)
+        if (edit.Value is null && edit.EventAppend is null && edit.Insertion is null && edit.TailRemoval == 0)
         {
             _tileReferences = null;
             _floorNumbers = null;
@@ -963,15 +982,25 @@ internal sealed partial class EditorDocument
 
     public bool IsMidspinAt(int floor) => floor >= 0 && floor < LastFloor && _angles[floor]!.Value<double>() == 999;
 
-    public bool IsFreeAngleBacktrack(int floor, double angle)
+    internal double? FullSpinAngle(int floor)
     {
-        if (floor <= 0 || floor > LastFloor || IsMidspinAt(floor))
-            return false;
-        double backwards = IncomingAngle(floor) + 180;
-        return MatchesBackwards(angle) && (floor == LastFloor || !MatchesBackwards(_angles[floor]!.Value<double>()));
-
-        bool MatchesBackwards(double direction) => Math.Abs(Math.IEEERemainder(direction - backwards, 360)) < .0001;
+        if (floor <= 0 || floor > LastFloor) return null;
+        double angle = _angles[floor - 1]!.Value<double>();
+        return angle == 999 ? angle : ((angle + 180) % 360 + 360) % 360;
     }
+
+    public bool IsTileBacktrack(int floor, double angle)
+        => angle != 999 && TileBacktrackAngle(floor) is { } backwards && SameDirection(angle, backwards);
+
+    public double? TileBacktrackAngle(int floor)
+    {
+        if (floor < 0 || floor > LastFloor || IsMidspinAt(floor))
+            return null;
+        double backwards = IncomingAngle(floor) + 180;
+        return floor == LastFloor || !SameDirection(_angles[floor]!.Value<double>(), backwards) ? backwards : null;
+    }
+
+    internal static bool SameDirection(double first, double second) => Math.Abs(Math.IEEERemainder(first - second, 360)) < .0001;
 
     private (JToken Item, int Floor)[] AnchorsAfter(int floor) =>
         AnchorsAfter(_actions, floor).Concat(AnchorsAfter(_decorations, floor))
@@ -1073,8 +1102,9 @@ internal sealed partial class EditorDocument
             _floors.Remove(floor);
         }
 
-        public int[] After(int floor) =>
-            _floors.Count == 0 || _floors.Max <= floor ? [] : _floors.GetViewBetween(floor + 1, int.MaxValue).ToArray();
+        public bool HasAfter(int floor) => _floors.Count != 0 && _floors.Max > floor;
+
+        public int[] After(int floor) => HasAfter(floor) ? _floors.GetViewBetween(floor + 1, int.MaxValue).ToArray() : [];
     }
 
     private void AddAction(JObject item)

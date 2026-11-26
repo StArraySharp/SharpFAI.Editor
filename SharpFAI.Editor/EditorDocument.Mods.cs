@@ -9,6 +9,7 @@ internal sealed partial class EditorDocument
     private readonly Guid _modDocumentId = Guid.NewGuid();
     internal ChartRevision ModRevision => new(_modDocumentId, ChangeVersion);
     internal JArray? ModEvents => (_level.root["sharpFaiMods"] as JObject)?["events"] as JArray;
+    internal double ModViewAngle(int floor) => _angles[floor - 1]!.Value<double>();
 
     internal void AddModEvent(string type, CustomEventSchema schema, int floor)
     {
@@ -62,7 +63,7 @@ internal sealed partial class EditorDocument
             floor => source.Events(floor).Select(ToElement).ToArray());
     }
 
-    private static JsonElement ToElement(JToken source)
+    internal static JsonElement ToElement(JToken source)
     {
         using var json = JsonDocument.Parse(source.ToString(Newtonsoft.Json.Formatting.None));
         return json.RootElement.Clone();
@@ -127,16 +128,35 @@ internal sealed partial class EditorDocument
                 return Add(item, decoration: false);
             case UpdateChartEvent update when update.Fields.ValueKind == JsonValueKind.Object &&
                                               Events(update.Floor).ElementAtOrDefault(update.Index) is { } target:
-                foreach (var property in JObject.Parse(update.Fields.GetRawText()).Properties())
-                {
-                    if (property.Name is "floor" or "eventType") return false;
-                    Set(target, property.Name, property.Value);
-                }
-                return true;
+                return SetModFields(target, update.Fields);
             case RemoveChartEvent removal when Events(removal.Floor).ElementAtOrDefault(removal.Index) is { } target:
                 Remove(target);
                 return true;
+            case AddChartDecoration addition when addition.Floor >= 0 && addition.Floor <= LastFloor &&
+                                                   addition.Type is "AddDecoration" or "AddObject" or "AddText" &&
+                                                   addition.Fields.ValueKind == JsonValueKind.Object:
+                var addedDecoration = JObject.Parse(addition.Fields.GetRawText());
+                addedDecoration["floor"] = addition.Floor;
+                addedDecoration["eventType"] = addition.Type;
+                return Add(addedDecoration, decoration: true);
+            case UpdateChartDecoration update when update.Fields.ValueKind == JsonValueKind.Object &&
+                update.Index >= 0 && update.Index < _decorations.Count && _decorations[update.Index] is JObject decoration:
+                return SetModFields(decoration, update.Fields);
+            case RemoveChartDecoration removal when removal.Index >= 0 && removal.Index < _decorations.Count &&
+                                                      _decorations[removal.Index] is JObject decoration:
+                Remove(decoration);
+                return true;
             default: return false;
         }
+    }
+
+    private bool SetModFields(JObject target, JsonElement fields)
+    {
+        foreach (var property in JObject.Parse(fields.GetRawText()).Properties())
+        {
+            if (property.Name is "floor" or "eventType") return false;
+            Set(target, property.Name, property.Value);
+        }
+        return true;
     }
 }

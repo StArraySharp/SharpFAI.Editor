@@ -23,6 +23,14 @@ internal sealed partial class EditorWindow
             if (result == EditResult.Applied) ClampSelection();
             return result;
         }, () => ModContext(true));
+        var inspection = new ModEditorInspection(this, _modUi);
+        var resolveUiService = host.ExternalService;
+        host.ExternalService = type =>
+        {
+            if (type == typeof(IEditorInspection) || type == typeof(IEditorFrameCapture)) return inspection;
+            if (type == typeof(IEditorWindowStream)) return _windowStream;
+            return resolveUiService?.Invoke(type);
+        };
         _modUi.Initialize();
     }
 
@@ -44,11 +52,12 @@ internal sealed partial class EditorWindow
         IsFocused, _windowMode.IsFullscreen), _canvasOnly);
 
     private void DrawModSettings() =>
-        _modUi?.DrawSettings(!_receivedWebInput && _webButtons == 0 && _webKeys.Count == 0);
+        _modUi?.DrawSettings(!_receivedRemoteInput && _remoteButtons == 0 && _remoteKeys.Count == 0);
 
     private bool ModTransport(TransportAction action, double time)
     {
-        if (_videoExport?.Request is not null || _settingsWindow.IsOpen || _playbackView == PlaybackView.Manual)
+        if (_videoExport?.Request is not null || _settingsWindow.IsOpen ||
+            _playbackView == PlaybackView.Manual && action != TransportAction.Edit)
             return false;
         switch (action)
         {
@@ -59,10 +68,13 @@ internal sealed partial class EditorWindow
             case TransportAction.Pause when _playbackView != PlaybackView.Edit:
                 PauseToPreview();
                 return true;
-            case TransportAction.Seek when double.IsFinite(time) && HasCurrentPlayback && _playback is not null &&
-                                           _playbackView != PlaybackView.Edit:
-                PauseToPreview();
+            case TransportAction.Seek when double.IsFinite(time) && HasCurrentPlayback && _playback is not null:
+                if (_playbackView == PlaybackView.Edit) SwitchPlaybackView(PlaybackView.Preview);
+                else PauseToPreview();
                 _playback.Seek(Math.Clamp(time, 0, _playback.Duration));
+                return true;
+            case TransportAction.Edit:
+                ReturnToEdit();
                 return true;
             default: return false;
         }

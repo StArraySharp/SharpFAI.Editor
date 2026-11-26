@@ -83,7 +83,8 @@ public class TestPlanetTrack
         Assert.That(timeline.PlanetTrack[3].Pivot, Is.EqualTo(timeline.PlanetTrack[2].Orbit));
         FloorTrackState[] states = FloorTrackStateResolver.Resolve(playback, floors);
         using var guides = TrackGuideMesh.Build(floors, states, states, timeline, spacing, CancellationToken.None);
-        Assert.That(guides?.IndexCount, Is.GreaterThan(300));
+        Assert.That(guides?.Mesh.IndexCount, Is.GreaterThan(300));
+        Assert.That(guides!.HoldFloors, Is.EqualTo(new[] { 1 }));
     }
 
     [Test]
@@ -168,6 +169,26 @@ public class TestPlanetTrack
         Assert.That(correction.At(0), Is.EqualTo(initialOffset).Within(1e-7));
         Assert.That(correction.At(.25), Is.EqualTo(initialOffset * (1 - Math.Sqrt(.5))).Within(1e-7));
         Assert.That(correction.At(.5), Is.Zero.Within(1e-7));
+    }
+
+    [TestCase(6, 6)]
+    [TestCase(9, 4)]
+    [TestCase(0, 4)]
+    public void PauseStartTimingUsesTheAuthoredBeatLengthAndCountdown(int ticks, int expectedLead)
+    {
+        Level level = Chart("""{"floor":1,"eventType":"SetSpeed","speedType":"Bpm","beatsPerMinute":240}""",
+            $$"""{"floor":1,"eventType":"Pause","duration":8,"countdownTicks":{{ticks}}}""");
+        var timeline = LevelRenderer.BuildTimeline(level, level.CreateFloors());
+        var pause = timeline.PauseStarts![1];
+        Assert.Multiple(() =>
+        {
+            Assert.That(pause.BeatLength, Is.EqualTo(.25).Within(1e-7));
+            Assert.That(pause.ReadyTime, Is.EqualTo(timeline.EntryTimes[1] + 2).Within(1e-7));
+            Assert.That(pause.StartTime(timeline.OffsetSeconds, manual: true),
+                Is.EqualTo(pause.ReadyTime - expectedLead * .25).Within(1e-7));
+            Assert.That(pause.StartTime(timeline.OffsetSeconds, manual: false), Is.EqualTo(pause.ReadyTime));
+            Assert.That(pause.StartTime(pause.ReadyTime - .25, manual: true), Is.EqualTo(pause.ReadyTime - .25));
+        });
     }
 
     private static Level Chart(params string[] actions) => ChartWithAngles(new JArray(0, 0, 0, 0, 0), actions);

@@ -24,7 +24,7 @@ internal sealed unsafe partial class EditorWindow
     private int? _centerEditFloor = 0;
     private int _pendingCameraFocusVersion = -1;
     private enum CanvasGesture { None, Click, Drag }
-    private readonly record struct PendingTile(int Floor, int Version, double Direction);
+    private readonly record struct PendingTile(int Floor, int Version, double Direction, bool MidspinMarker);
     private readonly List<PendingTile> _pendingTiles = [];
     private readonly List<int> _canvasFloorHits = [];
     private readonly List<int> _decorationMarkers = [];
@@ -61,6 +61,22 @@ internal sealed unsafe partial class EditorWindow
 
     private void InsertTile(double angle) => InsertTiles([angle]);
 
+    private void EditTileInDirection(double angle)
+    {
+        if (_document.IsTileBacktrack(_floor, angle))
+        {
+            if (_floor > 0)
+                DeleteFloorRange(_floor, _floor, _floor - 1, center: true);
+        }
+        else InsertTile(angle);
+    }
+
+    private void InsertFullSpin()
+    {
+        if (_document.FullSpinAngle(_floor) is { } angle)
+            InsertTile(angle);
+    }
+
     private void InsertTiles(double[] angles)
     {
         if (_pathLocked || !_document.CanInsertTiles(_floor, angles))
@@ -73,8 +89,9 @@ internal sealed unsafe partial class EditorWindow
         {
             for (int i = 0; i < angles.Length; i++)
             {
-                heading = angles[i] == 999 ? (heading + 180) % 360 : angles[i];
-                _pendingTiles.Add(new(_floor + i + 1, _document.ChangeVersion, heading));
+                bool midspin = angles[i] == 999;
+                heading = midspin ? (heading + 180) % 360 : angles[i];
+                _pendingTiles.Add(new(_floor + i + 1, _document.ChangeVersion, heading, midspin));
             }
         }
         SelectFloor(_floor + angles.Length, true);
@@ -155,18 +172,17 @@ internal sealed unsafe partial class EditorWindow
         return Toggle(label, ref value);
     }
 
-    private bool DrawArbitraryAngleInput()
+    private bool DrawArbitraryAngleInput(out bool valid)
     {
         const string id = "##arbitrary-angle";
         bool submit = ImGui.GetCurrentContext()->ActiveId == ImGui.GetID(id) &&
             (Pressed(ImGuiKey.ImGuiKey_Enter) || Pressed(ImGuiKey.ImGuiKey_KeypadEnter));
-        const int flags = (int)(ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll |
-            ImGuiInputTextFlags.ImGuiInputTextFlags_CharsScientific);
+        const int flags = (int)ImGuiInputTextFlags.ImGuiInputTextFlags_AutoSelectAll;
         string text = _angleDraft ?? _arbitraryAngle.ToString("R", CultureInfo.InvariantCulture);
         string? update = EditText(id, "", text, live: true, extraFlags: flags);
-        bool valid = float.TryParse(update ?? text, NumberStyles.Float, CultureInfo.InvariantCulture, out float angle) &&
-            float.IsFinite(angle);
-        if (valid) _arbitraryAngle = angle;
+        valid = EditorNumberExpression.TryEvaluate(update ?? text, out double angle) && float.IsFinite((float)angle);
+        if (valid) _arbitraryAngle = (float)angle;
+        else WidgetDraw.ItemTooltip(L.T("InvalidNumber"));
         _angleDraft = ImGui.IsItemActive() != 0 ? update ?? text : null;
         return submit && valid;
     }
@@ -196,11 +212,13 @@ internal sealed unsafe partial class EditorWindow
         {
             ContinueToolbar(80 * _uiScale);
             ImGui.SetNextItemWidth(80 * _uiScale);
-            bool submitted = DrawArbitraryAngleInput();
+            bool submitted = DrawArbitraryAngleInput(out bool valid);
             if (_hasFloorSelection)
             {
                 ContinueToolbar(ButtonWidth(L.T("AddTile")));
+                ImGui.BeginDisabled((byte)(valid ? 0 : 1));
                 bool add = ImGui.Button(L.T("AddTile"), default) != 0;
+                ImGui.EndDisabled();
                 if (add || submitted)
                     InsertArbitraryAngle();
             }
@@ -252,7 +270,9 @@ internal sealed unsafe partial class EditorWindow
                     inserted[i] = new(pending[i + 1], tile.Direction, _document.IncomingAngle(tile.Floor + 1),
                         _document.IsMidspinAt(tile.Floor));
                 }
-                renderer.SetEditorInsertedTrack(_document.ChangeVersion, _pendingTiles[0].Floor - 1, inserted, _tilesOnly);
+                var first = _pendingTiles[0];
+                renderer.SetEditorInsertedTrack(_document.ChangeVersion, first.Floor - 1, inserted, _tilesOnly,
+                    pending[0], first.MidspinMarker);
             }
             if (pending.Count > 1 && _centerEditFloor == _pendingTiles[^1].Floor &&
                 _pendingCameraFocusVersion != _pendingTiles[^1].Version)
@@ -347,7 +367,10 @@ internal sealed unsafe partial class EditorWindow
         JObject? spriteHit = null;
         int spriteHitIndex = -1;
         Span<Vector2> sprite = stackalloc Vector2[4];
-        bool hitSprites = hovered && (_inspectDecoration || io->KeyAlt != 0);
+        const int left = (int)ImGuiMouseButton.ImGuiMouseButton_Left;
+        bool prioritizeDecorations = _inspectDecoration || io->KeyAlt != 0;
+        bool clickReleased = _canvasPress && !_canvasDrag && ImGui.IsMouseReleased(left) != 0;
+        bool hitSprites = hovered && (prioritizeDecorations || clickReleased);
         if (!_tilesOnly && !_hideAllDecorations)
         {
             var decorations = _document.Decorations;
@@ -358,7 +381,8 @@ internal sealed unsafe partial class EditorWindow
                     if ((uint)index >= (uint)decorations.Count || decorations[index] is not JObject item || DecorationHidden(item))
                         continue;
                     bool selectedDecoration = _inspectDecoration && _selectedDecorations.Contains(item);
-                    bool canHit = hitSprites && index > spriteHitIndex && !DecorationLocked(item);
+                    bool canHit = hitSprites && index > spriteHitIndex && !DecorationLocked(item) &&
+                        (prioritizeDecorations || EditorDocument.Type(item) == "AddDecoration");
                     if ((!selectedDecoration && !canHit) || !renderer.TryGetDecorationQuad(index, sprite))
                         continue;
                     if (canHit && InsideQuad(sprite, cursor))
@@ -395,14 +419,14 @@ internal sealed unsafe partial class EditorWindow
                     decorationHit = item;
             }
         }
-        decorationHit ??= spriteHit;
+        if (prioritizeDecorations)
+            decorationHit ??= spriteHit;
         bool shift = io->KeyShift != 0;
         bool fine = FineDirections;
         double? direction = guide && !_pathLocked
             ? DrawDirectionGuide(draw, selected, origin, end, io->MousePos, shift, fine, hovered) : null;
         ImDrawList.PopClipRect(draw);
 
-        const int left = (int)ImGuiMouseButton.ImGuiMouseButton_Left;
         bool leftPressed = hovered && ImGui.IsMouseClicked(left, 0) != 0;
         if (leftPressed)
         {
@@ -500,7 +524,10 @@ internal sealed unsafe partial class EditorWindow
                     if (_pressedDirection is { } pressed)
                     {
                         if (direction == pressed)
-                            InsertTile(pressed == -1 ? (_document.IncomingAngle(_floor) + 180) % 360 : pressed);
+                        {
+                            if (pressed == -1) InsertFullSpin();
+                            else EditTileInDirection(pressed);
+                        }
                     }
                     else if (ready && io->KeyAlt == 0)
                     {
@@ -646,10 +673,7 @@ internal sealed unsafe partial class EditorWindow
             if (hovered)
             {
                 int version = _document.ChangeVersion;
-                if (_document.IsFreeAngleBacktrack(_floor, angle))
-                    DeleteFloorRange(_floor, _floor, _floor - 1);
-                else
-                    InsertTile(angle);
+                EditTileInDirection(angle);
                 if (version != _document.ChangeVersion) _centerEditFloor = _floor;
             }
             renderer.ClearEditorAnglePreview();
@@ -696,6 +720,7 @@ internal sealed unsafe partial class EditorWindow
             Math.Min(end.x - origin.x, end.y - origin.y) * .5f - half - 2));
         ImVec2 center = floor;
         double? result = null;
+        double? backwards = _document.TileBacktrackAngle(_floor);
         float nearest = float.PositiveInfinity;
         foreach (var direction in Directions)
         {
@@ -703,24 +728,22 @@ internal sealed unsafe partial class EditorWindow
             if (!EditorCanvasInput.VisibleDirection(direction.Extra, horizontal, shift, fine))
                 continue;
             double angle = direction.AngleFor(fine);
+            bool deletes = backwards is { } reverse && EditorDocument.SameDirection(angle, reverse);
+            if (deletes && _floor == 0) continue;
             double radians = angle * Math.PI / 180;
             Button(WidgetDraw.V2(center.x + (float)Math.Cos(radians) * radius,
-                center.y - (float)Math.Sin(radians) * radius), direction.Label, direction.Key, angle);
+                center.y - (float)Math.Sin(radians) * radius), direction.Label, direction.Key, angle, deletes);
         }
-        if (shift)
+        if (shift && _floor > 0)
             Button(center, "Space", ImGuiKey.ImGuiKey_Space, -1);
-        else
+        else if (!shift && _floor > 0)
         {
             float corner = radius + half * 0.75f;
-            ImVec2 hint = WidgetDraw.V2(center.x - corner, center.y - corner);
-            ImVec2 min = WidgetDraw.V2(hint.x - half, hint.y - half * 0.65f);
-            ImVec2 max = WidgetDraw.V2(hint.x + half, hint.y + half * 0.65f);
-            WidgetDraw.Panel(draw, min, max, WidgetDraw.U32(31, 34, 49, 208), 4);
-            WidgetDraw.TextCentered(draw, min, max, WidgetDraw.U32(183, 187, 202), "Tab");
+            Button(WidgetDraw.V2(center.x - corner, center.y - corner), "Tab", ImGuiKey.ImGuiKey_Tab, 999);
         }
         return result;
 
-        void Button(ImVec2 point, string label, ImGuiKey key, double angle)
+        void Button(ImVec2 point, string label, ImGuiKey key, double angle, bool deletes = false)
         {
             ImVec2 min = WidgetDraw.V2(point.x - half, point.y - half);
             ImVec2 max = WidgetDraw.V2(point.x + half, point.y + half);
@@ -731,7 +754,9 @@ internal sealed unsafe partial class EditorWindow
                 nearest = x * x + y * y;
                 result = angle;
             }
-            uint color = hot || ImGui.IsKeyDown(key) != 0 ? WidgetDraw.U32(29, 117, 117) : WidgetDraw.U32(31, 34, 49, 240);
+            bool active = hot || ImGui.IsKeyDown(key) != 0;
+            uint color = deletes ? (active ? WidgetDraw.U32(151, 59, 74) : WidgetDraw.U32(83, 44, 57)) :
+                active ? WidgetDraw.U32(29, 117, 117) : WidgetDraw.U32(31, 34, 49, 240);
             WidgetDraw.Panel(draw, min, max, color, 4);
             WidgetDraw.Outline(draw, min, max, WidgetDraw.U32(111, 119, 140), 4);
             WidgetDraw.TextCentered(draw, min, max, WidgetDraw.U32(242, 243, 248), label);

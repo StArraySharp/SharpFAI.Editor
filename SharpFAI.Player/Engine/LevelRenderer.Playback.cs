@@ -13,6 +13,7 @@ public sealed unsafe partial class LevelRenderer
 
     private bool _playbackZoomNeedsReset = true;
     private bool _progressScrubbing;
+    private bool _startFromSelectedFloor;
 
     private float PlaybackBaseZoom => _settings.CameraZoom is float zoom
         ? AuthoredZoom(_camera.ViewportHeight, zoom) : _homeZoom;
@@ -25,9 +26,12 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
+        PauseStartTiming pause = default;
+        bool selectedPause = _startFromSelectedFloor && _pauseStarts?.TryGetValue(_selectedFloor, out pause) == true;
+        _startFromSelectedFloor = false;
         if (PlayInput.Enabled && _manualTrack is { LastFloor: >= 1 } track)
         {
-            if (!PlaySession.IsTracking || PlaySession.Failed || PlaySession.Completed)
+            if (selectedPause || !PlaySession.IsTracking || PlaySession.Failed || PlaySession.Completed)
             {
                 int start = PlaySession.Failed ? PlaySession.CheckpointFloor
                     : _selectedFloor >= 0 && _selectedFloor < track.LastFloor ? _selectedFloor : 0;
@@ -42,6 +46,12 @@ public sealed unsafe partial class LevelRenderer
                 _cameraSnap = true;
                 _playbackZoomNeedsReset = true;
             }
+        }
+        else if (selectedPause)
+        {
+            _playTime = pause.StartTime(_offsetSeconds, manual: false);
+            ResetDecorationTriggers();
+            _cameraSnap = true;
         }
         else if (_playTime >= _duration)
         {
@@ -97,6 +107,7 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private bool ManualAttemptActive => PlayInput.Enabled && !_offlineSubSample && PlaySession.IsTracking;
+    internal double ErrorMeterTime => _lastFrameTime;
 
     private string? ManualStatus
     {
@@ -158,6 +169,7 @@ public sealed unsafe partial class LevelRenderer
         }
 
         SetRuntimeTrackMode(false);
+        _startFromSelectedFloor = false;
         _trackRuntime?.Reset();
         _isPlaying = false;
         _filterClockPaused = false;
@@ -205,6 +217,7 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
+        _startFromSelectedFloor = false;
         _colorHistory?.Reset();
         InvalidateModHistory();
         _lastFilterTime = double.NaN;

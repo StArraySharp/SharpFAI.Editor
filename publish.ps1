@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $publishDirectory = Join-Path $PSScriptRoot 'publish'
 $artifactsDirectory = Join-Path $PSScriptRoot 'SharpFAI.Editor/obj/single-file-publish'
 $editorProject = Join-Path $PSScriptRoot 'SharpFAI.Editor/SharpFAI.Editor.csproj'
+$modNames = @('SharpFAI.Mcp', 'SharpFAI.WebMirror')
 
 $version = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup |
     ForEach-Object { $_.VersionPrefix } |
@@ -76,6 +77,39 @@ function Move-PublishedFile([string]$stagedExe, [string]$fileName, [string]$runt
     }
 }
 
+function Publish-ModPackages {
+    $modArtifacts = Join-Path $artifactsDirectory 'mods'
+    $modOutput = Join-Path $publishDirectory 'Mods'
+    New-Item -ItemType Directory -Path $modOutput -Force | Out-Null
+
+    foreach ($name in $modNames) {
+        $project = Join-Path $PSScriptRoot "mods/$name/$name.csproj"
+        $buildArguments = @('--configuration', 'Release', '--artifacts-path', $modArtifacts, '--nologo')
+        if ($Source) {
+            $restoreArguments = @('--artifacts-path', $modArtifacts)
+            foreach ($packageSource in $Source) {
+                $restoreArguments += @('--source', $packageSource)
+            }
+            & dotnet restore $project @restoreArguments | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                throw "dotnet restore failed for $name (exit code $LASTEXITCODE)."
+            }
+            $buildArguments += '--no-restore'
+        }
+        & dotnet build $project @buildArguments | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet build failed for $name (exit code $LASTEXITCODE)."
+        }
+
+        $fileName = "$name.sharpfaimod"
+        $stagedPackage = Join-Path $modArtifacts "bin/$name/release/$fileName"
+        $publishedPackage = Join-Path $modOutput $fileName
+        Copy-Item -LiteralPath $stagedPackage -Destination $publishedPackage -Force
+        Write-Host "Published $publishedPackage"
+        [pscustomobject]@{ Path = $publishedPackage; FileName = "Mods/$fileName" }
+    }
+}
+
 function Add-FileToArchive($archive, [string]$filePath, [string]$fileName, [bool]$executable) {
     $entry = $archive.CreateEntry($fileName, [IO.Compression.CompressionLevel]::Optimal)
     if ($executable) {
@@ -100,6 +134,7 @@ Push-Location -LiteralPath $PSScriptRoot
 try {
     New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
 
+    $publishedMods = @(Publish-ModPackages)
     $publishedFiles = [System.Collections.Generic.List[object]]::new()
     foreach ($targetRuntime in $Runtime) {
         $stagedExe = Publish-SingleFile $editorProject 'SharpFAI.Editor' $targetRuntime
@@ -115,6 +150,9 @@ try {
         try {
             foreach ($file in $publishedFiles) {
                 Add-FileToArchive $archive $file.Path $file.FileName ($file.Runtime -ne 'win-x64')
+            }
+            foreach ($mod in $publishedMods) {
+                Add-FileToArchive $archive $mod.Path $mod.FileName $false
             }
             Add-FileToArchive $archive $fontLicense 'NotoSansCJK-LICENSE.txt' $false
         } finally {

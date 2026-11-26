@@ -11,6 +11,19 @@ namespace SharpFAI.Editor.Mods;
 
 internal sealed record ModPackage(ModManifest Manifest, string Root, bool Development, bool IsDropIn = false, bool IsArchive = false)
 {
+    internal string SettingsPath
+    {
+        get
+        {
+            string package = Path.TrimEndingDirectorySeparator(Root);
+            string name = IsDropIn || Development
+                ? Path.GetFileName(package) : Path.GetFileNameWithoutExtension(Manifest.EntryAssembly.Replace('\\', '/'));
+            if (name.EndsWith(".sharpfaimod", StringComparison.OrdinalIgnoreCase))
+                name = name[..^".sharpfaimod".Length];
+            return Path.Combine(Path.GetDirectoryName(package) ?? package, name + ".Settings.json");
+        }
+    }
+
     private const long MaximumBytes = 512L * 1024 * 1024;
     private const int MaximumFiles = 4096;
     private static readonly Regex IdFormat = new(@"^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+$", RegexOptions.CultureInvariant);

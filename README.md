@@ -33,7 +33,7 @@ Mod 安装、示例和热重载见 [Mod 开发指南](docs/modding.md)。SDK 接
 
 ## 打包与测试
 
-在仓库根目录通过 PowerShell 7 运行打包脚本，可在 `publish/` 生成自包含的 Windows x64、Linux x64、macOS x64 和 macOS arm64 编辑器。文件名包含 RID 和版本号，四个可执行文件和字体许可证也会打包到 `SharpFAI.Editor-MultiPlatforms-<版本>.zip`。 [publish.ps1](publish.ps1)
+在仓库根目录通过 PowerShell 7 运行打包脚本，可在 `publish/` 生成自包含的 Windows x64、Linux x64、macOS x64 和 macOS arm64 编辑器。MultiPlatforms ZIP 包含所选平台的可执行文件、字体许可证和 `Mods/` 下的 MCP、Web 镜像。 [publish.ps1](publish.ps1)
 
 ```powershell
 pwsh -NoProfile -File .\publish.ps1

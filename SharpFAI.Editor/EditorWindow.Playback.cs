@@ -195,7 +195,7 @@ internal sealed unsafe partial class EditorWindow
             else
             {
                 if (!_pendingEffects && pending != target &&
-                    (_document.HasOnlyTileInsertionsSince(pending.Version) || _document.HasOnlyEventAppendsSince(pending.Version)))
+                    (_document.HasOnlyTileEditsSince(pending.Version) || _document.HasOnlyEventAppendsSince(pending.Version)))
                     renderer.RequestEditorRevisionCancellation();
                 if (!FinishPlaybackRevision(renderer, pending, target, _pendingEffects, out effectsFailed))
                     return;
@@ -218,13 +218,12 @@ internal sealed unsafe partial class EditorWindow
                         return;
                     if (_displayedRevision == target) goto PlaybackReady;
 
-                    bool tileInsertion = _document.HasOnlyTileInsertionsSince(current.Version);
-                    bool nearEnd = _pendingTiles.Count > 0 && _document.LastFloor - _pendingTiles[^1].Floor < 64;
-                    bool tailEvent = editing && _document.LastFloor - _floor < 64 &&
-                        _document.HasOnlyEventAppendsSince(current.Version);
+                    bool tileEdit = _document.HasOnlyTileEditsSince(current.Version);
+                    bool nearEnd = _document.LastFloor - _floor < 64;
+                    bool tailEdit = nearEnd && (tileEdit || _document.HasOnlyEventAppendsSince(current.Version));
                     double delay = 0.12;
-                    if (editing && tileInsertion && _document.IsLargeChart && !nearEnd) delay = 0.4;
-                    else if (tailEvent || editing && !_document.IsLargeChart && _pendingTiles.Count > 0) delay = 0.035;
+                    if (editing && tileEdit && _document.IsLargeChart && !nearEnd) delay = 0.25;
+                    else if (editing && (tailEdit || tileEdit && !_document.IsLargeChart)) delay = 0.035;
                     if (!effectsFailed && !_startPlayback && !_document.CanReusePlaybackChart(current.Version) &&
                         now - _lastPreviewEdit < delay) return;
 

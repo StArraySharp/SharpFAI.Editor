@@ -1,0 +1,17 @@
+{
+  "manifestVersion": 1,
+  "id": "com.sharpfai.mcp",
+  "name": "SharpFAI MCP",
+  "version": "1.0.0",
+  "api": "[1.0.0,2.0.0)",
+  "entryType": "SharpFAI.Mcp.McpMod",
+  "translations": {
+    "en": { "mcp-window": "SharpFAI MCP", "Port Change Help": "Restart the listener to apply a different port." },
+    "zh-Hans": {
+      "mcp-window": "SharpFAI MCP",
+      "Local Port": "监听端口",
+      "Start Automatically": "启用 Mod 时自动启动",
+      "Port Change Help": "重启监听服务后使用新端口。"
+    }
+  }
+}

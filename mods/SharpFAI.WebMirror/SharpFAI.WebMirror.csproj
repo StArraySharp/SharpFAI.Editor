@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../SharpFAI.ModApi/SharpFAI.ModApi.csproj" Private="false" />
+    <EmbeddedResource Include="WebMirror.html" LogicalName="SharpFAI.WebMirror.WebMirror.html" />
+  </ItemGroup>
+  <Target Name="BuildModPackage" AfterTargets="Build">
+    <PropertyGroup>
+      <MirrorPackage>$(TargetDir)package/SharpFAI.WebMirror.sharpfaimod</MirrorPackage>
+    </PropertyGroup>
+    <Copy SourceFiles="$(TargetPath);$(ProjectDir)SharpFAI.WebMirror.json"
+          DestinationFolder="$(MirrorPackage)" SkipUnchangedFiles="true" />
+    <ZipDirectory SourceDirectory="$(MirrorPackage)" DestinationFile="$(TargetDir)SharpFAI.WebMirror.sharpfaimod" Overwrite="true" />
+  </Target>
+</Project>

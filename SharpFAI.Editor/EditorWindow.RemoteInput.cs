@@ -2,64 +2,65 @@ using System.Text;
 using ImGui4NET;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using SharpFAI.ModApi;
 
 namespace SharpFAI.Editor;
 
 internal sealed unsafe partial class EditorWindow
 {
-    internal EditorWebMirror? WebMirror { get; set; }
-    private EditorWebMirror.Connection? _webClient;
-    private bool _webInputActive;
-    private bool _receivedWebInput;
-    private readonly HashSet<Keys> _webKeys = [];
-    private int _webButtons;
+    private readonly EditorWindowStream _windowStream = new();
+    private EditorWindowStream.Session? _remoteSession;
+    private bool _remoteInputActive;
+    private bool _receivedRemoteInput;
+    private readonly HashSet<Keys> _remoteKeys = [];
+    private int _remoteButtons;
 
-    private void FeedWebInput(ImGuiIO* io)
+    private void FeedRemoteInput(ImGuiIO* io)
     {
-        _receivedWebInput = false;
-        var client = WebMirror?.Client;
-        if (client != _webClient)
+        _receivedRemoteInput = false;
+        var session = _windowStream.Current;
+        if (session != _remoteSession)
         {
-            ReleaseWebInput();
-            _webClient = client;
+            ReleaseRemoteInput();
+            _remoteSession = session;
         }
-        if (client is null) return;
+        if (session is null) return;
 
-        for (int i = 0; i < 128 && client.Input.Reader.TryRead(out var input); i++)
+        for (int i = 0; i < 128 && session.TryRead(out var input); i++)
         {
-            _receivedWebInput = true;
-            if (input.Type == "reset")
+            _receivedRemoteInput = true;
+            if (input.Kind == EditorWindowInputKind.Reset)
             {
-                ReleaseWebInput();
+                ReleaseRemoteInput();
                 continue;
             }
-            if (!_webInputActive)
+            if (!_remoteInputActive)
             {
-                _webInputActive = true;
+                _remoteInputActive = true;
                 ImGuiIO.AddFocusEvent(io, 1);
             }
-            if (input.Type is "move" or "button" or "wheel")
+            if (input.Kind is EditorWindowInputKind.Move or EditorWindowInputKind.Button or EditorWindowInputKind.Wheel)
                 ImGuiIO.AddMousePosEvent(io, (float)(input.X * ClientSize.X), (float)(input.Y * ClientSize.Y));
-            switch (input.Type)
+            switch (input.Kind)
             {
-                case "button":
+                case EditorWindowInputKind.Button:
                     int index = input.Button switch { 1 => 2, 2 => 1, _ => 0 };
                     int mask = 1 << index;
-                    if (input.Down == ((_webButtons & mask) != 0)) break;
-                    _webButtons ^= mask;
+                    if (input.Down == ((_remoteButtons & mask) != 0)) break;
+                    _remoteButtons ^= mask;
                     ImGuiIO.AddMouseButtonEvent(io, index, (byte)(input.Down ? 1 : 0));
                     FeedPlaybackMouse((MouseButton)index, input.Down);
                     break;
-                case "wheel":
-                    KeyModifiers modifiers = WebModifiers();
-                    FeedEditorWheel(io, (float)input.Dx, (float)input.Dy,
+                case EditorWindowInputKind.Wheel:
+                    KeyModifiers modifiers = RemoteModifiers();
+                    FeedEditorWheel(io, (float)input.DeltaX, (float)input.DeltaY,
                         input.Ctrl ?? modifiers.HasFlag(KeyModifiers.Control),
                         input.Shift ?? modifiers.HasFlag(KeyModifiers.Shift));
                     break;
-                case "key":
-                    FeedWebKey(input.Code!, input.Down, input.Ctrl, input.Shift);
+                case EditorWindowInputKind.Key:
+                    FeedRemoteKey(input.KeyCode!, input.Down, input.Ctrl, input.Shift);
                     break;
-                case "text":
+                case EditorWindowInputKind.Text:
                     foreach (Rune rune in input.Text!.EnumerateRunes())
                         if (!Rune.IsControl(rune) || rune.Value is '\n' or '\t')
                             ImGuiIO.AddInputCharacter(io, (uint)rune.Value);
@@ -68,13 +69,13 @@ internal sealed unsafe partial class EditorWindow
         }
     }
 
-    private void FeedWebKey(string code, bool down, bool? ctrl, bool? shift)
+    private void FeedRemoteKey(string code, bool down, bool? ctrl, bool? shift)
     {
-        Keys key = BrowserKey(code);
+        Keys key = RemoteKey(code);
         if (key == Keys.Unknown) return;
-        bool changed = down ? _webKeys.Add(key) : _webKeys.Remove(key);
+        bool changed = down ? _remoteKeys.Add(key) : _remoteKeys.Remove(key);
         if (!changed && (down || key is not (Keys.LeftControl or Keys.RightControl or Keys.LeftShift or Keys.RightShift))) return;
-        KeyModifiers modifiers = WebModifiers();
+        KeyModifiers modifiers = RemoteModifiers();
         if (ctrl is bool control)
             modifiers = control ? modifiers | KeyModifiers.Control : modifiers & ~KeyModifiers.Control;
         if (shift is bool shifted)
@@ -83,35 +84,35 @@ internal sealed unsafe partial class EditorWindow
         FeedEditorKey(args, down);
     }
 
-    private void ReleaseWebInput()
+    private void ReleaseRemoteInput()
     {
-        if (!_webInputActive) return;
-        _webInputActive = false;
+        if (!_remoteInputActive) return;
+        _remoteInputActive = false;
         ImGuiIO* io = ImGui.GetIO();
-        foreach (Keys key in _webKeys)
+        foreach (Keys key in _remoteKeys)
             FeedKey(new KeyboardKeyEventArgs(key, 0, 0, false), false);
-        _webKeys.Clear();
+        _remoteKeys.Clear();
         for (int i = 0; i < 3; i++)
-            if ((_webButtons & (1 << i)) != 0)
+            if ((_remoteButtons & (1 << i)) != 0)
                 ImGuiIO.AddMouseButtonEvent(io, i, 0);
-        _webButtons = 0;
+        _remoteButtons = 0;
         ImGuiIO.AddMousePosEvent(io, -float.MaxValue, -float.MaxValue);
         ResetCanvasGesture();
         _dragDecoration = null;
         ReleasePlaybackInput();
     }
 
-    private KeyModifiers WebModifiers()
+    private KeyModifiers RemoteModifiers()
     {
         KeyModifiers modifiers = 0;
-        if (_webKeys.Contains(Keys.LeftControl) || _webKeys.Contains(Keys.RightControl)) modifiers |= KeyModifiers.Control;
-        if (_webKeys.Contains(Keys.LeftShift) || _webKeys.Contains(Keys.RightShift)) modifiers |= KeyModifiers.Shift;
-        if (_webKeys.Contains(Keys.LeftAlt) || _webKeys.Contains(Keys.RightAlt)) modifiers |= KeyModifiers.Alt;
-        if (_webKeys.Contains(Keys.LeftSuper) || _webKeys.Contains(Keys.RightSuper)) modifiers |= KeyModifiers.Super;
+        if (_remoteKeys.Contains(Keys.LeftControl) || _remoteKeys.Contains(Keys.RightControl)) modifiers |= KeyModifiers.Control;
+        if (_remoteKeys.Contains(Keys.LeftShift) || _remoteKeys.Contains(Keys.RightShift)) modifiers |= KeyModifiers.Shift;
+        if (_remoteKeys.Contains(Keys.LeftAlt) || _remoteKeys.Contains(Keys.RightAlt)) modifiers |= KeyModifiers.Alt;
+        if (_remoteKeys.Contains(Keys.LeftSuper) || _remoteKeys.Contains(Keys.RightSuper)) modifiers |= KeyModifiers.Super;
         return modifiers;
     }
 
-    private static Keys BrowserKey(string code)
+    private static Keys RemoteKey(string code)
     {
         if (code.Length == 4 && code.StartsWith("Key", StringComparison.Ordinal) && code[3] is >= 'A' and <= 'Z')
             return Keys.A + (code[3] - 'A');

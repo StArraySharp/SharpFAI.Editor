@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
+    <ProjectReference Include="../../SharpFAI.ModApi/SharpFAI.ModApi.csproj" Private="false" />
+  </ItemGroup>
+  <Target Name="BuildModPackage" AfterTargets="Build">
+    <PropertyGroup>
+      <McpPackage>$(TargetDir)package/SharpFAI.Mcp.sharpfaimod</McpPackage>
+    </PropertyGroup>
+    <ItemGroup>
+      <McpPackageFile Include="$(TargetPath);$(ProjectDir)SharpFAI.Mcp.json;@(ReferenceCopyLocalPaths)"
+                      Condition="'%(Extension)' == '.dll' Or '%(Extension)' == '.json'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(McpPackageFile)" DestinationFolder="$(McpPackage)" SkipUnchangedFiles="true" />
+    <ZipDirectory SourceDirectory="$(McpPackage)" DestinationFile="$(TargetDir)SharpFAI.Mcp.sharpfaimod" Overwrite="true" />
+  </Target>
+</Project>

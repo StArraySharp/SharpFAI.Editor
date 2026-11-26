@@ -26,7 +26,7 @@ public sealed partial class LevelRenderer
 
         _music?.Pause();
         _hitsound?.Pause();
-        var gains = new ModMixGains(_musicEnabled ? _musicVolume * _musicOutputGain : 0,
+        var gains = new ModMixGains(_musicEnabled ? PlaybackMusicGain : 0,
             _hitsoundEnabled ? _hitsoundVolume * _hitsoundOutputGain : 0);
         try
         {

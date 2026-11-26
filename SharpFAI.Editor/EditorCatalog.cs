@@ -35,7 +35,7 @@ internal sealed class EditorCatalog
         ("Gameplay", ["SetSpeed", "Twirl", "Pause", .. PlanetEvents, "Bookmark"]),
         ("TrackFx", ["PositionTrack", "ColorTrack", "AnimateTrack", "MoveTrack", "RecolorTrack"]),
         ("DecorationFx", ["MoveDecorations", "SetObject", "SetText", "SetParticle", "EmitParticle"]),
-        ("VisualFx", ["CustomBackground", "MoveCamera", "Flash", "SetFilter", "SetFilterAdvanced", "Bloom", "HallOfMirrors"]),
+        ("VisualFx", ["CustomBackground", "MoveCamera", "Flash", "SetFilter", "SetFilterAdvanced", "Bloom", "HallOfMirrors", "ScreenTile"]),
         ("FxModifiers", ["RepeatEvents"]),
         ("Conveniences", ["EditorComment"])
     ];
@@ -74,12 +74,13 @@ internal sealed class EditorCatalog
         AddDefaults("SetFilterAdvanced", """{"filter":"CameraFilterPack_AAA_SuperComputer","enabled":true,"disableOthers":false,"angleOffset":0.0,"duration":0.0,"ease":"Linear","filterProperties":{},"eventTag":""}""");
         AddDefaults("Bloom", """{"enabled":true,"threshold":50.0,"intensity":100.0,"color":"ffffff","duration":0.0,"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("HallOfMirrors", """{"enabled":true,"angleOffset":0.0,"eventTag":""}""");
+        AddDefaults("ScreenTile", """{"duration":0.0,"tile":[1,1],"angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("RepeatEvents", """{"repeatType":"Beat","repetitions":1,"interval":1.0,"tag":""}""");
         AddDefaults("SetText", """{"decText":"","tag":"","angleOffset":0.0,"eventTag":""}""");
         AddDefaults("SetObject", """{"duration":1.0,"tag":"","angleOffset":0.0,"ease":"Linear","eventTag":""}""");
         AddDefaults("SetParticle", """{"tag":"","targetMode":"Start","duration":0.0,"angleOffset":0.0,"eventTag":""}""");
         AddDefaults("EmitParticle", """{"tag":"","count":10,"angleOffset":0.0,"eventTag":""}""");
-        AddDefaults("AddDecoration", """{"decorationImage":"","tag":"","relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"cropPivotOffset":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0],"maskingType":"None"}""");
+        AddDefaults("AddDecoration", """{"decorationImage":"","tag":"","relativeTo":"Global","position":[0,0],"pivotOffset":[0,0],"cropPivotOffset":[0,0],"rotation":0.0,"scale":[100,100],"tile":[1,1],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0],"blendMode":"None","maskingType":"None"}""");
         AddDefaults("AddText", """{"decText":"","tag":"","font":"Default","relativeTo":"Global","position":[0,0],"rotation":0.0,"scale":[100,100],"color":"ffffff","opacity":100.0,"depth":-1,"parallax":[0,0]}""");
         AddDefaults("AddObject", """
             {"objectType":"Floor","tag":"","trackType":"Normal","trackAngle":180.0,"trackColorType":"Single",
@@ -205,15 +206,22 @@ internal sealed class EditorCatalog
                     ("Hold", "duration") => metadata with { Unit = "loops", Minimum = 0 },
                     ("Hold", "distanceMultiplier") => metadata with { Unit = "%" },
                     ("ScaleRadius", "scale") => metadata with { Unit = "%", Minimum = -10000, Maximum = 10000 },
+                    ("AddDecoration", "tile") => metadata with { EnableIf = ["blendMode", "None"], DisableIf = ["maskingType", "Mask"] },
                     _ => metadata,
                 };
-                return ApplyNumericBounds(type, metadata with { Optional = optional.Contains(field.Name), StartEnabled = false });
+                return ApplyNumericBounds(type, metadata with
+                {
+                    Optional = optional.Contains(field.Name),
+                    StartEnabled = StartsEnabled(type, field.Name),
+                });
             }).ToArray()
         };
     }
 
     private static bool IsObjectFloorField(string key) =>
         key.StartsWith("track", StringComparison.Ordinal) || key == "secondaryTrackColor";
+
+    private static bool StartsEnabled(string? owner, string key) => (owner, key) == ("PositionTrack", "positionOffset");
 
     private void LoadSchema(JObject schema)
     {
@@ -274,7 +282,7 @@ internal sealed class EditorCatalog
                     value = new JValue("ffffff");
                 var metadata = new EditorField(key, type, value, field["disableIf"] as JArray,
                     field.Value<string>("control") == "Hidden", field.Value<string>("unit") ?? DefaultUnit(owner, key),
-                    field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") == true,
+                    field.Value<bool?>("canBeDisabled") == true, field.Value<bool?>("startEnabled") ?? StartsEnabled(owner, key),
                     ReadBound(field["min"]), ReadBound(field["max"]), field.Value<bool?>("allowEmpty") == true,
                     ShowIf: field["showIf"] as JArray, HideIf: field["hideIf"] as JArray,
                     EnableIf: field["enableIf"] as JArray, FileType: field.Value<string>("fileType"),
@@ -291,20 +299,32 @@ internal sealed class EditorCatalog
 
     private static EditorField ApplyNumericBounds(string? owner, EditorField field)
     {
+        if ((owner, field.Key) == ("ScreenTile", "tile"))
+            return field with { Type = "Vector2", Minimum = -20, Maximum = 20 };
+        if ((owner, field.Key) == ("AddDecoration", "tile"))
+            return field with { Type = "Vector2", Minimum = 1 };
+
+        double? tempoMinimum = (owner, field.Key) switch
+        {
+            ("SongSettings", "bpm") or ("SetSpeed", "beatsPerMinute") => 0.001,
+            ("SetSpeed", "bpmMultiplier") => 1e-7,
+            _ => null,
+        };
+        if (tempoMinimum is double minimum)
+            return field with { Type = "Float", Minimum = Math.Max(field.Minimum ?? minimum, minimum), Maximum = null };
+
         (double? Min, double? Max) bounds = (owner, field.Key) switch
         {
-            ("SongSettings", "bpm") or ("SetSpeed", "beatsPerMinute") => (0.001, 10000),
-            ("SetSpeed", "bpmMultiplier") => (1e-7, 128),
             ("SongSettings", "volume" or "hitsoundVolume") => (1, 100),
             ("SongSettings", "pitch") => (1, 1000),
             ("SongSettings", "offset") => (-10000, 300000),
             ("SongSettings", "countdownTicks") => (2, 12),
+            ("ScreenTile", "duration") => (0, null),
             _ => (null, null),
         };
         if (bounds.Min is null) return field;
         return field with
         {
-            Type = (owner, field.Key) == ("SongSettings", "bpm") ? "Float" : field.Type,
             Minimum = field.Minimum is { } lower && bounds.Min is { } required
                 ? Math.Max(lower, required) : field.Minimum ?? bounds.Min,
             Maximum = field.Maximum ?? bounds.Max,
@@ -333,7 +353,7 @@ internal sealed class EditorCatalog
             ("AddParticle", "playDuration" or "particleLifetime") => "seconds",
         (_, "beatsAhead" or "beatsBehind" or "holdMidSoundDelay") or ("RepeatEvents", "interval") => "beats",
         ("Pause" or "Flash" or "MoveTrack" or "MoveCamera" or "MoveDecorations" or "SetFilter" or
-            "SetFilterAdvanced" or "SetObject" or "SetParticle" or "Bloom", "duration") => "beats",
+            "SetFilterAdvanced" or "SetObject" or "SetParticle" or "Bloom" or "ScreenTile", "duration") => "beats",
         (_, "bpm" or "beatsPerMinute" or "trackSetSpeedIconBpm") => "bpm",
         (_, "bpmMultiplier" or "speedTrialAim") => "X",
         (_, "angleOffset" or "rotation" or "rotationOffset" or "trackAngle" or "trackIconAngle" or "startRotation") => "°",

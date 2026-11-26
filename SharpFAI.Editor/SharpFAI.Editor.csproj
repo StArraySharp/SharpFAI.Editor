@@ -10,8 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- HTTP Mods share the ASP.NET Core runtime in the editor process. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <EmbeddedResource Include="WebMirror.html" LogicalName="SharpFAI.Editor.WebMirror.html" />
     <PackageReference Include="ImGui4NET" Version="1.93.0.6" />
     <PackageReference Include="ImGui4NET.Backend.OpenGL3" Version="1.93.0.6" />
     <PackageReference Include="NativeFileDialog" Version="1.0.0" />

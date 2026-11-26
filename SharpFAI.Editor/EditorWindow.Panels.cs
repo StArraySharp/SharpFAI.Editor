@@ -15,6 +15,7 @@ internal sealed unsafe partial class EditorWindow
     private readonly List<int> _decorationRows = [];
     private (int Version, string Filter, CultureInfo Language)? _decorationRowsKey;
     private string _eventSearch = "";
+    private const string DecorationMoreButton = "…###decoration-actions";
 
     private void DrawSettings()
     {
@@ -65,11 +66,13 @@ internal sealed unsafe partial class EditorWindow
                         AddEvent(type);
                 ImGui.EndPopup();
             }
-            ImGui.SameLine();
-            if (ImGui.SmallButton(_hideAllDecorations ? L.T("ShowAll") : L.T("HideAll")) != 0)
+            string visibility = _hideAllDecorations ? L.T("ShowAll") : L.T("HideAll");
+            ContinueToolbar(ButtonWidth(visibility));
+            if (ImGui.SmallButton(visibility) != 0)
                 _hideAllDecorations = !_hideAllDecorations;
-            ImGui.SameLine();
-            if (ImGui.SmallButton(_lockAllDecorations ? L.T("UnlockAll") : L.T("LockAll")) != 0)
+            string locking = _lockAllDecorations ? L.T("UnlockAll") : L.T("LockAll");
+            ContinueToolbar(ButtonWidth(locking));
+            if (ImGui.SmallButton(locking) != 0)
                 _lockAllDecorations = !_lockAllDecorations;
             ImGui.Separator();
 
@@ -77,7 +80,22 @@ internal sealed unsafe partial class EditorWindow
             {
                 var decorations = _document.Decorations;
                 UpdateDecorationRows();
-                JObject? moveFrom = null, moveTo = null;
+                JObject? moveFrom = null, moveTo = null, remove = null;
+                string show = L.T("Show"), hide = L.T("Hide"), unlock = L.T("Unlock"), @lock = L.T("Lock");
+                string delete = L.T("DeleteEvent");
+                float width = ImGui.GetContentRegionAvail().x, gap = ImGui.GetStyle()->ItemSpacing.x;
+                float visibilityWidth = Math.Max(ButtonWidth(show), ButtonWidth(hide));
+                float lockWidth = Math.Max(ButtonWidth(unlock), ButtonWidth(@lock));
+                float deleteWidth = ButtonWidth(delete);
+                float fullActionsWidth = visibilityWidth + lockWidth + deleteWidth + 2 * gap;
+                float typeWidth = ImGui.CalcTextSize(L.T("DecorationTypeOther")).x;
+                foreach (string type in EditorCatalog.DecorationTypes)
+                    typeWidth = Math.Max(typeWidth, ImGui.CalcTextSize(DecorationTypeName(type)).x);
+                bool compact = width < fullActionsWidth + typeWidth + 2 * gap + 4 * ImGui.GetFontSize();
+                float actionsWidth = compact ? ButtonWidth(DecorationMoreButton) : fullActionsWidth;
+                typeWidth = Math.Min(typeWidth, Math.Max(0, width - actionsWidth - 2 * gap - ImGui.GetFontSize()));
+                float nameWidth = Math.Max(1, width - actionsWidth - gap - (typeWidth > 0 ? typeWidth + gap : 0));
+                ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_FramePadding, WidgetDraw.V2(ImGui.GetStyle()->FramePadding.x, 0));
                 ImGuiListClipper clipper = default;
                 ImGuiListClipper.ImGuiListClipper_Ctor(&clipper);
                 try
@@ -90,28 +108,35 @@ internal sealed unsafe partial class EditorWindow
                 finally
                 {
                     ImGuiListClipper.Dispose(&clipper);
+                    ImGui.PopStyleVar();
                 }
                 if (moveFrom is not null && moveTo is not null)
                     _document.MoveDecoration(moveFrom, moveTo);
+                if (remove is not null)
+                    DeleteDecorations([remove]);
 
                 void DrawDecorationRow(int i)
                 {
                     var item = (JObject)decorations[i]!;
                     ImGui.PushID(i);
-                    float width = Math.Max(25, ImGui.GetContentRegionAvail().x - 100);
-                    if (ImGui.Selectable(DecorationName(item) + "###item", (byte)(_selectedDecorations.Contains(item) ? 1 : 0),
-                            0, WidgetDraw.V2(width, 0)) != 0)
+                    float rowStart = ImGui.GetCursorPosX();
+                    string name = DecorationName(item);
+                    string type = DecorationTypeName(EditorDocument.Type(item));
+                    if (ImGui.Selectable(name + "###item", (byte)(_selectedDecorations.Contains(item) ? 1 : 0),
+                            0, WidgetDraw.V2(nameWidth, 0)) != 0)
                     {
                         SelectDecoration(item, ImGui.GetIO()->KeyCtrl != 0);
                         CenterOnDecoration(item);
                     }
+                    bool showName = ImGui.IsItemHovered() != 0 &&
+                        (ImGui.CalcTextSize(name).x > nameWidth || ImGui.CalcTextSize(type).x > typeWidth);
                     _modUi?.DrawContext(SharpFAI.ModApi.MenuSlot.DecorationContext, "###mod-decoration-context",
                         () => SelectDecoration(item));
                     if (ImGui.BeginDragDropSource() != 0)
                     {
                         int original = i;
                         ImGui.SetDragDropPayload("DECORATION", &original, sizeof(int));
-                        ImGui.TextUnformatted(DecorationName(item));
+                        ImGui.TextUnformatted(name);
                         ImGui.EndDragDropSource();
                     }
                     if (ImGui.BeginDragDropTarget() != 0)
@@ -128,20 +153,59 @@ internal sealed unsafe partial class EditorWindow
                         }
                         ImGui.EndDragDropTarget();
                     }
+                    if (showName) WidgetDraw.Tooltip($"{name}\n{type}");
+                    if (typeWidth > 0)
+                    {
+                        ImGui.SameLine();
+                        var first = ImGui.GetCursorScreenPos();
+                        var end = WidgetDraw.V2(first.x + typeWidth, first.y + ImGui.GetTextLineHeight());
+                        ImGui.PushClipRect(in first, in end, 1);
+                        ImGui.TextDisabled(type);
+                        ImGui.PopClipRect();
+                    }
                     ImGui.SameLine();
+                    ImGui.SetCursorPosX(rowStart + Math.Max(0, width - actionsWidth));
                     bool hidden = item.Value<bool?>("visible") == false;
-                    if (ImGui.SmallButton(hidden ? L.T("Show") : L.T("Hide")) != 0)
-                        _document.Set(item, "visible", hidden ? null : new JValue(false));
-                    ImGui.SameLine();
                     bool locked = item.Value<bool?>("locked") == true;
-                    if (ImGui.SmallButton(locked ? L.T("Unlock") : L.T("Lock")) != 0)
-                        _document.Set(item, "locked", locked ? null : new JValue(true));
+                    if (compact)
+                    {
+                        if (ImGui.Button(DecorationMoreButton, WidgetDraw.V2(actionsWidth, 0)) != 0)
+                            ImGui.OpenPopup("##decoration-actions");
+                        WidgetDraw.ItemTooltip(L.T("DecorationActions"));
+                        if (ImGui.BeginPopup("##decoration-actions") != 0)
+                        {
+                            DrawActions(menu: true);
+                            ImGui.EndPopup();
+                        }
+                    }
+                    else DrawActions(menu: false);
                     ImGui.PopID();
+
+                    void DrawActions(bool menu)
+                    {
+                        if (Action(hidden ? show : hide, visibilityWidth, menu))
+                            _document.Set(item, "visible", hidden ? null : new JValue(false));
+                        if (!menu) ImGui.SameLine();
+                        if (Action(locked ? unlock : @lock, lockWidth, menu))
+                            _document.Set(item, "locked", locked ? null : new JValue(true));
+                        if (!menu) ImGui.SameLine();
+                        if (Action(delete, deleteWidth, menu, !locked && !_lockAllDecorations))
+                            remove = item;
+                    }
                 }
             }
             ImGui.EndChild();
         }
         ImGui.End();
+
+        static bool Action(string label, float width, bool menu, bool enabled = true)
+        {
+            if (menu) return ImGui.MenuItem(label, null, 0, (byte)(enabled ? 1 : 0)) != 0;
+            ImGui.BeginDisabled((byte)(enabled ? 0 : 1));
+            bool pressed = ImGui.Button(label, WidgetDraw.V2(width, 0)) != 0;
+            ImGui.EndDisabled();
+            return pressed;
+        }
     }
 
     private void UpdateDecorationRows()
@@ -185,6 +249,8 @@ internal sealed unsafe partial class EditorWindow
     {
         string name = DecorationName(item);
         string type = EditorDocument.Type(item);
+        string localizedType = EditorCatalog.Name(type);
+        string shortType = DecorationTypeName(type);
         string tag = item.Value<string>("tag") ?? "";
         foreach (string term in terms)
         {
@@ -194,8 +260,7 @@ internal sealed unsafe partial class EditorWindow
             }
             else if (term.StartsWith("type:", StringComparison.OrdinalIgnoreCase))
             {
-                if (!type.Contains(term[5..], StringComparison.OrdinalIgnoreCase) &&
-                    !EditorCatalog.Name(type).Contains(term[5..], StringComparison.OrdinalIgnoreCase)) return false;
+                if (!MatchesType(term[5..])) return false;
             }
             else if (term.StartsWith("tag:", StringComparison.OrdinalIgnoreCase))
             {
@@ -203,12 +268,14 @@ internal sealed unsafe partial class EditorWindow
             }
             else if (!name.Contains(term, StringComparison.OrdinalIgnoreCase) &&
                      !tag.Contains(term, StringComparison.OrdinalIgnoreCase) &&
-                     !EditorCatalog.Name(type).Contains(term, StringComparison.OrdinalIgnoreCase) &&
-                     !type.Contains(term, StringComparison.OrdinalIgnoreCase) &&
+                     !MatchesType(term) &&
                      (!int.TryParse(term, out int floor) || floor != EditorDocument.Floor(item)))
                 return false;
         }
         return true;
+
+        bool MatchesType(string term) => type.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            localizedType.Contains(term, StringComparison.OrdinalIgnoreCase) || shortType.Contains(term, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DecorationName(JObject item)
@@ -221,6 +288,15 @@ internal sealed unsafe partial class EditorWindow
         return newline < 0 ? name : name[..newline];
     }
 
+    private static string DecorationTypeName(string type) => L.T(type switch
+    {
+        "AddDecoration" => "DecorationTypeImage",
+        "AddText" => "DecorationTypeText",
+        "AddObject" => "DecorationTypeObject",
+        "AddParticle" => "DecorationTypeParticle",
+        _ => "DecorationTypeOther",
+    });
+
     private void DrawInspector()
     {
         if (!_showInspector)
@@ -229,19 +305,33 @@ internal sealed unsafe partial class EditorWindow
         {
             if (_inspectDecoration && _decoration is { Parent: not null } decoration)
             {
-                ImGui.TextUnformatted(DecorationName(decoration));
-                ImGui.SameLine();
-                WidgetDraw.TextDisabled(EditorCatalog.Name(EditorDocument.Type(decoration)));
-                if (ImGui.Button(L.T("LocateDecoration"), default) != 0)
+                string name = DecorationName(decoration);
+                ImGui.PushTextWrapPos(0);
+                ImGui.TextUnformatted(name);
+                ImGui.PopTextWrapPos();
+                ImGui.TextDisabled(DecorationTypeName(EditorDocument.Type(decoration)));
+                string locate = L.T("LocateDecoration");
+                ContinueToolbar(ButtonWidth(locate));
+                if (ImGui.SmallButton(locate) != 0)
                     CenterOnDecoration(decoration);
                 if (IsSelectedParticle)
                 {
-                    ImGui.SameLine();
-                    if (ImGui.Button(L.T("EditParticle"), default) != 0)
+                    string edit = L.T("EditParticle");
+                    ContinueToolbar(ButtonWidth(edit));
+                    if (ImGui.SmallButton(edit) != 0)
                         OpenParticle();
                 }
-                ImGui.Separator();
-                DrawProperties(decoration, true);
+                string delete = L.T("DeleteEvent");
+                ContinueToolbar(ButtonWidth(delete));
+                ImGui.BeginDisabled((byte)(DecorationLocked(decoration) ? 1 : 0));
+                bool remove = ImGui.SmallButton(delete) != 0;
+                ImGui.EndDisabled();
+                if (remove) DeleteDecorations([decoration]);
+                else
+                {
+                    ImGui.Separator();
+                    DrawProperties(decoration, true);
+                }
             }
             else
             {

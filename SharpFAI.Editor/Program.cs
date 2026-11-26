@@ -8,7 +8,7 @@ namespace SharpFAI.Editor;
 internal static class Program
 {
     private const string Usage =
-        "SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--web-ui] [--no-audio] [--no-mods]";
+        "SharpFAI.Editor [level.adofai | levels.zip] [--properties LevelEditorProperties.txt] [--language en|zh-Hans] [--no-audio] [--no-mods]";
 
     [STAThread]
     private static int Main(string[] args)
@@ -41,7 +41,6 @@ internal static class Program
         string? levelPath = null;
         string? propertiesPath = null;
         string? language = null;
-        bool webUi = false;
         bool noAudio = false;
         bool noMods = false;
         for (int i = 0; i < args.Length; i++)
@@ -50,8 +49,6 @@ internal static class Program
                 propertiesPath = args[++i];
             else if (args[i] == "--language" && i + 1 < args.Length)
                 language = args[++i];
-            else if (args[i] == "--web-ui")
-                webUi = true;
             else if (args[i] == "--no-audio")
                 noAudio = true;
             else if (args[i] == "--no-mods")
@@ -96,8 +93,6 @@ internal static class Program
         }, catalog, document, language) { DisableMods = noMods };
         if (archiveChoices is not null)
             window.ChooseArchiveLevel(archiveChoices);
-        using EditorWebMirror? mirror = webUi ? EditorWebMirror.Start() : null;
-        window.WebMirror = mirror;
         window.Run();
         return 0;
     }

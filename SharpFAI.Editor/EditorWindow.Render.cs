@@ -23,6 +23,7 @@ internal sealed unsafe partial class EditorWindow
     {
         if (_videoExport?.Request is not null || _document.Path is not { } sourcePath)
             return;
+        DisposeModFrameCapture();
 
         try
         {

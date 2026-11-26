@@ -634,6 +634,7 @@ public sealed unsafe partial class LevelRenderer
         if (index < 0 || index >= _floors.Count)
         {
             _selectedFloor = -1;
+            _startFromSelectedFloor = false;
             return;
         }
 
@@ -647,5 +648,6 @@ public sealed unsafe partial class LevelRenderer
         _playbackZoomNeedsReset = true;
         Pause();
         Seek(_entryTimes[index]);
+        _startFromSelectedFloor = true;
     }
 }

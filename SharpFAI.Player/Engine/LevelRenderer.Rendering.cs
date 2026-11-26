@@ -415,17 +415,17 @@ public sealed unsafe partial class LevelRenderer
         _chunkDrawCalls += DrawFloorsWithOverlays(null, int.MinValue + 1, null);
 
         GL.Disable(EnableCap.Blend);
+        if (_trackGuideRenderer is { } guides && (!tilesOnly || guides.HasHolds))
+        {
+            guides.Draw(viewProjection, _runtimeTrackActive ? _trackRuntime : null, _playTime, tilesOnly, _hidePassedFloors);
+            DrawCalls++;
+        }
+
         if (tilesOnly)
         {
             if (!_visualSettings.HidePlanetsInTilesOnly && _circleRenderer is not null && _floors.Count > 0)
                 DrawPlanets(viewProjection, showTrail: false);
             return;
-        }
-
-        if (_trackGuideRenderer is { } guides)
-        {
-            guides.Draw(viewProjection, _runtimeTrackActive, _playTime);
-            DrawCalls++;
         }
 
         // The planets draw over the track guides.
@@ -445,7 +445,7 @@ public sealed unsafe partial class LevelRenderer
             int from = 0;
             int floorDraws = 0;
             // Draw replacements in the same descending floor order as the baked mesh.
-            // A newly inserted run is drawn just behind its selected anchor.
+            // A newly inserted run replaces its anchor with the updated turn.
             while (true)
             {
                 int decorationFloor = syncedSprites is not null && nextSynced < syncedSprites.SyncedCount
@@ -460,6 +460,7 @@ public sealed unsafe partial class LevelRenderer
                 {
                     DrawThrough(cut + 1);
                     floorDraws += DrawFloors(inserted!, 0, int.MaxValue);
+                    DrawThrough(cut, skip: true);
                     inserted = null;
                     continue;
                 }
@@ -479,14 +480,14 @@ public sealed unsafe partial class LevelRenderer
 
             return floorDraws + (renderer is null ? 0 : DrawFloors(renderer, from, int.MaxValue));
 
-            void DrawThrough(int floor)
+            void DrawThrough(int floor, bool skip = false)
             {
                 if (renderer is null) return;
                 int local = floorIndices is null ? floor - firstFloor : Array.BinarySearch(floorIndices, floor);
                 if (floorIndices is not null && local < 0) local = ~local;
                 int end = local >= renderer.FloorCount ? 0 : renderer.IndexAfterFloor(local);
                 if (end <= from) return;
-                floorDraws += DrawFloors(renderer, from, end);
+                if (!skip) floorDraws += DrawFloors(renderer, from, end);
                 from = end;
             }
         }

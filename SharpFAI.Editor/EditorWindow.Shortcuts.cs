@@ -53,25 +53,35 @@ internal sealed unsafe partial class EditorWindow
         _queuedRateShortcut = null;
 
         // Inspect the current widget after drawing: text fields own the chord, mouse-only controls do not.
-        ImGuiContext* context = ImGui.GetCurrentContext();
-        if (ShortcutContextBlocked || (context->ActiveId != 0 &&
-            (SharpFAI.Player.WindowInputMethod.HasTextFocus(context) ||
-             context->ActiveIdSource != ImGuiInputSource.ImGuiInputSource_Mouse)))
+        if (ShortcutContextBlocked || WidgetOwnsKeyboard())
             return;
 
         StartFromShortcut(PlaybackRate.Configured);
     }
 
-    private void HandleShortcuts()
+    private static bool WidgetOwnsKeyboard()
+    {
+        ImGuiContext* context = ImGui.GetCurrentContext();
+        return context->ActiveId != 0 &&
+            (SharpFAI.Player.WindowInputMethod.HasTextFocus(context) ||
+             context->ActiveIdSource != ImGuiInputSource.ImGuiInputSource_Mouse);
+    }
+
+    private void HandleShortcuts(KeyModifiers? spaceModifiers)
     {
         ImGuiIO* io = ImGui.GetIO();
-        KeyModifiers? spaceModifiers = _spacePressModifiers;
-        _spacePressModifiers = null;
         if (ShortcutContextBlocked || _freeAngle)
             return;
         if ((spaceModifiers.GetValueOrDefault() & (KeyModifiers.Control | KeyModifiers.Super)) != 0)
         {
             _queuedRateShortcut = PlaybackRate.Configured;
+            return;
+        }
+        if (spaceModifiers is { } chord && (chord & (KeyModifiers.Shift | KeyModifiers.Alt)) == KeyModifiers.Shift)
+        {
+            if (!_canvasOnly && _playbackView != PlaybackView.Auto && !_inspectDecoration && _hasFloorSelection &&
+                _rangeAnchor is null && !WidgetOwnsKeyboard())
+                InsertFullSpin();
             return;
         }
         if (io->WantTextInput != 0 || ImGui.IsAnyItemActive() != 0)
@@ -83,9 +93,6 @@ internal sealed unsafe partial class EditorWindow
         {
             if ((modifiers & (KeyModifiers.Shift | KeyModifiers.Alt)) == 0)
                 _queuedRateShortcut = PlaybackRate.Normal;
-            else if (!_canvasOnly && modifiers == KeyModifiers.Shift && _playbackView != PlaybackView.Auto &&
-                     !_inspectDecoration && _hasFloorSelection && _rangeAnchor is null)
-                InsertTile((_document.IncomingAngle(_floor) + 180) % 360);
             return;
         }
         if (_canvasOnly)
@@ -169,8 +176,8 @@ internal sealed unsafe partial class EditorWindow
         if (Pressed(ImGuiKey.ImGuiKey_F5)) { InsertPolygon(5, shift); return; }
         if (Pressed(ImGuiKey.ImGuiKey_F7)) { InsertPolygon(7, shift); return; }
         foreach (var direction in Directions)
-            if (Pressed(direction.Key)) { InsertTile(direction.AngleFor(FineDirections)); return; }
-        if (Pressed(ImGuiKey.ImGuiKey_X)) InsertTile(270);
+            if (Pressed(direction.Key)) { EditTileInDirection(direction.AngleFor(FineDirections)); return; }
+        if (Pressed(ImGuiKey.ImGuiKey_X)) EditTileInDirection(270);
     }
 
     private void HandleControlShortcuts(bool shift, bool alt)
@@ -298,13 +305,13 @@ internal sealed unsafe partial class EditorWindow
         SelectFloor(_floor + clipboard.Angles.Length, true);
     }
 
-    private void DeleteFloorRange(int first, int last, int select)
+    private void DeleteFloorRange(int first, int last, int select, bool center = false)
     {
         if (_pathLocked || first < 1 || last > _document.LastFloor || first > last)
             return;
         _pendingTiles.Clear();
         _document.DeleteTiles(first, last);
-        SelectFloor(select, false);
+        SelectFloor(select, center);
     }
 
     private void TransformSelection(TrackTransform transform)
@@ -347,7 +354,7 @@ internal sealed unsafe partial class EditorWindow
             return;
         bool reverse = _document.IsReversedAt(_floor);
         double delta = (180 - _arbitraryAngle) * (reverse ? -1 : 1);
-        InsertTile((_document.IncomingAngle(_floor) + delta + 360) % 360);
+        EditTileInDirection((_document.IncomingAngle(_floor) + delta + 360) % 360);
     }
 
     private void InsertPolygon(int sides, bool reverse)

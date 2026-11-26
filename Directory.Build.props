@@ -3,6 +3,6 @@
                             '$(MSBuildProjectName)' == 'SharpFAI.Player' Or
                             '$(MSBuildProjectName)' == 'SharpFAI.SourceGenerator' Or
                             '$(MSBuildProjectName)' == 'PrepareGameAssets'">
-    <VersionPrefix>1.0.2</VersionPrefix>
+    <VersionPrefix>1.0.3</VersionPrefix>
   </PropertyGroup>
 </Project>

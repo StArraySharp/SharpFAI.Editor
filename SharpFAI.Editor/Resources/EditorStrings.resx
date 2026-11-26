@@ -97,6 +97,12 @@
   <data name="EditParticle" xml:space="preserve"><value>Edit particles…</value></data>
   <data name="AddDecoration" xml:space="preserve"><value>Image</value></data>
   <data name="SearchDecorations" xml:space="preserve"><value>Filter by tile, type or tag</value></data>
+  <data name="DecorationActions" xml:space="preserve"><value>Decoration actions</value></data>
+  <data name="DecorationTypeImage" xml:space="preserve"><value>Image</value></data>
+  <data name="DecorationTypeText" xml:space="preserve"><value>Text</value></data>
+  <data name="DecorationTypeObject" xml:space="preserve"><value>Object</value></data>
+  <data name="DecorationTypeParticle" xml:space="preserve"><value>Particle</value></data>
+  <data name="DecorationTypeOther" xml:space="preserve"><value>Other</value></data>
   <data name="HideAll" xml:space="preserve"><value>Hide all</value></data>
   <data name="ShowAll" xml:space="preserve"><value>Restore visibility</value></data>
   <data name="LockAll" xml:space="preserve"><value>Lock all</value></data>
@@ -385,7 +391,7 @@
   <data name="ResetPlaybackSpeed" xml:space="preserve"><value>Reset playback speed to 100%</value></data>
   <data name="TilesOnly" xml:space="preserve"><value>Tiles only</value></data>
   <data name="EditSceneModeHelp" xml:space="preserve"><value>Switch between tiles only and effects preview without changing playback</value></data>
-  <data name="InlineNumberHelp" xml:space="preserve"><value>Click to type; drag left or right to adjust</value></data>
+  <data name="InlineNumberHelp" xml:space="preserve"><value>Click to enter a number or expression. Drag left or right to adjust.</value></data>
   <data name="Name_artistLinks" xml:space="preserve"><value>Artist links</value></data>
   <data name="Name_artistPermission" xml:space="preserve"><value>Permission image</value></data>
   <data name="Name_autoPlay" xml:space="preserve"><value>Play on start</value></data>

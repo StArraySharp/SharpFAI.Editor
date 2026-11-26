@@ -15,6 +15,7 @@ internal sealed unsafe partial class EditorWindow
     private double _lastTimelinePosition = double.NaN;
     private double _meterBeat;
     private int _meterNumerator = 4;
+    private string? _meterNumeratorDraft;
     private int _meterDenominator = 4;
     private float TimelineRulerHeight => Math.Max(42 * _uiScale, 2 * ImGui.GetTextLineHeight() + 12);
     private float TimelineFloorHeight => Math.Max(23 * _uiScale, ImGui.GetTextLineHeight() + 8);
@@ -81,6 +82,7 @@ internal sealed unsafe partial class EditorWindow
                 _meterBeat = meters.Snap(beat, previousOnly: true);
             var signature = meters.Changes[meters.IndexAt(_meterBeat)].Signature;
             (_meterNumerator, _meterDenominator) = (signature.Numerator, signature.Denominator);
+            _meterNumeratorDraft = null;
             ImGui.OpenPopup("##chart-time-signature", 0);
         }
         WidgetDraw.ItemTooltip(L.T("TimeSignature"));
@@ -109,7 +111,7 @@ internal sealed unsafe partial class EditorWindow
         ImGui.TextUnformatted(L.T("TimeSignature"));
         WidgetDraw.TextDisabled(L.F("TimelineAtTime", Timeline.FormatPosition(Math.Max(0, clock.TimeAt(_meterBeat)))));
         ImGui.SetNextItemWidth(100 * _uiScale);
-        ImGui.InputInt(L.T("TimelineNumerator"), ref _meterNumerator, 1, 0, 0);
+        bool validNumerator = DrawIntegerExpression(L.T("TimelineNumerator"), ref _meterNumerator, ref _meterNumeratorDraft, 1, out _);
         ImGui.SetNextItemWidth(100 * _uiScale);
         if (ImGui.BeginCombo(L.T("TimelineDenominator"), _meterDenominator.ToString()) != 0)
         {
@@ -120,7 +122,8 @@ internal sealed unsafe partial class EditorWindow
         }
 
         TimeSignature signature = new(_meterNumerator, _meterDenominator);
-        if (!signature.IsValid) ImGui.BeginDisabled(1);
+        bool valid = validNumerator && signature.IsValid;
+        if (!valid) ImGui.BeginDisabled(1);
         if (ImGui.Button(L.T("TimelineApplyHere"), default) != 0)
         {
             _document.SetTimeSignature(_meterBeat, signature);
@@ -135,7 +138,7 @@ internal sealed unsafe partial class EditorWindow
                 ImGui.CloseCurrentPopup();
             }
         }
-        if (!signature.IsValid) ImGui.EndDisabled();
+        if (!valid) ImGui.EndDisabled();
         var existing = meters.Changes[meters.IndexAt(_meterBeat)];
         if (existing.Beat == _meterBeat && (_meterBeat != 0 || existing.Signature != TimeSignature.Common))
         {

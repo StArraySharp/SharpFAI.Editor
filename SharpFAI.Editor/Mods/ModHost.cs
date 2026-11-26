@@ -279,6 +279,8 @@ internal sealed class ModHost : IModRuntime
         for (int i = before.Length - 1; i >= 0; i--)
             if (!after.Contains(before[i]))
                 await RetireAsync(before[i]).ConfigureAwait(false);
+        foreach (var mod in staged)
+            await mod.NotifyActivatedAsync().ConfigureAwait(false);
 
         static bool HasLoadHook(ModActivation mod) => mod.Scope.Registrations.Any(entry =>
             entry is ModRegistration<ChartProcessor> or ModRegistration<AssetProcessor> or ModRegistration<AudioHook> or
@@ -531,6 +533,7 @@ internal sealed class ModActivation : IModRegistrationOwner
         {
             _instance = Activator.CreateInstance(type) as ISharpFaiMod ??
                 throw new InvalidDataException("The entry type must implement ISharpFaiMod.");
+            if (_instance is IModSettings settings) Scope.RegisterSettings(settings);
             await _instance.ActivateAsync(Scope, Token).ConfigureAwait(false);
         }
         int menus = Scope.RegisterMenuItems(types, _instance);
@@ -549,6 +552,13 @@ internal sealed class ModActivation : IModRegistrationOwner
             _leases++;
             return new Lease(this);
         }
+    }
+
+    internal async ValueTask NotifyActivatedAsync()
+    {
+        if (_instance is not IModActivationObserver observer) return;
+        try { await observer.OnActivatedAsync(Token).ConfigureAwait(false); }
+        catch (Exception error) { Scope.Log(error.GetBaseException().Message); }
     }
 
     private void Release()

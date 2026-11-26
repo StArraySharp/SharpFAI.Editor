@@ -18,9 +18,12 @@ public sealed class PlaySession
     private double _lockedUntil;
     private double _countdownBeatSeconds;
     private double _countdownGoTime;
+    private double _pauseStartFadeFrom;
+    private double _pauseStartFadeDuration;
     private Action<HitRecord>? _onHit;
 
     public HitStats Stats { get; } = new();
+    internal HitErrorMeter ErrorMeter { get; } = new();
     public bool NoFail { get; set; }
     public HitRecord? LastHit => _recent.Count == 0 ? null : _recent[0];
     public IReadOnlyList<HitRecord> Recent => _recent;
@@ -34,6 +37,8 @@ public sealed class PlaySession
     public bool ReleasedHoldEarly { get; private set; }
     internal bool FailedByHitbox { get; private set; }
     internal bool IsTracking => _track is not null;
+    internal float PauseStartMusicGain => _pauseStartFadeDuration > 0
+        ? (float)Math.Clamp((Time - _pauseStartFadeFrom) / _pauseStartFadeDuration, 0, 1) : 1f;
     internal int? Countdown
     {
         get
@@ -57,6 +62,7 @@ public sealed class PlaySession
         _results.Clear();
         _recent.Clear();
         Stats.Clear();
+        ErrorMeter.Clear();
         CurrentFloor = CheckpointFloor = 0;
         Time = 0.0;
         Failed = ReleasedHoldEarly = FailedByHitbox = false;
@@ -67,6 +73,7 @@ public sealed class PlaySession
         _consecutiveMultipress = 0;
         _lockedUntil = double.NegativeInfinity;
         _countdownBeatSeconds = 0.0;
+        _pauseStartFadeDuration = 0.0;
     }
 
     internal void Start(ManualTrack track, int floor, double? seekTime = null)
@@ -93,8 +100,18 @@ public sealed class PlaySession
         {
             _countdownBeatSeconds = track.CountdownBeatSecondsAt(CurrentFloor);
             _countdownGoTime = track.Entry(TargetFloor) - _countdownBeatSeconds;
-            Time = _countdownGoTime - (track.CountdownTicks - 1) * _countdownBeatSeconds;
-            _lockedUntil = Math.Max(_lockedUntil, _countdownGoTime);
+            if (track.TryGetPauseStart(CurrentFloor, out var pause))
+            {
+                Time = pause.StartTime(track.MinimumPauseStartTime, manual: true);
+                _lockedUntil = pause.ReadyTime;
+                _pauseStartFadeFrom = Time;
+                _pauseStartFadeDuration = pause.ReadyTime - Time;
+            }
+            else
+            {
+                Time = _countdownGoTime - (track.CountdownTicks - 1) * _countdownBeatSeconds;
+                _lockedUntil = Math.Max(_lockedUntil, _countdownGoTime);
+            }
         }
     }
 
@@ -138,18 +155,19 @@ public sealed class PlaySession
         foreach (PlayInput.KeyEvent input in events)
         {
             double fraction = frameEnd > frameStart ? Math.Clamp((input.Time - frameStart) / (frameEnd - frameStart), 0.0, 1.0) : 1.0;
-            AdvanceClock(track, start + (until - start) * fraction, multiplier);
+            double inputTime = frameStart + frameSeconds * fraction;
+            AdvanceClock(track, start + (until - start) * fraction, multiplier, inputTime);
             if (Failed || Completed)
                 return;
             int floor = CurrentFloor;
-            HandleInput(track, input, multiplier, landedFromPress, frameSeconds);
+            HandleInput(track, input, multiplier, landedFromPress, frameSeconds, inputTime);
             landedFromPress |= input.Pressed && CurrentFloor != floor;
         }
 
-        AdvanceClock(track, until, multiplier);
+        AdvanceClock(track, until, multiplier, frameEnd);
     }
 
-    private void AdvanceClock(ManualTrack track, double until, double multiplier)
+    private void AdvanceClock(ManualTrack track, double until, double multiplier, double frameTime)
     {
         until = Math.Max(Time, until);
         while (!Failed && !Completed)
@@ -171,6 +189,8 @@ public sealed class PlaySession
 
             SetTime(track, Math.Max(Time, deadline));
             double offset = (Time - entry) * rate;
+            if (auto || startingHold)
+                ErrorMeter.Add(0, baseBounds, frameTime);
             if (auto || startingHold || safe)
                 Land(track, auto ? HitMargin.Auto : startingHold ? HitMargin.Perfect : HitMargin.Miss, offset, null);
             else
@@ -190,7 +210,7 @@ public sealed class PlaySession
     }
 
     private void HandleInput(ManualTrack track, PlayInput.KeyEvent input, double multiplier,
-        bool landedFromPress, double frameSeconds)
+        bool landedFromPress, double frameSeconds, double inputTime)
     {
         int target = TargetFloor;
         if ((input.Pressed && Time < _lockedUntil) || track.RulesAt(target).Auto)
@@ -224,6 +244,7 @@ public sealed class PlaySession
             }
             else if (!nextHold)
             {
+                ErrorMeter.Add(offset, bounds, inputTime);
                 TryHit(track, margin, offset, null);
             }
             return;
@@ -236,6 +257,8 @@ public sealed class PlaySession
         if (CurrentFloor > 0 && track.IsHold(CurrentFloor - 1) && margin == HitMargin.TooEarly
             && (Time - track.Entry(CurrentFloor)) * rate < 90.0)
             return;
+
+        ErrorMeter.Add(offset, bounds, inputTime);
 
         if (landedFromPress && HitJudge.IsValidHit(margin) && track.PenalizesMultipress(CurrentFloor)
             && !ApplyMultipress(track, offset, frameSeconds))

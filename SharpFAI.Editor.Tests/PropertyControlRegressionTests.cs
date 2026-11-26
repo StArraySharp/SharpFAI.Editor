@@ -2,11 +2,62 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using SharpFAI.Editor;
 using SharpFAI.Editor.Widgets;
+using SharpFAI.Player.Engine;
+using SharpFAI.Player.Engine.Events;
+using SharpFAI.Util;
 
 namespace SharpFAI.Editor.Tests;
 
 public sealed class PropertyControlRegressionTests
 {
+    [TestCase("1+2*3", 7)]
+    [TestCase("(1+2)*3-8/4", 7)]
+    [TestCase("-.5 * -2e1 + 9 ÷ 3 × 2", 16)]
+    [TestCase("8/4/2", 1)]
+    public void NumericFieldsEvaluateMixedExpressions(string text, double expected)
+    {
+        Assert.That(EditorPropertyEdit.TryNumber(new("value", "Float", null), text, out var result), Is.True);
+        Assert.That(result.Value<double>(), Is.EqualTo(expected));
+    }
+
+    [TestCase("1/(2-2)")]
+    [TestCase("(2+3")]
+    [TestCase("1e308*10")]
+    [TestCase("2+3garbage")]
+    [TestCase("5/2")]
+    [TestCase("60+60")]
+    public void IntegerExpressionsStillRequireFiniteWholeValuesInRange(string text)
+    {
+        Assert.That(EditorPropertyEdit.TryNumber(new("count", "Int", null, Minimum: 0, Maximum: 100), text, out _), Is.False);
+    }
+
+    [TestCase("ScreenTile", "0.95", "-1.75", "20.01")]
+    [TestCase("AddDecoration", "1.25", "2.5", "0.95")]
+    public void TilingFieldsKeepFractionalComponents(string type, string x, string y, string outsideRange)
+    {
+        var catalog = new EditorCatalog(null);
+        EditorField[] fields = catalog.Find(type)!.Fields;
+        EditorField tile = fields.Single(field => field.Key == "tile");
+        var item = catalog.Create(type, 1);
+        Assert.That(tile.Type, Is.EqualTo("Vector2"));
+        Assert.That(item["tile"]!.Values<double>(), Is.EqualTo(new[] { 1d, 1d }));
+        Assert.That(EditorPropertyEdit.TryNumber(tile, outsideRange, out _), Is.False);
+        Assert.That(EditorPropertyEdit.TryNumber(tile, x, out var first), Is.True);
+        Assert.That(EditorPropertyEdit.TryNumber(tile, y, out var second), Is.True);
+        item["tile"] = EditorPropertyEdit.WithComponent(item["tile"], tile, 0, first);
+        item["tile"] = EditorPropertyEdit.WithComponent(item["tile"], tile, 1, second);
+        Assert.That(JObject.Parse(item.ToString())["tile"]!.Values<double>(),
+            Is.EqualTo(new[] { first.Value<double>(), second.Value<double>() }));
+
+        if (type != "AddDecoration") return;
+        Assert.That(InspectorFields.GetState(item, tile, fields, type).Enabled, Is.True);
+        item["maskingType"] = "Mask";
+        Assert.That(InspectorFields.GetState(item, tile, fields, type).Enabled, Is.False);
+        item["maskingType"] = "None";
+        item["blendMode"] = "Multiply";
+        Assert.That(InspectorFields.GetState(item, tile, fields, type).Enabled, Is.False);
+    }
+
     [TestCase("bpm", 0.001)]
     [TestCase("volume", 1)]
     [TestCase("hitsoundVolume", 1)]
@@ -16,6 +67,44 @@ public sealed class PropertyControlRegressionTests
         EditorField field = new EditorCatalog(null).SettingsFor("SongSettings").Single(item => item.Key == property);
         Assert.That(EditorPropertyEdit.TryNumber(field, "0", out _), Is.False);
         Assert.That(EditorPropertyEdit.ClampNumericDrag(field, 0), Is.EqualTo(minimum));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void TempoFieldsAcceptValuesAboveTheOldLimits(bool importedSchema)
+    {
+        var catalog = importedSchema ? EditorCatalog.FromSchema(JObject.Parse("""
+            {"levelEvents":[{"name":"SetSpeed","properties":[
+                {"name":"beatsPerMinute","type":"Float","max":10000},
+                {"name":"bpmMultiplier","type":"Float","max":128}]}],
+             "categories":[{"name":"Gameplay","events":["SetSpeed"]}],
+             "settings":[{"name":"SongSettings","properties":[
+                 {"name":"bpm","type":"Float","max":10000}]}]}
+            """)) : new EditorCatalog(null);
+        var baseBpm = catalog.SettingsFor("SongSettings").Single(field => field.Key == "bpm");
+        var speed = catalog.Find("SetSpeed")!.Fields;
+        var absolute = speed.Single(field => field.Key == "beatsPerMinute");
+        var multiplier = speed.Single(field => field.Key == "bpmMultiplier");
+        foreach (var field in new[] { baseBpm, absolute, multiplier })
+        {
+            Assert.That(field.Maximum, Is.Null, field.Key);
+            Assert.That(EditorPropertyEdit.ClampNumericDrag(field, 1e8), Is.EqualTo(1e8), field.Key);
+            Assert.That(EditorPropertyEdit.TryNumber(field, "0", out _), Is.False, field.Key);
+            Assert.That(EditorPropertyEdit.TryNumber(field, "1/0", out _), Is.False, field.Key);
+        }
+        Assert.That(EditorPropertyEdit.TryNumber(baseBpm, "25000", out var chartBpm), Is.True);
+        Assert.That(EditorPropertyEdit.TryNumber(multiplier, "128*2", out var factor), Is.True);
+        Assert.That(EditorPropertyEdit.TryNumber(absolute, "100000", out var eventBpm), Is.True);
+
+        var chart = new EditorDocument();
+        chart.InsertTiles(0, [0, 0, 0]);
+        chart.Set(chart.Settings, "bpm", chartBpm);
+        chart.Add(new() { ["floor"] = 1, ["eventType"] = "SetSpeed", ["speedType"] = "Multiplier", ["bpmMultiplier"] = factor }, false);
+        chart.Add(new() { ["floor"] = 2, ["eventType"] = "SetSpeed", ["speedType"] = "Bpm", ["beatsPerMinute"] = eventBpm }, false);
+        var level = chart.SnapshotForPlayback();
+        var core = FloorCoreEvents.Read(level);
+        var timeline = LevelRenderer.BuildTimeline(level, level.CreatePlaybackFloors(core), PlaybackEventBinder.BindForEditor(level), core);
+        Assert.That(timeline.FloorBpms.Take(3), Is.EqualTo(new[] { 25_000d, 6_400_000d, 100_000d }));
     }
     [Test]
     public void OtherFieldsExcludeMetadataAndOnlyListUnrecognizedProperties()

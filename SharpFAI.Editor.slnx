@@ -14,4 +14,8 @@
     <Project Path="examples/SharpFAI.ModExamples/SharpFAI.ModExamples.csproj" />
     <Project Path="examples/SharpFAI.ModExamples.Shared/SharpFAI.ModExamples.Shared.csproj" />
   </Folder>
+  <Folder Name="/Mods/">
+    <Project Path="mods/SharpFAI.Mcp/SharpFAI.Mcp.csproj" />
+    <Project Path="mods/SharpFAI.WebMirror/SharpFAI.WebMirror.csproj" />
+  </Folder>
 </Solution>

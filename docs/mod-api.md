@@ -216,3 +216,47 @@ vec4 modEffect(vec2 uv, vec4 color) {
 - 编辑器的视频导出使用 `UiHost.Export` 筛选谱面预处理、自定义事件、渲染和音频 Hook。原版兼容谱面副本使用前述 `RegisterCompatibilityConverter`。
 
 完整处理签名见 [Processing.cs](../SharpFAI.ModApi/Processing.cs)，可运行的注册示例见 [ExampleMods.cs](../examples/SharpFAI.ModExamples/ExampleMods.cs)。
+
+## 实时查询与离屏抓帧
+
+`IEditorInspection` 读取包含未保存改动的编辑文档。先用 `GetChartAsync` 获取修订号，后续的砖块、事件、装饰、定位和诊断查询都可以指定该修订。返回数据可以在后台线程读取，事件和装饰以分页结果返回。
+
+`IEditorFrameCapture` 从指定修订准备独立渲染器，按砖块或音乐时间返回摄像机和滤镜状态，可选 PNG。抓帧通过编辑器的渲染线程执行，并接受取消信号。每次只运行一个离屏抓帧任务。
+
+Mod 可以实现 `IModActivationObserver`，在新实例发布且旧实例释放后启动独占资源，例如本地端口。仍在 `ActivateAsync` 内注册菜单、窗口和其他贡献，并在 `DisposeAsync` 中释放资源。
+
+接口见 [EditorInspection.cs](../SharpFAI.ModApi/EditorInspection.cs)，使用示例见 [SharpFAI MCP Mod](mcp-mod.md)。
+
+## 窗口画面与输入
+
+`IEditorWindowStream.TryOpen()` 打开一个独占会话，用于读取带界面的编辑器窗口画面和发送输入。按需调用 `CaptureAsync`，每次最多保留一个请求，可选 RGBA8 或 JPEG。鼠标坐标按客户区归一化至 0–1，按键使用物理键名，例如 `KeyA`。客户端失去焦点时可以发送 `Reset`，断开连接时释放会话，编辑器会松开远程按住的按键和鼠标。接口见 [EditorWindowStream.cs](../SharpFAI.ModApi/EditorWindowStream.cs)。
+
+## 声明式 Mod 设置
+
+入口类在实现 `ISharpFaiMod` 之外再实现 `IModSettings`，即可声明实例字段或属性。宿主会在 `ActivateAsync` 前载入保存值。默认读取入口对象上的成员，也可以实现 `object Settings => _settings`，返回单独的设置对象。
+
+```csharp
+public sealed class ExampleMod : ISharpFaiMod, IModSettings
+{
+    [ModSettingLabel("自动启动"), ModSettingTooltip("在启用此 Mod 时启动")]
+    private bool _autoStart = true;
+
+    [ModSettingLabel("帧率"), ModSettingRange(1, 60), ModSettingShowIf(nameof(_autoStart))]
+    private int _frameRate = 24;
+
+    public ValueTask ActivateAsync(IModContext context, CancellationToken token) => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+```
+
+任意 `ModSetting` 系列标注都会将成员纳入设置。布尔值显示为复选框，枚举显示为下拉框，标注范围的 `int` 和 `float` 显示为滑块。其他数值及字符串可直接输入，数组和对象用多行 JSON 编辑。`ModSettingJson(Lines = 6)` 可给存储 JSON 的字符串使用多行编辑和语法校验。还支持 `ModSettingHeader`（分组）、`ModSettingOrder`（排序）、`ModSettingShowIf`（条件禁用）、`ModSettingReadOnly`（只读）、`ModSettingNoSave`（当前会话）和 `ModSettingIgnore`（排除）。标签、分组名和提示可对应清单中的翻译键。
+
+在「设置 → Mod 管理 → 对应 Mod → 设置」编辑后点击「应用」。宿主保存成功后在编辑器线程调用 `OnSettingsChanged()`，Mod 可在此更新正在运行的功能。JSON 键使用 C# 成员名。首次保存前使用声明的默认值。
+
+`IModSettings` 实现可在 `ActivateAsync` 中通过 `context.GetRequiredService<IModSettingsStore>()` 获取配置文件路径，并用 `Save()` 保存代码修改的值。`Save()` 只写入已声明持久化的成员。用 `[ModSettingHidden]` 保存由代码管理的值，例如令牌，同时从设置界面隐藏该成员。
+
+- 对于放在搜索目录的 `Example.sharpfaimod` 文件或目录，配置是同级的 `Example.Settings.json`。直接添加的开发目录也按目录名保存。
+- 从界面安装的 Mod 按版本存放在 `Mods/packages/<Mod ID>/` 下，配置用入口 DLL 的基本名命名，与各版本目录同级。
+- 停用、热重载和移除会保留同级文件。再次安装同一个 Mod 可继续使用原来的设置。
+
+接口见 [ModSettings.cs](../SharpFAI.ModApi/ModSettings.cs)，实际用法见 [WebMirrorMod.cs](../mods/SharpFAI.WebMirror/WebMirrorMod.cs)。字段声明参考 [StArray.ModManager Inspector](https://github.com/StArraySharp/StArray.ModManager/tree/main/StArray.ModManager/Inspector)。
