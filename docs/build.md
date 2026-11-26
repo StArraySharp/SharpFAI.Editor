@@ -10,7 +10,7 @@
 ## 1. 获取源码
 
 ```powershell
-git clone --recurse-submodules https://github.com/StArraySharp/SharpFAI.Editor.git
+git clone --recurse-submodules https://github.com/adofaiex/SharpFAI.Editor.git
 cd SharpFAI.Editor
 ```
 
