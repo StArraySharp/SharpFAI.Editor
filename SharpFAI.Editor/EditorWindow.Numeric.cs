@@ -121,7 +121,7 @@ internal sealed unsafe partial class EditorWindow
     }
 
     private void DrawNumericInput(JObject target, EditorField field, JToken? value, int component = -1, bool step = false,
-        float? width = null)
+        float? width = null, bool textOnly = false, string? tooltip = null)
     {
         var current = _numericDraft is { } draft && ReferenceEquals(draft.Document, _document) &&
             draft.Matches(target, field.Key, component) ? draft : null;
@@ -139,10 +139,12 @@ internal sealed unsafe partial class EditorWindow
         float stepWidth = 2 * (buttonWidth + ImGui.GetStyle()->ItemSpacing.x);
         step &= available >= stepWidth + unitWidth + 52 * _uiScale;
         ImGui.SetNextItemWidth(Math.Max(1, available - unitWidth - (step ? stepWidth : 0)));
-        if (component < 0 && !field.AllowEmpty && current is not { Gesture: false })
+        if (!textOnly && component < 0 && !field.AllowEmpty && current is not { Gesture: false })
             DrawInlineNumberDrag(target, field, value, content, current, invalid is not null);
         else
             DrawNumberText(target, field, component, content, current);
+        if (tooltip is not null && _invalidNumber?.Matches(target, field.Key, component) != true)
+            WidgetDraw.ItemTooltip(tooltip);
         if (unitWidth > 0)
         {
             ImGui.SameLine(0, ImGui.GetStyle()->ItemInnerSpacing.x);
@@ -207,7 +209,7 @@ internal sealed unsafe partial class EditorWindow
                 FinishNumericEdit();
         }
         if (_invalidNumber?.Matches(target, field.Key, component) == true && ImGui.IsItemHovered() != 0)
-            ImGui.SetTooltip(L.T("InvalidNumber"));
+            ImGui.SetTooltip(L.T(ReferenceEquals(field, SetSpeedEffectiveBpmField) ? "SetSpeedEffectiveBpmInvalid" : "InvalidNumber"));
     }
 
     private void DrawInlineNumberDrag(JObject target, EditorField field, JToken? value, string text,
@@ -286,6 +288,12 @@ internal sealed unsafe partial class EditorWindow
             return;
         }
         _invalidNumber = null;
+        if (ReferenceEquals(draft.Field, SetSpeedEffectiveBpmField))
+        {
+            if (!TryCommitSetSpeedEffectiveBpm(draft.Target, value.Value<double>()))
+                _invalidNumber = draft;
+            return;
+        }
         CommitProperty(draft.Binding, EditorPropertyEdit.WithComponent(draft.Binding.Read() ?? draft.Field.Default,
             draft.Field, draft.Component, value));
     }

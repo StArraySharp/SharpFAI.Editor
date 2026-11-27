@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ImGui4NET;
 using SharpFAI.Editor.Widgets;
 
@@ -10,15 +11,16 @@ internal sealed unsafe partial class EditorWindow
 
     private void OpenLevelPath(string path)
     {
+        long started = Stopwatch.GetTimestamp();
         if (!LevelArchive.IsZip(path))
         {
-            SetDocument(new(path));
+            SetDocument(new(path), started);
             return;
         }
 
         LevelArchive archive = LevelArchive.Extract(path);
         if (archive.Levels.Count == 1)
-            SetDocument(new(Path.Combine(archive.DirectoryPath, archive.Levels[0])));
+            SetDocument(new(Path.Combine(archive.DirectoryPath, archive.Levels[0])), started);
         else
             ChooseArchiveLevel(archive);
     }

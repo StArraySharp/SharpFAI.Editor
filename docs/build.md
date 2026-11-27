@@ -80,8 +80,8 @@ dotnet test .\SharpFAI.Editor.slnx -c Release
 | `publish/SharpFAI.Editor-linux-x64-<版本>` | Linux x64 |
 | `publish/SharpFAI.Editor-osx-x64-<版本>` | macOS x64 |
 | `publish/SharpFAI.Editor-osx-arm64-<版本>` | macOS arm64 |
-| `publish/Mods/SharpFAI.Mcp.sharpfaimod` | MCP Mod |
-| `publish/Mods/SharpFAI.WebMirror.sharpfaimod` | Web 镜像 Mod |
+| `publish/Mods/SharpFAI.Mcp/` | MCP Mod 运行目录 |
+| `publish/Mods/SharpFAI.WebMirror/` | Web 镜像 Mod 运行目录 |
 | `publish/SharpFAI.Editor-MultiPlatforms-<版本>.zip` | 所选平台的可执行文件、字体许可证和 `Mods/` 下的两个 Mod |
 
 ```powershell

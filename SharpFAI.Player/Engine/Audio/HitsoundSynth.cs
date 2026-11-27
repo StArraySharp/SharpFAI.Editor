@@ -16,7 +16,6 @@ public static class HitsoundSynth
 {
     /// <summary>
     /// </summary>
-    private const string EmbeddedSampleName = "Resources.kick.wav";
 
     private static readonly HitsoundPcmCache SynthCache = new(maxBytes: 256L * 1024 * 1024, maxEntries: 8);
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -13,6 +14,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (SharpFAI.Player.ApplicationUpdater.HandleLaunch(ref args, out int updaterExit))
+            return updaterExit;
         if (args is [SharpFAI.Player.PlaybackAudio.ProbeArgument])
             return SharpFAI.Player.PlaybackAudio.RunProbe();
         if (args is ["--help" or "-h"])
@@ -68,6 +71,7 @@ internal static class Program
         if (language is not null)
             L.Language = System.Globalization.CultureInfo.GetCultureInfo(language);
         EditorCatalog catalog = new(propertiesPath);
+        long chartLoadStarted = Stopwatch.GetTimestamp();
         LevelArchive? archiveChoices = null;
         if (levelPath is not null && LevelArchive.IsZip(levelPath))
         {
@@ -90,7 +94,19 @@ internal static class Program
             APIVersion = new Version(4, 1),
             Profile = ContextProfile.Core,
             Vsync = VSyncMode.On,
-        }, catalog, document, language) { DisableMods = noMods };
+        }, catalog, document, language)
+        {
+            DisableMods = noMods,
+            InitialDocumentLoadStarted = chartLoadStarted,
+            RestartArguments = path =>
+            [
+                .. path is null ? Array.Empty<string>() : [path],
+                .. propertiesPath is null ? Array.Empty<string>() : ["--properties", Path.GetFullPath(propertiesPath)],
+                .. language is null ? Array.Empty<string>() : ["--language", language],
+                .. noAudio ? new[] { "--no-audio" } : [],
+                .. noMods ? new[] { "--no-mods" } : [],
+            ],
+        };
         if (archiveChoices is not null)
             window.ChooseArchiveLevel(archiveChoices);
         window.Run();

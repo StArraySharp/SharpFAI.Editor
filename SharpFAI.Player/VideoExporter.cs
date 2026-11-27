@@ -45,7 +45,10 @@ internal static class VideoExporter
         int BitrateKbps,
         float Zoom,
         bool HidePassedFloors,
-        bool PreferHardware = true);
+        bool PreferHardware = true,
+        PlaybackRange? Range = null,
+        double PrerollSeconds = 0,
+        bool OverwriteOutput = true);
 
     /// <summary>
     /// 是否为视频文件。视频绝不能被当成音乐输入：ffmpeg 会把其中的音轨混进来，
@@ -59,8 +62,8 @@ internal static class VideoExporter
     /// 选定输出路径，并避开关卡自己引用的素材文件。
     /// Pick the output path without clobbering an asset the level itself references.
     /// </summary>
-    public static string ResolveOutputPath(string levelPath, Level? level)
-        => LevelAssetPaths.ResolveExportPath(levelPath, level);
+    public static string ResolveOutputPath(string levelPath, Level? level, PlaybackRange? range = null)
+        => LevelAssetPaths.ResolveExportPath(levelPath, level, range);
 
     /// <summary>
     /// 把宽高对齐到偶数。<c>libx264</c> 的 <c>yuv420p</c> 要求 4:2:0 采样，宽高必须是偶数，
@@ -155,7 +158,7 @@ internal static class VideoExporter
         Process process = Process.Start(info)
             ?? throw new InvalidOperationException("无法启动 ffmpeg / Failed to start ffmpeg");
 
-        return new EncoderSession(process, width, height, packedNv12, temporaryOutput, output);
+        return new EncoderSession(process, width, height, packedNv12, temporaryOutput, output, request.OverwriteOutput);
     }
 
     private static void AddVideoOptions(List<string> arguments, string codec, int bitrateKbps, bool packedNv12 = false)
@@ -236,14 +239,16 @@ internal static class VideoExporter
         private readonly Stream _input;
         private readonly string _temporaryOutput;
         private readonly string _output;
+        private readonly bool _overwriteOutput;
 
         internal EncoderSession(Process process, int width, int height, bool packedNv12,
-            string temporaryOutput, string output)
+            string temporaryOutput, string output, bool overwriteOutput)
         {
             _process = process;
             _input = process.StandardInput.BaseStream;
             _temporaryOutput = temporaryOutput;
             _output = output;
+            _overwriteOutput = overwriteOutput;
 
             // 后台读干 stderr，否则管道写满后 ffmpeg 会阻塞
             // Drain stderr on a worker, otherwise ffmpeg blocks once the pipe fills
@@ -332,7 +337,7 @@ internal static class VideoExporter
                     Mp4Container.WriteExport(_temporaryOutput, packagedOutput);
                     postprocess?.Invoke(packagedOutput, _output, token);
                     token.ThrowIfCancellationRequested();
-                    File.Move(packagedOutput, _output, overwrite: true);
+                    File.Move(packagedOutput, _output, overwrite: _overwriteOutput);
                 }
                 finally
                 {
@@ -431,7 +436,7 @@ internal static class VideoExporter
     /// <param name="path">输出 WAV。</param>
     /// <param name="playbackRate">Music playback rate.</param>
     /// <param name="hitsoundRate">Hitsound playback rate; pass 1 for PCM already on the output clock.</param>
-    internal static DecodedAudio DecodeExportAudio(string ffmpeg, string path, double seconds)
+    internal static DecodedAudio DecodeExportAudio(string ffmpeg, string path, double seconds, double start = 0)
     {
         const int rate = DecodedAudio.TargetSampleRate;
         const int channels = 2;
@@ -442,7 +447,8 @@ internal static class VideoExporter
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        string[] arguments = ["-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-vn",
+        string[] arguments = ["-nostdin", "-v", "error", "-ss", FormattableString.Invariant($"{start:F9}"),
+            "-i", path, "-map", "0:a:0", "-vn",
             "-ar", rate.ToString(System.Globalization.CultureInfo.InvariantCulture), "-ac", "2",
             "-t", FormattableString.Invariant($"{seconds:F6}"), "-f", "s16le", "pipe:1"];
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
@@ -464,7 +470,8 @@ internal static class VideoExporter
         double totalSeconds,
         string path,
         double playbackRate = 1.0,
-        double? hitsoundRate = null, Func<DecodedAudio, DecodedAudio>? processMix = null, DecodedAudio? realtimeMix = null)
+        double? hitsoundRate = null, Func<DecodedAudio, DecodedAudio>? processMix = null, DecodedAudio? realtimeMix = null,
+        double musicStart = 0, double hitsoundStart = 0)
     {
         if (realtimeMix is not null)
         {
@@ -483,8 +490,8 @@ internal static class VideoExporter
 
         float[] mix = new float[sampleCount * Channels];
 
-        Accumulate(music, musicVolume, mix, Rate, Channels, playbackRate);
-        Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, hitsoundRate ?? playbackRate);
+        Accumulate(music, musicVolume, mix, Rate, Channels, playbackRate, musicStart);
+        Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, hitsoundRate ?? playbackRate, hitsoundStart);
 
         WriteWav(path, mix, Rate, Channels, processMix);
     }
@@ -496,7 +503,8 @@ internal static class VideoExporter
         float[] destination,
         int rate,
         int channels,
-        double playbackRate)
+        double playbackRate,
+        double start)
     {
         if (source is null || source.Pcm.Length == 0 || volume <= 0f)
         {
@@ -516,7 +524,7 @@ internal static class VideoExporter
         // 用「源帧位置」做线性插值，避免整段重采样产生额外分配
         // Linear-interpolate on the source frame position, with no intermediate resample buffer
         double step = (double)sourceRate / rate * playbackRate;
-        double sourcePosition = 0.0;
+        double sourcePosition = start * sourceRate;
 
         ReadOnlySpan<short> samples = MemoryMarshal.Cast<byte, short>(source.Pcm);
 

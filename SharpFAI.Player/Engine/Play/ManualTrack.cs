@@ -57,6 +57,9 @@ internal sealed class ManualTrack
     public double Pitch => _timeline.Pitch;
     public double Entry(int floor) => _timeline.EntryTimes[floor];
     public double Bpm(int floor) => _timeline.FloorBpms[floor];
+
+    internal (double Authored, double? Effective)? TempoAt(int floor) => _timeline.TempoAt(floor);
+
     public double AngleRate(int floor) => Bpm(floor) * 3.0;
     public bool IsMidspin(int floor) => _floors[floor].isMidspin;
     public bool IsHold(int floor) => _timeline.PlanetTrack[floor].HasHold;

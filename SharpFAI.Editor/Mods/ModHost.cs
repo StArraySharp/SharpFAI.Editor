@@ -15,7 +15,8 @@ internal sealed class ModHost : IModRuntime
     private sealed record Preferences(HashSet<string> Roots, Dictionary<string, string> Trust, HashSet<string> Development)
     {
         public Preferences() : this([], [], []) { }
-        public Preferences Copy() => new([.. Roots], new(Trust), [.. Development]);
+        public HashSet<string> Disabled { get; init; } = [];
+        public Preferences Copy() => new([.. Roots], new(Trust), [.. Development]) { Disabled = [.. Disabled] };
     }
 
     private sealed class ActiveSet(ModActivation[] mods)
@@ -26,7 +27,7 @@ internal sealed class ModHost : IModRuntime
 
     private readonly SemaphoreSlim _operations = new(1);
     private readonly ConcurrentQueue<ModNotice> _notices = new();
-    private readonly string _settingsFile, _packages, _shadow;
+    private readonly string _settingsFile, _packages, _legacyPackages, _shadow;
     private readonly bool _safeMode;
     private Preferences _preferences = new();
     private ActiveSet _active = new([]);
@@ -34,6 +35,8 @@ internal sealed class ModHost : IModRuntime
     private int _generation;
     private int _loadGeneration;
     private bool _disposed;
+    private FileSystemWatcher? _watcher;
+    private Timer? _refreshTimer;
 
     public ModHost(UiHost target, string? root = null, bool safeMode = false)
     {
@@ -45,7 +48,8 @@ internal sealed class ModHost : IModRuntime
         Root = Path.GetFullPath(root ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SharpFAI", "Mods"));
         _safeMode = safeMode;
-        _packages = Path.Combine(Root, "packages");
+        _packages = Path.Combine(SearchDirectory, "packages");
+        _legacyPackages = Path.Combine(Root, "packages");
         _shadow = Path.Combine(Root, "shadow");
         _settingsFile = Path.Combine(Root, $"enabled-{target.ToString().ToLowerInvariant()}.json");
     }
@@ -109,6 +113,7 @@ internal sealed class ModHost : IModRuntime
                 _preferences = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(_settingsFile)) ?? new();
         }
         catch (Exception error) { Log("SharpFAI", error.GetBaseException().Message); }
+        StartWatching();
         var available = Discover(_preferences);
         if (!_safeMode && Target == UiHost.Editor)
         {
@@ -124,19 +129,109 @@ internal sealed class ModHost : IModRuntime
                 catch (Exception error) { Log(id, error.GetBaseException().Message); }
             }
         }
-        PublishCatalog(available);
+        await RefreshDropInsAsync(available).ConfigureAwait(false);
     });
 
-    public Task RefreshAsync() => RunAsync(() =>
+    public Task RefreshAsync() => RunAsync(() => RefreshDropInsAsync(Discover(_preferences)));
+
+    private async Task RefreshDropInsAsync(IReadOnlyList<ModPackage> available)
     {
-        PublishCatalog(Discover(_preferences));
-        return Task.CompletedTask;
-    });
+        if (!_safeMode && Target == UiHost.Editor)
+        {
+            // Placing a folder in the search directory authorizes its first activation. Once known,
+            // the existing trust and disable records govern subsequent loads and file changes.
+            var seen = _preferences.Trust.Keys.Select(key => key.Split('|', 2)[0]).ToHashSet(StringComparer.Ordinal);
+            seen.UnionWith(_preferences.Disabled);
+            seen.UnionWith(_preferences.Roots);
+            seen.UnionWith(Volatile.Read(ref _active).Mods.Select(mod => mod.Package.Manifest.Id));
+            foreach (string id in available.Where(package => package.IsDropIn && Unavailable(package) is null)
+                         .Select(package => package.Manifest.Id).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+            {
+                if (seen.Contains(id)) continue;
+                var next = _preferences.Copy();
+                var roots = ActiveRoots(next).Append(id).ToArray();
+                try
+                {
+                    var plan = Resolve(available, roots);
+                    var approved = ModDependencyGraph.Dependencies(id, plan);
+                    if (approved.Overlaps(next.Disabled))
+                        throw new InvalidOperationException("A required Mod was disabled.");
+                    approved.IntersectWith(plan.Where(package => package.IsDropIn && !seen.Contains(package.Manifest.Id))
+                        .Select(package => package.Manifest.Id));
+                    next.Roots.Add(id);
+                    await ApplyAsync(available, roots, next, approved, [], save: true).ConfigureAwait(false);
+                    seen.UnionWith(approved);
+                    seen.Add(id);
+                }
+                catch (Exception error) { Log(id, error.GetBaseException().Message); }
+            }
+        }
+        PublishCatalog(available);
+    }
+
+    private void StartWatching()
+    {
+        if (_watcher is not null || Target != UiHost.Editor || _safeMode || !Directory.Exists(SearchDirectory)) return;
+        try
+        {
+            _refreshTimer = new Timer(state => _ = RefreshFromWatcherAsync());
+            _watcher = new FileSystemWatcher(SearchDirectory)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            };
+            _watcher.Created += Changed;
+            _watcher.Changed += Changed;
+            _watcher.Deleted += Changed;
+            _watcher.Renamed += (_, change) => { Changed(null, change); Schedule(change.OldFullPath); };
+            _watcher.Error += (_, _) => QueueRefresh();
+            _watcher.EnableRaisingEvents = true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            StopWatching();
+            Log("SharpFAI", error.Message);
+        }
+
+        void Changed(object? sender, FileSystemEventArgs change) => Schedule(change.FullPath);
+
+        void Schedule(string path)
+        {
+            string relative = Path.GetRelativePath(SearchDirectory, path);
+            string first = relative.Split(Path.DirectorySeparatorChar, 2)[0];
+            if (first.StartsWith('.') || first.Equals("packages", StringComparison.OrdinalIgnoreCase) ||
+                IsDataDirectory(Path.Combine(SearchDirectory, first)) ||
+                relative == first && (File.Exists(path) || first.EndsWith(".json", StringComparison.OrdinalIgnoreCase))) return;
+            QueueRefresh();
+        }
+    }
+
+    private void QueueRefresh()
+    {
+        try { _refreshTimer?.Change(400, Timeout.Infinite); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task RefreshFromWatcherAsync()
+    {
+        try { await RefreshAsync().ConfigureAwait(false); }
+        catch (ObjectDisposedException) { }
+        catch (Exception error) { Log("SharpFAI", error.GetBaseException().Message); }
+    }
+
+    private void StopWatching()
+    {
+        _watcher?.Dispose();
+        _watcher = null;
+        Interlocked.Exchange(ref _refreshTimer, null)?.Dispose();
+    }
 
     public Task InstallAsync(string archive) => RunAsync(() =>
     {
         if (!archive.EndsWith(".sharpfaimod", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Select a .sharpfaimod archive.");
+        Directory.CreateDirectory(_packages);
+        if (!IsRegularPath(_packages)) throw new IOException("The Mod installation directory must be a regular directory.");
         string stage = Path.Combine(_packages, "." + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
         try
@@ -144,7 +239,9 @@ internal sealed class ModHost : IModRuntime
             ModPackage.Extract(archive, stage);
             var package = ModPackage.Read(stage, development: false);
             string destination = Path.Combine(_packages, package.Manifest.Id, package.Manifest.Version);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            string parent = Path.GetDirectoryName(destination)!;
+            Directory.CreateDirectory(parent);
+            if (!IsRegularPath(parent)) throw new IOException("The Mod package directory must be a regular directory.");
             Directory.Move(stage, destination);
         }
         finally { DeleteUnder(stage, _packages); }
@@ -172,7 +269,9 @@ internal sealed class ModHost : IModRuntime
         var packages = Discover(next);
         var roots = ActiveRoots(next).Append(id).Distinct(StringComparer.Ordinal).ToArray();
         var plan = Resolve(packages, roots);
-        await ApplyAsync(packages, roots, next, ModDependencyGraph.Dependencies(id, plan), [], save: true).ConfigureAwait(false);
+        var required = ModDependencyGraph.Dependencies(id, plan);
+        next.Disabled.ExceptWith(required);
+        await ApplyAsync(packages, roots, next, required, [], save: true).ConfigureAwait(false);
     });
 
     public Task DisableAsync(string id) => RunAsync(() => DisableCoreAsync(id));
@@ -202,7 +301,7 @@ internal sealed class ModHost : IModRuntime
         {
             next.Trust.Remove(TrustKey(package));
             if (package.Development) next.Development.Remove(package.Root);
-            else DeleteUnder(package.Root, _packages);
+            else DeleteUnder(package.Root, IsUnder(package.Root, _packages) ? _packages : _legacyPackages);
         }
         Save(next);
         PublishCatalog(Discover(next));
@@ -215,6 +314,8 @@ internal sealed class ModHost : IModRuntime
         var available = Discover(next);
         var activePackages = active.Select(mod => mod.Package).ToArray();
         var disabled = ModDependencyGraph.Dependents(id, activePackages);
+        next.Disabled.UnionWith(disabled);
+        next.Disabled.Add(id);
         next.Roots.ExceptWith(disabled);
         await ApplyAsync(available, ActiveRoots(next), next, [], [], save: true, candidates: activePackages).ConfigureAwait(false);
     }
@@ -332,19 +433,12 @@ internal sealed class ModHost : IModRuntime
     private IReadOnlyList<ModPackage> Discover(Preferences settings)
     {
         var packages = new List<ModPackage>();
-        if (Directory.Exists(_packages))
-            foreach (string id in Directory.EnumerateDirectories(_packages))
-                if (!Path.GetFileName(id).StartsWith('.') && IsRegularPath(id))
-                    foreach (string version in Directory.EnumerateDirectories(id))
-                        if (IsRegularPath(version)) Read(version, development: false);
+        ReadInstalled(_packages, SearchDirectory);
+        if (!SamePath(_packages, _legacyPackages)) ReadInstalled(_legacyPackages, null);
         foreach (string folder in settings.Development.Order(StringComparer.Ordinal))
             Read(folder, development: true);
         if (Directory.Exists(SearchDirectory))
         {
-            foreach (string path in Directory.EnumerateFiles(SearchDirectory, "*.sharpfaimod", new EnumerationOptions
-                     { MatchCasing = MatchCasing.CaseInsensitive }))
-                if (IsRegularPath(path))
-                    TryRead(path, () => ModPackage.ReadArchive(path));
             var ignored = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             {
                 _packages, _shadow, Path.Combine(Root, "data"),
@@ -356,17 +450,35 @@ internal sealed class ModHost : IModRuntime
         }
         return packages;
 
-        void Read(string folder, bool development, bool isDropIn = false) =>
-            TryRead(folder, () => ModPackage.Read(folder, development, isDropIn: isDropIn));
-
-        void TryRead(string path, Func<ModPackage> read)
+        void ReadInstalled(string root, string? settingsDirectory)
         {
-            try { packages.Add(read()); }
-            catch (Exception error) { Log(Path.GetFileName(path), error.GetBaseException().Message); }
+            if (!Directory.Exists(root) || !IsRegularPath(root)) return;
+            foreach (string id in Directory.EnumerateDirectories(root))
+                if (!Path.GetFileName(id).StartsWith('.') && IsRegularPath(id))
+                    foreach (string version in Directory.EnumerateDirectories(id))
+                        if (IsRegularPath(version)) Read(version, development: false, settingsDirectory: settingsDirectory);
+        }
+
+        void Read(string folder, bool development, bool isDropIn = false, string? settingsDirectory = null)
+        {
+            try { packages.Add(ModPackage.Read(folder, development, isDropIn: isDropIn, settingsDirectory: settingsDirectory)); }
+            catch (FileNotFoundException) when (isDropIn) { } // A folder may still be copying.
+            catch (DirectoryNotFoundException) when (isDropIn) { }
+            catch (Exception error) { Log(Path.GetFileName(folder), error.GetBaseException().Message); }
         }
     }
 
-    private static bool IsRegularPath(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
+    private bool IsDataDirectory(string path) => SamePath(path, _shadow) || SamePath(path, Path.Combine(Root, "data"));
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static bool SamePath(string first, string second) => first.Equals(second, PathComparison);
+
+    private static bool IsRegularPath(string path)
+    {
+        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
 
     private void PublishCatalog(IReadOnlyList<ModPackage> packages)
     {
@@ -428,6 +540,7 @@ internal sealed class ModHost : IModRuntime
         {
             if (_disposed) return;
             _disposed = true;
+            StopWatching();
             var active = Interlocked.Exchange(ref _active, new([])).Mods;
             for (int i = active.Length - 1; i >= 0; i--)
                 await RetireAsync(active[i]).ConfigureAwait(false);
@@ -438,12 +551,14 @@ internal sealed class ModHost : IModRuntime
     private static void DeleteUnder(string path, string root)
     {
         string absolute = Path.GetFullPath(path);
-        if (!absolute.StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        if (!IsUnder(absolute, root))
             throw new InvalidOperationException("Mod cleanup path is outside the package store.");
         if (Directory.Exists(absolute))
             Directory.Delete(absolute, recursive: true);
     }
+
+    private static bool IsUnder(string path, string root) => Path.GetFullPath(path)
+        .StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar, PathComparison);
 }
 
 internal sealed class ModActivation : IModRegistrationOwner

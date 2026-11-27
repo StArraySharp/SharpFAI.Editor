@@ -59,6 +59,14 @@ internal sealed unsafe partial class EditorWindow
         _selectedDecorations.Clear();
     }
 
+    private void SelectFloorFromView(int floor, bool extend)
+    {
+        int? anchor = extend && _hasFloorSelection && !_inspectDecoration ? _rangeAnchor ?? _floor : null;
+        SelectFloor(floor, false);
+        if (anchor != _floor)
+            _rangeAnchor = anchor;
+    }
+
     private void InsertTile(double angle) => InsertTiles([angle]);
 
     private void EditTileInDirection(double angle)
@@ -234,8 +242,9 @@ internal sealed unsafe partial class EditorWindow
                 _centerEditFloor = _floor;
             }
         }
-        string status = ready ? $"{_playback!.Camera.Zoom:P0}" : _playback?.LoadError ??
-            (_playback?.IsLoading == true ? L.F("SyncStage", L.LoadPhase(_playback.LoadPhase)) : L.T("Syncing"));
+        string status = ready ? $"{_playback!.Camera.Zoom:P0}" : PlaybackLoadingStatus(_playback);
+        if (ready && _documentLoadSeconds > 0)
+            status += " · " + L.F("LoadCompletedTime", _documentLoadSeconds);
         ContinueToolbar(ImGui.CalcTextSize(status).x);
         ImGui.AlignTextToFramePadding();
         WidgetDraw.TextDisabled(status);
@@ -535,10 +544,7 @@ internal sealed unsafe partial class EditorWindow
                         int floor = _floorHitCycle.Pick(_canvasFloorHits);
                         if (floor >= 0)
                         {
-                            int? anchor = shift && _hasFloorSelection && !_inspectDecoration ? _rangeAnchor ?? _floor : null;
-                            SelectFloor(floor, false);
-                            if (anchor != floor)
-                                _rangeAnchor = anchor;
+                            SelectFloorFromView(floor, shift);
                         }
                         else if (spriteHit is not null)
                             SelectDecoration(spriteHit);

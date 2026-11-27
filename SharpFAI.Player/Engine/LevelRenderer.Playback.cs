@@ -17,6 +17,7 @@ public sealed unsafe partial class LevelRenderer
     private long _seekLeadStarted;
     private bool WaitingForSeekFrame => _prepareSeekFrame && _isPlaying && !_offlineSubSample;
     private bool _startFromSelectedFloor;
+    internal PlaybackRange? PlaybackLoop { get; set; }
 
     private float PlaybackBaseZoom => _settings.CameraZoom is float zoom
         ? AuthoredZoom(_camera.ViewportHeight, zoom) : _homeZoom;
@@ -296,7 +297,14 @@ public sealed unsafe partial class LevelRenderer
         }
         else if (_isPlaying)
         {
-            _playTime = Math.Min(AdvancePlaybackClock(delta), _duration);
+            double next = AdvancePlaybackClock(delta);
+            if (PlaybackLoop is { } loop && next >= loop.End)
+            {
+                Seek(loop.Start);
+                if (!_isPlaying) Play(); // Seeking to 0 uses Restart.
+                return;
+            }
+            _playTime = Math.Min(next, _duration);
             if (_playTime >= _duration)
                 _isPlaying = false;
         }

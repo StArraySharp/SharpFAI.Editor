@@ -73,9 +73,8 @@ internal sealed partial class EditorDocument
     {
         if (expected != ModRevision) return EditResult.RevisionConflict;
         if (request.Operations.Count == 0) return EditResult.Applied;
-        var staged = new EditorDocument(Path, _level.CreateSnapshot(PlaybackPath));
-        foreach (var operation in request.Operations)
-            if (!staged.ApplyModOperation(operation)) return EditResult.Invalid;
+        var staged = StageModEdits(request, null, out _);
+        if (staged is null) return EditResult.Invalid;
         if (!staged.Modified) return EditResult.Applied;
 
         var before = Capture(this);
@@ -96,6 +95,53 @@ internal sealed partial class EditorDocument
             _level.root["sharpFaiMods"] = data.Extensions;
             if (data.Extensions is null) _level.root.Remove("sharpFaiMods");
         }
+    }
+
+    internal EditorDocument? StageModEdits(ChartEditRequest request, List<ChartEditChange>? changes, out int rejected)
+    {
+        var staged = new EditorDocument(Path, _level.CreateSnapshot(PlaybackPath));
+        for (int index = 0; index < request.Operations.Count; index++)
+        {
+            var operation = request.Operations[index];
+            var before = changes is null ? default : staged.DescribeModOperation(operation);
+            if (!staged.ApplyModOperation(operation))
+            {
+                rejected = index;
+                return null;
+            }
+            if (changes is not null)
+            {
+                var after = staged.DescribeModOperation(operation, after: true);
+                changes.Add(new(index, operation.GetType().Name, before.Floor, after.Index ?? before.Index,
+                    before.Value, after.Value, (operation as SetChartSetting)?.Key));
+            }
+        }
+        rejected = -1;
+        return staged;
+    }
+
+    private (int? Floor, int? Index, JsonElement? Value) DescribeModOperation(ChartOperation operation, bool after = false)
+    {
+        JsonElement? Read(JToken? value) => value is null ? null : ToElement(value);
+        JsonElement? Event(int floor, int index) => Read(Events(floor).ElementAtOrDefault(index));
+        JsonElement? Decoration(int index) => Read(_decorations.ElementAtOrDefault(index));
+        return operation switch
+        {
+            InsertAngles insert => (insert.AfterFloor, null, JsonSerializer.SerializeToElement(new
+                { LastFloor, Angles = after ? insert.Angles : [] })),
+            DeleteAngles delete => (delete.FirstFloor, null, JsonSerializer.SerializeToElement(new
+                { LastFloor, delete.Count, Angles = after ? [] : _angles.Skip(Math.Max(0, delete.FirstFloor - 1)).Take(Math.Min(delete.Count, 512)).ToArray() })),
+            SetChartSetting setting => (null, null, Read(Settings[setting.Key])),
+            AddChartEvent add => (add.Floor, after ? Events(add.Floor).Count - 1 : Events(add.Floor).Count,
+                after ? Read(Events(add.Floor).LastOrDefault()) : null),
+            UpdateChartEvent update => (update.Floor, update.Index, Event(update.Floor, update.Index)),
+            RemoveChartEvent remove => (remove.Floor, remove.Index, after ? null : Event(remove.Floor, remove.Index)),
+            AddChartDecoration add => (add.Floor, after ? _decorations.Count - 1 : _decorations.Count,
+                after ? Read(_decorations.LastOrDefault()) : null),
+            UpdateChartDecoration update => (null, update.Index, Decoration(update.Index)),
+            RemoveChartDecoration remove => (null, remove.Index, after ? null : Decoration(remove.Index)),
+            _ => default,
+        };
     }
 
     private bool ApplyModOperation(ChartOperation operation)
@@ -125,7 +171,7 @@ internal sealed partial class EditorDocument
                 var item = JObject.Parse(addition.Fields.GetRawText());
                 item["floor"] = addition.Floor;
                 item["eventType"] = addition.Type;
-                return Add(item, decoration: false);
+                return item.Properties().All(property => ModFieldValueValid(item, property)) && Add(item, decoration: false);
             case UpdateChartEvent update when update.Fields.ValueKind == JsonValueKind.Object &&
                                               Events(update.Floor).ElementAtOrDefault(update.Index) is { } target:
                 return SetModFields(target, update.Fields);
@@ -154,9 +200,24 @@ internal sealed partial class EditorDocument
     {
         foreach (var property in JObject.Parse(fields.GetRawText()).Properties())
         {
-            if (property.Name is "floor" or "eventType") return false;
+            if (property.Name is "floor" or "eventType" || !ModFieldValueValid(target, property)) return false;
             Set(target, property.Name, property.Value);
         }
         return true;
+    }
+
+    private static bool ModFieldValueValid(JObject target, JProperty property)
+    {
+        if (Type(target) != "SetSpeed") return true;
+        double minimum = property.Name switch
+        {
+            "beatsPerMinute" => .001,
+            "bpmMultiplier" => 1e-7,
+            _ => 0,
+        };
+        if (minimum == 0) return true;
+        if (property.Value.Type is not (JTokenType.Integer or JTokenType.Float)) return false;
+        double value = property.Value.Value<double>();
+        return double.IsFinite(value) && value >= minimum;
     }
 }

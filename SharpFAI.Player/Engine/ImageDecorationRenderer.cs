@@ -507,6 +507,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
             Matrix4 clip = Project(model, pose, screen);
             if (item.Particles is { } particles)
             {
+                using var profile = PlaybackPerformance.Measure(PlaybackPerformance.Stage.Particles);
                 if (collectEditorQuads && item.DecorationIndex >= 0 && !Outside(clip, screen))
                     _editorQuads[item.DecorationIndex] = clip;
                 particles.Collect(time, _particleSamples);

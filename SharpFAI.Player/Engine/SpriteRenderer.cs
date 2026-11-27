@@ -42,7 +42,6 @@ public sealed unsafe class SpriteRenderer : IDisposable
         public float Frame;
     }
 
-    private const int MaxInstances = 16384;
 
     // Planet program ----
     private int _planetProgram;

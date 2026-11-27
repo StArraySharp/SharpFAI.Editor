@@ -794,7 +794,7 @@ internal sealed class ModUi : IModWindowOperations, IUiDialogs, IMainWindowServi
     public void DrawSettings(bool acceptLocalInput = true)
     {
         var previousConfirmation = _confirmation;
-        ImGui.TextUnformatted(Tr("Mod 在 SharpFAI 进程内运行。仅启用你信任的 Mod。", "Mods run inside SharpFAI. Enable only Mods you trust."));
+        ImGui.TextWrapped(Tr("复制可信的 Mod 文件夹到搜索目录即可自动启用。", "Copy trusted Mod folders into the search directory to enable them automatically."));
         ImGui.PushTextWrapPos(0);
         ImGui.TextUnformatted(Tr("搜索目录 ", "Search directory ") + Host.SearchDirectory);
         ImGui.PopTextWrapPos();

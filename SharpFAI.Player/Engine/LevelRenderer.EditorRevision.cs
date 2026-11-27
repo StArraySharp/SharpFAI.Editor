@@ -272,7 +272,7 @@ public sealed unsafe partial class LevelRenderer
                 Has(EditorLayers.Bindings) ? PlaybackEventBinder.BindForEditor(model, token) : previousEvents;
             var settings = view with { SkipAudio = previousSettings.SkipAudio };
             var nextFloors = Has(EditorLayers.Track) ? CreatePlaybackFloors(model, settings, coreEvents!) : floors;
-            var timeline = Has(EditorLayers.Timing) ? BuildTimeline(model, nextFloors, events, coreEvents) : previousTimeline;
+            var timeline = Has(EditorLayers.Timing) ? BuildTimeline(model, nextFloors, events, coreEvents, editor: true) : previousTimeline;
             if (Has(EditorLayers.Rate)) timeline = timeline with { Pitch = ReadPlaybackPitch(settingsJson) };
             var update = new EditorRevisionUpdate(anglesOnly ? level : model, settingsJson, settings, layers, events, timeline)
             {

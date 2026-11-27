@@ -25,6 +25,14 @@
   <data name="VideoRenderSaveFirst" xml:space="preserve"><value>请先保存新谱面，以确定素材和导出的目录。</value></data>
   <data name="MenuTools" xml:space="preserve"><value>工具</value></data>
   <data name="MenuHelp" xml:space="preserve"><value>帮助</value></data>
+  <data name="CheckForUpdates" xml:space="preserve"><value>检查更新…</value></data>
+  <data name="LoadCompletedTime" xml:space="preserve"><value>加载共 {0:F2} 秒</value></data>
+  <data name="PlaybackTileBpm" xml:space="preserve"><value>砖块设定 BPM {0:G6} · 实时 BPM {1:G6}</value></data>
+  <data name="PlaybackTileBpmHelp" xml:space="preserve"><value>实时 BPM 为 60 除以当前砖块到下一块所需的播放秒数，扣除开场倒计时。</value></data>
+  <data name="SetSpeedEffectiveBpm" xml:space="preserve"><value>实时 BPM</value></data>
+  <data name="SetSpeedEffectiveBpmHelp" xml:space="preserve"><value>输入目标实时 BPM，按谱面音调换算此事件的 BPM 或倍频器。</value></data>
+  <data name="SetSpeedEffectiveBpmInvalid" xml:space="preserve"><value>请输入当前速度模式和角度偏移下可达到的正数 BPM。</value></data>
+  <data name="SetSpeedEffectiveBpmUnavailable" xml:space="preserve"><value>谱面时间轴加载完成且当前砖块与下一块有时间间隔时可用。</value></data>
   <data name="Language" xml:space="preserve"><value>语言</value></data>
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="Settings" xml:space="preserve"><value>关卡设置</value></data>
@@ -115,6 +123,7 @@
   <data name="EventEnabled" xml:space="preserve"><value>启用事件</value></data>
   <data name="DeleteEvent" xml:space="preserve"><value>删除</value></data>
   <data name="SearchEvents" xml:space="preserve"><value>搜索事件</value></data>
+  <data name="EventCategory" xml:space="preserve"><value>事件分类</value></data>
   <data name="OtherFields" xml:space="preserve"><value>其它字段</value></data>
   <data name="ChooseAsset" xml:space="preserve"><value>选择素材</value></data>
   <data name="Syncing" xml:space="preserve"><value>同步谱面中…</value></data>
@@ -772,6 +781,11 @@
   <data name="TimelineAndEvents" xml:space="preserve"><value>时间轴与事件</value></data>
   <data name="TimelineFloorNumber" xml:space="preserve"><value>砖块 #{0}</value></data>
   <data name="TimelineFloorAtTime" xml:space="preserve"><value>砖块 #{0} · {1}</value></data>
+  <data name="TimelineTileTrack" xml:space="preserve"><value>砖块</value></data>
+  <data name="TimelineTimingEvents" xml:space="preserve"><value>时间事件</value></data>
+  <data name="TimelineCameraEvents" xml:space="preserve"><value>摄像机</value></data>
+  <data name="TimelineEffectEvents" xml:space="preserve"><value>其他特效</value></data>
+  <data name="TimelineEventGroup" xml:space="preserve"><value>{0:N0} 个事件 · 点击选择</value></data>
   <data name="TimeSignature" xml:space="preserve"><value>拍号</value></data>
   <data name="TimelineFit" xml:space="preserve"><value>查看全曲</value></data>
   <data name="TimelineMeasure" xml:space="preserve"><value>第 {0:0} 小节 · 第 {1} 拍</value></data>
@@ -781,7 +795,28 @@
   <data name="TimelineApplyHere" xml:space="preserve"><value>从此拍应用</value></data>
   <data name="TimelineApplyAtStart" xml:space="preserve"><value>设为初始拍号</value></data>
   <data name="TimelineRemoveSignature" xml:space="preserve"><value>移除此拍号</value></data>
-  <data name="TimelineHelp" xml:space="preserve"><value>拖动定位 · Shift 拖动吸附整拍 · 滚轮缩放 · Shift 滚轮平移</value></data>
+  <data name="TimelineHelp" xml:space="preserve"><value>拖动定位 · Shift 拖动吸附整拍 · Ctrl 拖动设定 A–B · 滚轮缩放 · Shift 滚轮平移</value></data>
+  <data name="TimelineRangeHelp" xml:space="preserve"><value>按住 Ctrl 在时间轴上拖动，设定 A–B。</value></data>
+  <data name="TimelineFloorRangeHelp" xml:space="preserve"><value>按住 Shift 点击或拖动，选择一段砖块。</value></data>
+  <data name="TimelineRangeFromTiles" xml:space="preserve"><value>用选中砖块设定 A–B</value></data>
+  <data name="TimelineClearRange" xml:space="preserve"><value>清除 A–B</value></data>
+  <data name="TimelineLoopRange" xml:space="preserve"><value>循环 A–B</value></data>
+  <data name="TimelineStopLoop" xml:space="preserve"><value>停止循环</value></data>
+  <data name="TimelineExportRange" xml:space="preserve"><value>导出 A–B</value></data>
+  <data name="VideoRenderRange" xml:space="preserve"><value>选区 {0} – {1}</value></data>
+  <data name="VideoRenderRangeChanged" xml:space="preserve"><value>请为当前谱面重新打开导出窗口。</value></data>
+  <data name="VideoRenderPreroll" xml:space="preserve"><value>预滚 (秒)</value></data>
+  <data name="VideoRenderPrerollProgress" xml:space="preserve"><value>正在预滚…</value></data>
+  <data name="PlaybackPerformance" xml:space="preserve"><value>播放性能</value></data>
+  <data name="AudioMonitor" xml:space="preserve"><value>实时频谱</value></data>
+  <data name="AudioMonitorNoMusic" xml:space="preserve"><value>请打开音乐已加载的铺面。</value></data>
+  <data name="AudioMonitorPeakCount" xml:space="preserve"><value>峰值标注数量</value></data>
+  <data name="PerformanceFreeze" xml:space="preserve"><value>冻结采样</value></data>
+  <data name="PerformanceClear" xml:space="preserve"><value>清空</value></data>
+  <data name="PerformanceEmpty" xml:space="preserve"><value>开始播放后显示窗口帧间隔。</value></data>
+  <data name="PerformanceStats" xml:space="preserve"><value>窗口帧间隔 · {0:N0} 帧 · P95 {1:0.00} ms · P99 {2:0.00} ms · 最大 {3:0.00} ms</value></data>
+  <data name="PerformanceSample" xml:space="preserve"><value>{0} · 砖块 #{1} · {2:0.00} ms · 滚轮缩放 · 点击曲线跳转</value></data>
+  <data name="PerformanceStages" xml:space="preserve"><value>CPU 用时 (ms)　装饰贴图上传 {0:0.00}　解码等待 {1:0.00}　粒子准备 {2:0.00}　原生滤镜 {3:0.00}</value></data>
   <data name="Fullscreen" xml:space="preserve"><value>全屏</value></data>
   <data name="Name_AddDecoration_depth" xml:space="preserve"><value>深度</value></data>
   <data name="Name_AddDecoration_pivotOffset" xml:space="preserve"><value>轴心偏移</value></data>

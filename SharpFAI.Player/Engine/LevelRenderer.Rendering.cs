@@ -220,6 +220,8 @@ public sealed unsafe partial class LevelRenderer
             _filterBackend?.ObserveCameraFrame(_playTime);
             return false;
         }
+        if (_isPlaying)
+            PlaybackPerformance.MarkScene(_playTime, _currentIndex);
 
         float neutralZoom = _camera.Zoom;
         Vector2 neutralPosition = _camera.Position;
@@ -292,6 +294,7 @@ public sealed unsafe partial class LevelRenderer
             _fallingPetals = null;
             if (filtersDue || backgroundDue || screenActive)
             {
+                using var profile = PlaybackPerformance.Measure(PlaybackPerformance.Stage.Filters);
                 var backend = _filterBackend ??= new Filters.OpenGlFilterBackend();
                 backend.CameraView = _camera.ViewProjection;
                 if (filtersDue)
@@ -374,7 +377,7 @@ public sealed unsafe partial class LevelRenderer
         {
             double step = (_playTime - _lastFilterTime) / _pitch;
             _filterDelta = double.IsFinite(step) && step >= 0 ? (float)step : 0f;
-            _filterClock = double.IsFinite(step) && step >= 0 ? _filterClock + step : 0;
+            _filterClock = _playTime / _pitch;
         }
         else
         {

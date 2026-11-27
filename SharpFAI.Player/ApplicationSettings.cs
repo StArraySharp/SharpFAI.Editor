@@ -34,6 +34,8 @@ public sealed record ApplicationSettings
     public ApplicationWindowMode WindowMode { get; init; }
     public int FrameLimit { get; init; }
     public bool ShowFrameRate { get; init; } = true;
+    public bool ShowTimelineTimingEvents { get; init; } = true;
+    public bool ShowTimelineEffectEvents { get; init; } = true;
     public string FirePlanetColor { get; init; } = DefaultFireColor;
     public string IcePlanetColor { get; init; } = DefaultIceColor;
     public DecorationKinds VisibleDecorations { get; init; } = DecorationKinds.All;

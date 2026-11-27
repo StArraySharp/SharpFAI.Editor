@@ -15,23 +15,26 @@ internal sealed partial class EditorWindow
         _modUi = new(host, () => ModContext(false), fullscreen =>
         {
             if (_windowMode.IsFullscreen != fullscreen) _windowMode.RequestToggle();
-        }, ModTransport, (revision, edit) =>
-        {
-            if (_playbackView != PlaybackView.Edit || _videoExport?.Request is not null) return EditResult.Invalid;
-            FinishNumericEdit();
-            EditResult result = _document.ApplyModEdits(revision, edit);
-            if (result == EditResult.Applied) ClampSelection();
-            return result;
-        }, () => ModContext(true));
+        }, ModTransport, CommitModEdit, () => ModContext(true));
         var inspection = new ModEditorInspection(this, _modUi);
         var resolveUiService = host.ExternalService;
         host.ExternalService = type =>
         {
-            if (type == typeof(IEditorInspection) || type == typeof(IEditorFrameCapture)) return inspection;
+            if (type == typeof(IEditorInspection) || type == typeof(IEditorFrameCapture) ||
+                type == typeof(IEditorWorkflow)) return inspection;
             if (type == typeof(IEditorWindowStream)) return _windowStream;
             return resolveUiService?.Invoke(type);
         };
         _modUi.Initialize();
+    }
+
+    private EditResult CommitModEdit(ChartRevision revision, ChartEditRequest edit)
+    {
+        if (_playbackView != PlaybackView.Edit || _videoExport?.Request is not null) return EditResult.Invalid;
+        FinishNumericEdit();
+        EditResult result = _document.ApplyModEdits(revision, edit);
+        if (result == EditResult.Applied) ClampSelection();
+        return result;
     }
 
     private CommandContext ModContext(bool snapshot)

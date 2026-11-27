@@ -71,6 +71,7 @@ internal sealed class DecorationPixelCache(long capacity = 256L * 1024 * 1024)
         }
         if (!required)
             return DecorationPixelStatus.Waiting;
+        using var profile = task.IsCompleted ? default : PlaybackPerformance.Measure(PlaybackPerformance.Stage.DecodeWait);
         if (task.GetAwaiter().GetResult() is not { } decoded)
             return DecorationPixelStatus.Unavailable;
         pixels = decoded;

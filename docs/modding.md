@@ -8,7 +8,7 @@
 dotnet build .\examples\SharpFAI.ModExamples -c Release
 ```
 
-将 `examples/SharpFAI.ModExamples/bin/Release/net10.0/` 中的 `Example.Base.sharpfaimod` 和 `Example.Tools.sharpfaimod` 放进可执行文件旁的 `Mods` 目录。打开「设置 → Mod 管理」，点工具包的「启用」并确认，基础包会随之加载。程序运行时加入的包可用「刷新」发现。
+将构建目录 `examples/SharpFAI.ModExamples/bin/Release/net10.0/mods/` 下的 `Example.Base` 和 `Example.Tools` 文件夹复制到可执行文件旁的 `Mods`。编辑器会自动发现并启用它们。也可以到「设置 → Mod 管理」选择构建生成的 `.sharpfaimod` 文件安装，再启用工具包，基础包会随之加载。
 
 从「谱面工具 → 打开谱面分析」或 `Ctrl+Shift+F9` 打开窗口。窗口可以切换深度着色与历史帧残影、调整实时总线增益，并显示谱面预处理执行次数。示例缓存只读 BPM，修改歌曲作者等字段会复用结果。播放带音乐的谱面时，增益对之后排队的音频块生效。
 
@@ -20,7 +20,7 @@ dotnet build .\examples\SharpFAI.ModExamples -c Release
 
 停用基础包会先关闭依赖它的工具包。仅因依赖而启用的包在失去最后一个依赖者后卸载。手动启用的包保留其启用状态。移除开发版只删除登记，源目录继续保留。
 
-搜索目录默认为可执行文件旁的 `Mods`，启动时会自动创建，支持 `.sharpfaimod` 压缩包和解压后的单独目录。通过界面安装的包、启用和信任记录仍保存在 SharpFAI 用户数据目录的 `Mods` 下。要移除从搜索目录发现的 Mod，先停用，再移走对应的包或目录并点「刷新」。可用 `SHARPFAI_MODS_DIR` 同时覆盖搜索目录和数据目录。Mod 统一在编辑器中启用，处理 Hook 也可参与编辑器的视频导出。用 `--no-mods` 启动可进入安全模式。首次启用和重新信任由本地设置界面完成。托管 Mod 与应用共享进程权限。
+搜索目录默认为可执行文件旁的 `Mods`，启动时会自动创建。复制解压后的 Mod 文件夹会触发首次启用，手动停用的 Mod 会记住状态。`.sharpfaimod` 是安装包，在「设置 → Mod 管理」安装后会解压到 `Mods/packages/`。托管 Mod 与应用共享进程权限，请把可信的文件夹放入 `Mods`。可用 `SHARPFAI_MODS_DIR` 同时覆盖搜索目录和数据目录。Mod 统一在编辑器中启用，处理 Hook 也可参与编辑器的视频导出。用 `--no-mods` 启动可进入安全模式。
 
 ## SDK
 

@@ -53,15 +53,19 @@ public static class LevelAssetPaths
     /// to be the background video the level references, `ffmpeg -y` overwrites it in place and the
     /// level can never load that video again.
     /// </remarks>
-    public static string ResolveExportPath(string levelPath, Level? level)
+    public static string ResolveExportPath(string levelPath, Level? level) => ResolveExportPath(levelPath, level, null);
+
+    internal static string ResolveExportPath(string levelPath, Level? level, PlaybackRange? range)
     {
         string full = Path.GetFullPath(levelPath);
         string directory = Path.GetDirectoryName(full) ?? ".";
         string stem = Path.GetFileNameWithoutExtension(full);
+        if (range is { } clip)
+            stem += FormattableString.Invariant($"-clip-{clip.Start * 1000:0}-{clip.End * 1000:0}");
 
         string candidate = Path.Combine(directory, stem + ".mp4");
 
-        if (!File.Exists(candidate) || !IsReferencedAsset(candidate, level))
+        if (!IsReferencedAsset(candidate, level) && (range is null || IsUnused(candidate)))
         {
             return candidate;
         }
@@ -72,13 +76,16 @@ public static class LevelAssetPaths
         {
             string alternative = Path.Combine(directory, $"{stem}-export{suffix}.mp4");
 
-            if (!File.Exists(alternative))
+            if (IsUnused(alternative) && !IsReferencedAsset(alternative, level))
             {
                 return alternative;
             }
         }
 
-        return candidate;
+        return Path.Combine(directory, $"{stem}-export-{Guid.NewGuid():N}.mp4");
+
+        static bool IsUnused(string path) => !File.Exists(path) &&
+            !Directory.Exists(Path.ChangeExtension(path, null) + "_frames");
     }
 
     /// <summary>该文件是否被关卡设置引用 / Whether a level setting references this file.</summary>

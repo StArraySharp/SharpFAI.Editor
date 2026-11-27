@@ -9,8 +9,11 @@ using SharpFAI.ModApi;
 
 namespace SharpFAI.Mcp;
 
-internal sealed class EditorTools(IEditorInspection chart, IEditorFrameCapture frames, IChartEdits edits, IPlaybackControl playback)
+internal sealed partial class EditorTools(IEditorInspection chart, IEditorFrameCapture frames,
+    IChartEdits edits, IPlaybackControl playback, IEditorWorkflow? workflow)
 {
+    private IEditorWorkflow? EditorWorkflow { get; } = workflow;
+    private IEditorWorkflow Workflows => EditorWorkflow ?? throw new McpException("This tool requires the matching SharpFAI Editor version.");
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
@@ -74,16 +77,20 @@ internal sealed class EditorTools(IEditorInspection chart, IEditorFrameCapture f
     public async Task<CallToolResult> Edit(ChartRevision revision, string description, EditOperation[] operations,
         CancellationToken token)
     {
-        if (operations is not { Length: > 0 and <= 256 } || string.IsNullOrWhiteSpace(description))
-            throw new McpException("Provide a description and 1 to 256 operations.");
-        var batch = operations.Select((operation, index) => operation?.ToChartOperation() ??
-            throw new McpException($"Invalid or incomplete operation at index {index}.")).ToArray();
-        var result = await edits.CommitAsync(revision, new(description, batch), token);
-        if (result != EditResult.Applied)
-            throw new McpException(result == EditResult.RevisionConflict
+        var edit = EditRequest(description, operations);
+        ChartEditCommit result;
+        if (EditorWorkflow is { } current)
+            result = await Read(() => current.CommitEditAsync(revision, edit, token));
+        else
+        {
+            var applied = await Read(() => edits.CommitAsync(revision, edit, token));
+            result = new(applied == EditResult.Applied ? (await chart.GetChartAsync(token)).Revision : revision, applied);
+        }
+        if (result.Result != EditResult.Applied)
+            throw new McpException(result.Result == EditResult.RevisionConflict
                 ? "Chart revision changed. Call chart_context and re-read the affected floors or decorations."
                 : "The editor rejected the batch. Check the operations and confirm the editor is in edit mode.");
-        var value = JsonSerializer.SerializeToElement(new { applied = true, baseRevision = revision }, Json);
+        var value = JsonSerializer.SerializeToElement(new { applied = true, baseRevision = revision, revision = result.Revision }, Json);
         return new() { StructuredContent = value, Content = [new TextContentBlock { Text = value.GetRawText() }] };
     }
 
@@ -102,10 +109,19 @@ internal sealed class EditorTools(IEditorInspection chart, IEditorFrameCapture f
     private static async Task<T> Read<T>(Func<ValueTask<T>> read)
     {
         try { return await read(); }
-        catch (Exception error) when (error is InvalidOperationException or ArgumentException)
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException or IOException
+            or UnauthorizedAccessException)
         {
             throw new McpException(error.Message);
         }
+    }
+
+    private static ChartEditRequest EditRequest(string description, EditOperation[] operations)
+    {
+        if (operations is not { Length: > 0 and <= 256 } || string.IsNullOrWhiteSpace(description))
+            throw new McpException("Provide a description and 1 to 256 operations.");
+        return new(description, operations.Select((operation, index) => operation?.ToChartOperation() ??
+            throw new McpException($"Invalid or incomplete operation at index {index}.")).ToArray());
     }
 
     public sealed record EditOperation(

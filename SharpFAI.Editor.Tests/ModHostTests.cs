@@ -108,7 +108,9 @@ public sealed class ModHostTests
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-mods-").AsScope();
         await using var host = new ModRuntime(UiHost.Editor, root.Path);
-        var activation = new ModActivation(host, ModPackage.ReadArchive(Package("Base")), root.Path);
+        string unpacked = Path.Combine(root.Path, "Example.Base");
+        ZipFile.ExtractToDirectory(Package("Base"), unpacked);
+        var activation = new ModActivation(host, ModPackage.Read(unpacked, development: false), root.Path);
         try
         {
             IModContext context = activation.Scope;
@@ -136,33 +138,27 @@ public sealed class ModHostTests
     }
 
     [Test]
-    public async Task SearchDirectoryLoadsArchivesAndUnpackedModsWithPersistentApproval()
+    public async Task SearchDirectoryIgnoresArchivesAndAutomaticallyEnablesCopiedFolders()
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-mods-").AsScope();
-        string archive = Path.Combine(root.Path, "Example.Tools.sharpfaimod");
         string unpacked = Path.Combine(root.Path, "Example.Base.sharpfaimod");
-        File.Copy(Package("Tools"), archive);
+        File.Copy(Package("Tools"), Path.Combine(root.Path, "Example.Tools.sharpfaimod"));
         await using (var host = new ModRuntime(UiHost.Editor, root.Path))
         {
             await host.InitializeAsync();
-            Assert.That(host.Catalog.Select(item => item.Manifest.Id), Is.EqualTo(new[] { Tools }));
-            Assert.ThrowsAsync<InvalidOperationException>(() => host.EnableAsync(Tools));
+            Assert.That(host.Catalog, Is.Empty);
             ZipFile.ExtractToDirectory(Package("Base"), unpacked);
-            await host.RefreshAsync();
-            Assert.That(host.Catalog.Select(item => item.Manifest.Id), Is.EqualTo(new[] { Base, Tools }));
-            Assert.That(host.Catalog.All(item => !item.Enabled && !item.CanRemove), Is.True);
-            await host.EnableAsync(Tools);
-            Assert.That(host.Catalog.All(item => item.Enabled), Is.True);
-            Assert.That(host.Entries<RegisteredWindow>(UiHost.Editor), Has.Count.EqualTo(1));
+            ZipFile.ExtractToDirectory(Package("Tools"), Path.Combine(root.Path, "Example.Tools"));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            while (host.Catalog.Count != 2 || host.Catalog.Any(item => !item.Enabled))
+                await Task.Delay(30, deadline.Token);
+            Assert.That(host.Catalog.All(item => !item.CanRemove), Is.True);
+            await host.DisableAsync(Tools);
         }
         await using var restarted = new ModRuntime(UiHost.Editor, root.Path);
         await restarted.InitializeAsync();
-        Assert.That(restarted.Catalog.All(item => item.Enabled), Is.True);
-        File.Delete(archive);
-        await restarted.RefreshAsync();
-        Assert.That(restarted.Catalog.Single(item => item.Manifest.Id == Tools).Enabled, Is.True);
-        await restarted.DisableAsync(Tools);
-        Assert.That(restarted.Catalog.Select(item => item.Manifest.Id), Is.EqualTo(new[] { Base }));
+        Assert.That(restarted.Catalog.Single(item => item.Manifest.Id == Base).Enabled, Is.True);
+        Assert.That(restarted.Catalog.Single(item => item.Manifest.Id == Tools).Enabled, Is.False);
         Assert.That(File.Exists(Path.Combine(unpacked, "Example.Base.dll")), Is.True);
     }
 
@@ -170,15 +166,15 @@ public sealed class ModHostTests
     public async Task DisablingAModDoesNotRequireOtherActivePackagesToRemainOnDisk()
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-mods-").AsScope();
-        string baseArchive = Path.Combine(root.Path, "Example.Base.sharpfaimod");
-        File.Copy(Package("Base"), baseArchive);
-        File.Copy(Package("Tools"), Path.Combine(root.Path, "Example.Tools.sharpfaimod"));
+        string baseFolder = Path.Combine(root.Path, "Example.Base");
+        ZipFile.ExtractToDirectory(Package("Base"), baseFolder);
+        ZipFile.ExtractToDirectory(Package("Tools"), Path.Combine(root.Path, "Example.Tools"));
         await using var host = new ModRuntime(UiHost.Editor, root.Path);
         await host.InitializeAsync();
         await host.EnableAsync(Base);
         await host.EnableAsync(Tools);
 
-        File.Delete(baseArchive);
+        File.Delete(Path.Combine(baseFolder, "Example.Base.dll"));
         await host.DisableAsync(Tools);
 
         Assert.That(host.Catalog.Where(entry => entry.Enabled).Select(entry => entry.Manifest.Id), Is.EqualTo(new[] { Base }));

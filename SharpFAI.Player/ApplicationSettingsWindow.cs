@@ -286,6 +286,16 @@ public sealed unsafe class ApplicationSettingsWindow
                             value => value switch { "en" => "English", "zh-Hans" => "简体中文", _ => Tr("跟随系统", "System default") },
                             out string? language))
                         Change(_draft with { Language = language });
+                    if (editor)
+                    {
+                        Section(Tr("时间轴", "Timeline"));
+                        if (Toggle("timeline-timing-events", Tr("显示时间事件", "Show timing events"),
+                                _draft.ShowTimelineTimingEvents, out bool timingEvents))
+                            Change(_draft with { ShowTimelineTimingEvents = timingEvents });
+                        if (Toggle("timeline-effect-events", Tr("显示特效事件", "Show effect events"),
+                                _draft.ShowTimelineEffectEvents, out bool effectEvents))
+                            Change(_draft with { ShowTimelineEffectEvents = effectEvents });
+                    }
                     break;
                 case Page.Editing:
                     DrawTrackEditingOptions();

@@ -24,7 +24,7 @@ public sealed class McpModTests
             ExternalService = type => type.IsInstanceOfType(services) ? services : null,
         };
         await host.InstallAsync(archive);
-        string settingsPath = Path.Combine(root.Path, "packages", id, "SharpFAI.Mcp.Settings.json");
+        string settingsPath = Path.Combine(root.Path, "SharpFAI.Mcp.Settings.json");
         var candidate = new TcpListener(IPAddress.Loopback, 0);
         candidate.Start();
         int port = ((IPEndPoint)candidate.LocalEndpoint).Port;
@@ -89,7 +89,12 @@ public sealed class McpModTests
             using var response = await Send("tools/list", new { });
             var tools = (await Result(response)).GetProperty("tools").EnumerateArray()
                 .Select(tool => tool.GetProperty("name").GetString());
-            Assert.That(tools, Does.Contain("chart_edit").And.Contain("chart_capture_frame"));
+            Assert.That(tools, Is.SupersetOf(new[]
+            {
+                "chart_edit", "chart_capture_frame", "chart_edit_preview", "chart_open", "chart_save",
+                "chart_tempo", "chart_convert_tempo", "chart_selection", "chart_profile_playback",
+                "chart_compare_frames", "chart_export_video", "chart_video_status",
+            }));
         }
 
         async Task<HttpResponseMessage> Send(string method, object parameters, string? origin = null)

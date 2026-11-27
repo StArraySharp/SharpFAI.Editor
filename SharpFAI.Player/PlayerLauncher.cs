@@ -61,13 +61,21 @@ internal static class PlayerLauncher
             CreateMods = () => createMods(options.DisableMods),
             FireColorFromCommandLine = options.FireColor,
             IceColorFromCommandLine = options.IceColor,
+            RestartArguments = options.CapturePath is null && options.VideoPath is null ? path =>
+            [
+                "--player",
+                .. path is null ? Array.Empty<string>() : ["--open", path],
+                .. options.SkipAudio ? new[] { "--no-audio" } : [],
+                .. options.DisableMods ? new[] { "--no-mods" } : [],
+                .. options.FireColor is null ? Array.Empty<string>() : ["--fire-color", options.FireColor],
+                .. options.IceColor is null ? Array.Empty<string>() : ["--ice-color", options.IceColor],
+            ] : null,
         };
 
         if (options.VideoPath is { } video)
         {
             var export = new VideoExporter.Request(options.LevelPath!, video, options.Width, options.Height,
                 options.Fps, options.KeepFrames, options.Bitrate, options.Zoom, options.HidePassed, options.PreferHardware);
-            Console.WriteLine($"export queued: {export.LevelPath} -> {export.OutputPath} {export.Width}x{export.Height}@{export.Fps}");
             window.ExportRequest = export;
         }
         else

@@ -48,7 +48,8 @@ public sealed class McpMod : ISharpFaiMod, IModActivationObserver, IModSettings
         _windows = context.GetRequiredService<IToolWindowRegistry>();
         _store = context.GetRequiredService<IModSettingsStore>();
         _tools = new(context.GetRequiredService<IEditorInspection>(), context.GetRequiredService<IEditorFrameCapture>(),
-            context.GetRequiredService<IChartEdits>(), context.GetRequiredService<IPlaybackControl>());
+            context.GetRequiredService<IChartEdits>(), context.GetRequiredService<IPlaybackControl>(),
+            context.GetService<IEditorWorkflow>());
         _windows.Register(new(Window, "mcp-window", UiHost.Editor, ToolWindowKind.Floating, ToolWindowScope.Application,
             ShowInWindowMenu: false, MinimumSize: new(500, 160)), () => new StatusWindow(this));
         return ValueTask.CompletedTask;

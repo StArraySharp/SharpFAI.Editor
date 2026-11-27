@@ -429,7 +429,8 @@ internal sealed unsafe partial class EditorWindow
             PauseToPreview();
         else
         {
-            bool fromStart = (!_hasFloorSelection && !_inspectDecoration) || _rangeAnchor is not null;
+            bool fromStart = _rangeAnchor.HasValue || (_inspectDecoration
+                ? rate == PlaybackRate.Configured : !_hasFloorSelection);
             SwitchPlaybackView(SelectedPlaybackMode, rate, fromStart ? 0 : null);
         }
     }

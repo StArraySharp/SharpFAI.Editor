@@ -7,11 +7,19 @@ namespace SharpFAI.Editor;
 
 internal sealed partial class EditorWindow
 {
-    private sealed class ModEditorInspection(EditorWindow editor, ModUi ui) : IEditorInspection, IEditorFrameCapture
+    private sealed partial class ModEditorInspection : IEditorInspection, IEditorFrameCapture, IEditorWorkflow
     {
+        private readonly EditorWindow editor;
+        private readonly ModUi ui;
         private const int ScanLimit = 4096;
         private LevelRenderer.PlaybackTimeline? _timing;
         private EditorBeatClock? _clock;
+
+        internal ModEditorInspection(EditorWindow editor, ModUi ui)
+        {
+            this.editor = editor;
+            this.ui = ui;
+        }
 
         public ValueTask<ChartContext> GetChartAsync(CancellationToken token) => ui.Dispatch(() =>
         {
@@ -116,9 +124,20 @@ internal sealed partial class EditorWindow
                         field.Optional, field.Unit, field.Minimum, field.Maximum, field.Options)).ToArray());
             }, token);
 
-        public async ValueTask<ChartFrameCapture> CaptureAsync(FrameCaptureRequest request, CancellationToken token)
+        public ValueTask<ChartFrameCapture> CaptureAsync(FrameCaptureRequest request, CancellationToken token) =>
+            CaptureAsync(request, null, token);
+
+        private async ValueTask<ChartFrameCapture> CaptureAsync(FrameCaptureRequest request, ChartEditRequest? edit,
+            CancellationToken token)
         {
-            var job = await ui.Dispatch(() => editor.StartModFrameCapture(request, CheckRevision(request.Revision), token), token);
+            var job = await ui.Dispatch(() =>
+            {
+                var document = CheckRevision(request.Revision);
+                if (edit is not null)
+                    document = document.StageModEdits(edit, null, out int rejected) ??
+                        throw new ArgumentException($"Invalid proposed edit at index {rejected}.");
+                return editor.StartModFrameCapture(request, document, token);
+            }, token);
             if (job is null) throw new InvalidOperationException("The editor is closing.");
             var frame = await job.Completion.Task.WaitAsync(token);
             if (frame.Pixels is null) return new(request.Revision, request.Width, request.Height, frame.State, null);

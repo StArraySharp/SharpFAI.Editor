@@ -19,7 +19,9 @@ public sealed class ModSettingsTests
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-settings-").AsScope();
         await using var host = new ModHost(UiHost.Editor, root.Path);
-        var owner = new ModActivation(host, ModPackage.ReadArchive(PackagePath), Path.Combine(root.Path, "shadow"));
+        string folder = Path.Combine(root.Path, "fixture");
+        ZipFile.ExtractToDirectory(PackagePath, folder);
+        var owner = new ModActivation(host, ModPackage.Read(folder, development: false), Path.Combine(root.Path, "shadow"));
         try
         {
             string path = Path.Combine(root.Path, SettingsName);
@@ -50,23 +52,20 @@ public sealed class ModSettingsTests
         finally { await owner.StopAsync(); }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task DropInLoadsSidecarBeforeActivationWithoutChangingTrust(bool unpacked)
+    [Test]
+    public async Task DropInLoadsSidecarBeforeActivationWithoutChangingTrust()
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-settings-").AsScope();
         using var windowStream = new EditorWindowStream();
         string archive = Path.Combine(root.Path, PackageName);
         string settings = Path.Combine(root.Path, SettingsName);
-        if (unpacked) ZipFile.ExtractToDirectory(PackagePath, archive);
-        else File.Copy(PackagePath, archive);
+        ZipFile.ExtractToDirectory(PackagePath, archive);
         File.WriteAllText(settings, """{"AutoStart":false,"FramesPerSecond":10}""");
-        var package = unpacked ? ModPackage.Read(archive, development: false, isDropIn: true) : ModPackage.ReadArchive(archive);
+        var package = ModPackage.Read(archive, development: false, isDropIn: true);
         Assert.That(package.SettingsPath, Is.EqualTo(settings));
         await using (var host = CreateHost(root.Path, windowStream))
         {
             await host.InitializeAsync();
-            await host.EnableAsync(ModId);
             AssertStoppedWithSettings(host);
         }
 
@@ -77,7 +76,7 @@ public sealed class ModSettingsTests
     }
 
     [Test]
-    public async Task RemovingInstalledPackagePreservesSettingsBesideTheVersionDirectory()
+    public async Task RemovingInstalledPackagePreservesSettingsInModsDirectory()
     {
         using var root = Directory.CreateTempSubdirectory("sharpfai-settings-").AsScope();
         using var windowStream = new EditorWindowStream();
@@ -85,9 +84,10 @@ public sealed class ModSettingsTests
         await host.InstallAsync(PackagePath);
         string parent = Path.Combine(root.Path, "packages", ModId);
         string version = Directory.GetDirectories(parent).Single();
-        string config = Path.Combine(parent, SettingsName);
+        string config = Path.Combine(root.Path, SettingsName);
         File.WriteAllText(config, """{"AutoStart":false}""");
-        Assert.That(ModPackage.Read(version, development: false).SettingsPath, Is.EqualTo(config));
+        Assert.That(ModPackage.Read(version, development: false, settingsDirectory: root.Path).SettingsPath, Is.EqualTo(config));
+        Assert.That(File.Exists(Path.Combine(version, "SharpFAI.WebMirror.dll")), Is.True);
         await host.EnableAsync(ModId);
         AssertStoppedWithSettings(host);
         await host.RemoveAsync(ModId);

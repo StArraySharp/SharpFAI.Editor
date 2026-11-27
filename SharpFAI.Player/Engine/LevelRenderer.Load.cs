@@ -194,7 +194,7 @@ public sealed unsafe partial class LevelRenderer
         token.ThrowIfCancellationRequested();
         MarkPhase("计算时间轴");
         PlaybackEvent[] events = PlaybackEventBinder.BindForEditor(level, token);
-        PlaybackTimeline timeline = BuildTimeline(level, floors, events, coreEvents);
+        PlaybackTimeline timeline = BuildTimeline(level, floors, events, coreEvents, editor: editorSnapshot);
         var preparedData = RunChartProcessors(SharpFAI.ModApi.ChartPreparationStage.PrepareBoundData, level, timeline.EntryTimes, token);
         var modEffects = CompileModEffects(level, timeline.EntryTimes, timeline.FloorBpms, preparedData, token);
         var (floorPositionRemainders, trackStates, runtimeStates) = PlacePlaybackFloors(level, settings, events, floors, timeline, token);
@@ -470,16 +470,10 @@ public sealed unsafe partial class LevelRenderer
         _selectedFloor = -1;
 
         _lastLoadTimings = result.Timings;
-        _lastLoadTotalMs = 0.0;
-        foreach ((string _, double milliseconds) in _lastLoadTimings)
-        {
-            _lastLoadTotalMs += milliseconds;
-        }
-
         _status = $"{Path.GetFileName(result.Path)} — {result.Floors.Count:N0} 块地板";
-        _loadPhase = string.Empty;
-        _loadStartedAt = 0.0;
         BeginLevelEffectWarmup();
+        if (!_preparingLevelEffects)
+            FinishLoadTiming();
     }
 
     private void BeginLevelEffectWarmup()
@@ -510,10 +504,7 @@ public sealed unsafe partial class LevelRenderer
         _preparingLevelEffects = _shaderPrewarm is not null || _imageDecorations is { Items.Count: > 0 } ||
             _componentPrewarm.Count > 0 || _backgroundPrewarm.Count > 0 || !_schedulesPrewarmed || !_scenePrewarmed;
         if (_preparingLevelEffects)
-        {
             _loadPhase = "准备渲染资源";
-            _loadStartedAt = _clock.Elapsed.TotalSeconds;
-        }
     }
 
     private void ReserveLargeTextureWarmup()
@@ -762,6 +753,13 @@ public sealed unsafe partial class LevelRenderer
         _textureWarmupOrder = [];
         _imageDecorations?.PixelCache.DrainWarnings(_warnings);
         _preparingLevelEffects = false;
+        FinishLoadTiming();
+    }
+
+    private void FinishLoadTiming()
+    {
+        _lastLoadTotalMs = LoadElapsed * 1000.0;
+        _status += $" · 加载共 {_lastLoadTotalMs / 1000:F2} 秒";
         _loadPhase = string.Empty;
         _loadStartedAt = 0.0;
     }
@@ -782,17 +780,18 @@ public sealed unsafe partial class LevelRenderer
         _loadCts?.Dispose();
         _loadCts = null;
         _loadPhase = string.Empty;
-        _loadStartedAt = 0.0;
         bool keptScene = _keepSceneDuringLoad;
         _keepSceneDuringLoad = false;
 
         if (task.IsCanceled)
         {
+            _loadStartedAt = 0;
             return;
         }
 
         if (task.IsFaulted)
         {
+            _loadStartedAt = 0;
             Exception ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("加载失败");
             _loadError = ex.Message;
             _status = $"加载失败: {ex.Message}";
@@ -810,6 +809,7 @@ public sealed unsafe partial class LevelRenderer
         }
         catch (Exception ex)
         {
+            _loadStartedAt = 0;
             _loadError = ex.Message;
             _status = $"加载失败: {ex.Message}";
             _warnings.Add(ex.ToString());

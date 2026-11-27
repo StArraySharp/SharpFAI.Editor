@@ -72,6 +72,7 @@ internal sealed partial class EditorDocument
     public JObject Settings { get; }
     public EditorTimeSignatures TimeSignatures { get; private set; }
     public JArray Decorations => _decorations;
+    internal IEnumerable<JToken> ActionTokens => _actions;
     public int LastFloor => _angles.Count;
     public bool IsLargeChart => LastFloor >= 10_000 || _actions.Count + _decorations.Count >= 10_000;
     public double IncomingAngle(int floor)
@@ -543,16 +544,16 @@ internal sealed partial class EditorDocument
         Refresh(edit);
     }
 
-    public void Save(string path)
+    public void Save(string path, bool overwrite = true)
     {
         string destination = System.IO.Path.GetFullPath(path);
         string sourceDirectory = System.IO.Path.GetDirectoryName(PlaybackPath)!;
         string destinationDirectory = System.IO.Path.GetDirectoryName(destination)!;
         if (string.Equals(sourceDirectory, destinationDirectory, OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-            EditorFileStorage.WriteChart(destination, _level.root, overwrite: true);
+            EditorFileStorage.WriteChart(destination, _level.root, overwrite);
         else
-            EditorFileStorage.SaveChartWithAssets(destination, _level, sourceDirectory);
+            EditorFileStorage.SaveChartWithAssets(destination, _level, sourceDirectory, overwrite);
         Path = destination;
         _savedRevision = _revision;
     }

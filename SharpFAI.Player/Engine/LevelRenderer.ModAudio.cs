@@ -55,7 +55,8 @@ public sealed partial class LevelRenderer
         _modAudio = null;
     }
 
-    internal DecodedAudio? RenderOfflineModMix(DecodedAudio? music, DecodedAudio? hitsounds, double seconds)
+    internal DecodedAudio? RenderOfflineModMix(DecodedAudio? music, DecodedAudio? hitsounds, double seconds,
+        double musicStart, double hitsoundStart, double preroll)
     {
         var effects = Mods?.Entries<RealtimeAudioHook>(UiHost.Export);
         if (effects is not { Count: > 0 }) return null;
@@ -64,12 +65,25 @@ public sealed partial class LevelRenderer
         var bytes = new byte[checked(frames * format.Channels * sizeof(short))];
         var samples = MemoryMarshal.Cast<byte, short>(bytes.AsSpan());
         var gains = new ModMixGains(MusicVolumeExport, HitsoundVolumeExport);
-        using var mixer = new RealtimeModMixer(effects, new(music, hitsounds, PlaybackRate, 1, 0, 0),
-            0, offline: true);
+        long startFrame = (long)(hitsoundStart * format.SampleRate);
+        long warmupStart = Math.Max(0, startFrame - (long)(preroll * format.SampleRate));
+        double clockStart = startFrame / (double)format.SampleRate;
+        using var mixer = new RealtimeModMixer(effects,
+            new(music, hitsounds, PlaybackRate, 1, musicStart - clockStart * PlaybackRate, hitsoundStart - clockStart),
+            warmupStart, offline: true);
+        if (warmupStart < startFrame)
+        {
+            Span<short> scratch = stackalloc short[RealtimeModMixer.BlockFrames * format.Channels];
+            for (long first = warmupStart; first < startFrame; first += RealtimeModMixer.BlockFrames)
+            {
+                int count = (int)Math.Min(RealtimeModMixer.BlockFrames, startFrame - first);
+                mixer.Render(first, scratch[..(count * format.Channels)], gains);
+            }
+        }
         for (int first = 0; first < frames; first += RealtimeModMixer.BlockFrames)
         {
             int count = Math.Min(RealtimeModMixer.BlockFrames, frames - first);
-            mixer.Render(first, samples.Slice(first * format.Channels, count * format.Channels), gains);
+            mixer.Render(startFrame + first, samples.Slice(first * format.Channels, count * format.Channels), gains);
         }
         return new DecodedAudio { Pcm = bytes, SampleRate = format.SampleRate, Channels = format.Channels };
     }

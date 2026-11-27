@@ -27,7 +27,8 @@ $publishArguments = @(
     '-p:IncludeNativeLibrariesForSelfExtract=true',
     '-p:EnableCompressionInSingleFile=true',
     '-p:PublishTrimmed=false',
-    '-p:DebugType=embedded',
+    '-p:DebugType=none',
+    '-p:DebugSymbols=false',
     '-p:GeneratePackageOnBuild=false',
     '-p:EnableSingleFileAnalyzer=false',
     '-p:UseArtifactsOutput=true',
@@ -84,7 +85,7 @@ function Publish-ModPackages {
 
     foreach ($name in $modNames) {
         $project = Join-Path $PSScriptRoot "mods/$name/$name.csproj"
-        $buildArguments = @('--configuration', 'Release', '--artifacts-path', $modArtifacts, '--nologo')
+        $buildArguments = @('--configuration', 'Release', '--artifacts-path', $modArtifacts, '--nologo', '-p:DebugType=none', '-p:DebugSymbols=false')
         if ($Source) {
             $restoreArguments = @('--artifacts-path', $modArtifacts)
             foreach ($packageSource in $Source) {
@@ -106,7 +107,16 @@ function Publish-ModPackages {
         $publishedPackage = Join-Path $modOutput $fileName
         Copy-Item -LiteralPath $stagedPackage -Destination $publishedPackage -Force
         Write-Host "Published $publishedPackage"
-        [pscustomobject]@{ Path = $publishedPackage; FileName = "Mods/$fileName" }
+
+        $stagedDirectory = Join-Path $modArtifacts "bin/$name/release/package/$fileName"
+        $publishedDirectory = Join-Path $modOutput $name
+        Get-ChildItem -LiteralPath $stagedDirectory -File -Recurse | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($stagedDirectory, $_.FullName)
+            $publishedFile = Join-Path $publishedDirectory $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $publishedFile) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $publishedFile -Force
+            [pscustomobject]@{ Path = $publishedFile; FileName = "Mods/$name/$($relative.Replace('\', '/'))" }
+        }
     }
 }
 

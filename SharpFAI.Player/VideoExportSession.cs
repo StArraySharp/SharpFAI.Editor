@@ -48,6 +48,8 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
     private int _exportWidth;
     private int _exportHeight;
     private int _exportFps;
+    private VideoExportTiming _exportTiming;
+    private int _prerollRemaining;
 
     /// <summary>
     /// 推进至多 <paramref name="budget"/> 帧。渲染与编码都在这里完成，调用方负责绘制 UI。
@@ -91,9 +93,17 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         long batchStart = Stopwatch.GetTimestamp();
         while (budget-- > 0 && _exportFrame < _exportFrameCount && !writer.Failed)
         {
+            if (_prerollRemaining > 0)
+            {
+                RenderToOffscreen(_exportWidth, _exportHeight, _exportTiming.TimeAt(-_prerollRemaining));
+                _prerollRemaining--;
+                if (_interactive && Stopwatch.GetElapsedTime(batchStart).TotalMilliseconds >= 12.0)
+                    break;
+                continue;
+            }
             // 画面与音频共用同一个时钟：第 n 帧就是 n / fps 秒
             // Picture and audio share one clock: frame n is exactly n / fps seconds
-            double time = _exportFrame / (double)_exportFps * _renderer.PlaybackRate;
+            double time = _exportTiming.TimeAt(_exportFrame);
 
             RenderToOffscreen(_exportWidth, _exportHeight, time);
 
@@ -136,8 +146,16 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             _renderer.AudioSources;
 
         double seconds = _exportFrameCount / (double)_exportFps;
+        double musicStart = _exportTiming.Start;
+        double hitsoundStart = musicStart / _renderer.PlaybackRate;
+        double audioWarmup = (_exportTiming.Start - _exportTiming.TimeAt(-_exportTiming.PrerollFrames)) / _renderer.PlaybackRate;
         if (music is null && musicPath is not null && File.Exists(musicPath) && !VideoExporter.IsVideoPath(musicPath))
-            music = VideoExporter.DecodeExportAudio(ffmpeg, musicPath, seconds * _renderer.PlaybackRate);
+        {
+            double lead = audioWarmup * _renderer.PlaybackRate;
+            music = VideoExporter.DecodeExportAudio(ffmpeg, musicPath, seconds * _renderer.PlaybackRate + lead,
+                Math.Max(0, musicStart - lead));
+            musicStart = lead;
+        }
 
         if (music is not null || hitsound is not null)
         {
@@ -154,7 +172,8 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
                 hitsoundRate: 1.0, processMix: _renderer.Mods?.Entries<AudioHook>(UiHost.Export)
                     .Any(entry => entry.Value.Bus == AudioBus.Mix) == true
                     ? audio => _renderer.ProcessModAudio(audio, AudioBus.Mix, CancellationToken.None, UiHost.Export)! : null,
-                realtimeMix: _renderer.RenderOfflineModMix(music, hitsound, seconds));
+                realtimeMix: _renderer.RenderOfflineModMix(music, hitsound, seconds, musicStart, hitsoundStart, audioWarmup),
+                musicStart: musicStart, hitsoundStart: hitsoundStart);
 
             return path;
         }
@@ -264,7 +283,8 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         double ElapsedSeconds,
         string? OutputPath,
         string? Error,
-        bool Cancelled)
+        bool Cancelled,
+        int PrerollRemaining)
     {
         /// <summary>完成比例 0..1。</summary>
         public double Progress => FrameCount > 0 ? Math.Clamp(Frame / (double)FrameCount, 0.0, 1.0) : 0.0;
@@ -298,7 +318,8 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
         _exportStartedAt > 0.0 ? _clock.Elapsed.TotalSeconds - _exportStartedAt : 0.0,
         _exportOutputPath,
         _lastExportError,
-        _cancelled);
+        _cancelled,
+        _prerollRemaining);
 
     public void Start(VideoExporter.Request request, bool interactive)
     {
@@ -307,6 +328,7 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
 
         _exportFrame = 0;
         _exportFrameCount = 0;
+        _prerollRemaining = 0;
         _exportStartedAt = 0.0;
         _exportArmed = false;
         _lastExportError = null;
@@ -352,14 +374,11 @@ internal sealed class VideoExportSession(LevelRenderer renderer) : IDisposable
             throw new InvalidOperationException($"设备无法渲染 {_exportWidth}×{_exportHeight} 的视频");
         }
 
-        // 帧数按关卡总时长向上取整，保证最后一拍也被画到
-        // Frame count rounds the level duration up so the final beat is drawn too
-        _exportFrameCount = (int)Math.Ceiling(_renderer.ExportDuration / _renderer.PlaybackRate * _exportFps);
-
-        if (_exportFrameCount <= 0)
-        {
-            _exportFrameCount = 1;
-        }
+        _exportTiming = VideoExportTiming.Create(request.Range,
+            request.Range.HasValue ? _renderer.Duration : _renderer.ExportDuration,
+            _renderer.PlaybackRate, _exportFps, request.PrerollSeconds);
+        _exportFrameCount = _exportTiming.FrameCount;
+        _prerollRemaining = _exportTiming.PrerollFrames;
 
         string frameDirectory = Path.Combine(
             Path.GetDirectoryName(Path.GetFullPath(request.OutputPath)) ?? ".",

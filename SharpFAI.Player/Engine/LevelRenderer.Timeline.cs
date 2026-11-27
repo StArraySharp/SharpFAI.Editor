@@ -39,7 +39,7 @@ public sealed unsafe partial class LevelRenderer
     /// The music, the hitsound and every visual share this single clock, so they cannot drift apart.
     /// </summary>
     internal static PlaybackTimeline BuildTimeline(Level level, List<Floor> floors, IReadOnlyList<PlaybackEvent>? events = null,
-        FloorCoreEvents? coreEvents = null)
+        FloorCoreEvents? coreEvents = null, bool editor = false)
     {
         if (floors.Count == 0)
         {
@@ -48,7 +48,9 @@ public sealed unsafe partial class LevelRenderer
 
         // The chart clock includes the countdown and the actual initial sweep. The same timing
         // data carries Pause / Hold extra beats for the later sweeps.
-        List<FloorTimingCalculator.FloorData> timing = coreEvents is null
+        Dictionary<int, FloorTimingCalculator.SpeedContext>? speedContexts = editor ? [] : null;
+        List<FloorTimingCalculator.FloorData> timing = speedContexts is not null
+            ? FloorTimingCalculator.Calculate(level, coreEvents, speedContexts) : coreEvents is null
             ? FloorTimingCalculator.Calculate(level) : FloorTimingCalculator.Calculate(level, coreEvents);
         events ??= PlaybackEventBinder.BindForPlayback(level);
         PlanetTrackFloor[] planetTrack = PlanetTrackFloor.Resolve(timing, events);
@@ -194,6 +196,7 @@ public sealed unsafe partial class LevelRenderer
         {
             EntryTimes = entryTimes,
             FloorBpms = floorBpms,
+            SpeedContexts = speedContexts,
             SweepStart = sweepStart,
             SweepDelta = sweepDelta,
             PlanetTrack = planetTrack,
@@ -209,7 +212,7 @@ public sealed unsafe partial class LevelRenderer
         };
     }
 
-    private static double ReadPlaybackPitch(Newtonsoft.Json.Linq.JObject? settings)
+    internal static double ReadPlaybackPitch(Newtonsoft.Json.Linq.JObject? settings)
     {
         double pitch = LevelPlaybackSettings.Setting(settings, "pitch", 100.0) / 100.0;
         return pitch > 1e-6 && double.IsFinite(pitch) ? pitch : 1.0;

@@ -1,6 +1,8 @@
 using Newtonsoft.Json.Linq;
 using SharpFAI.Player.Engine;
 using SharpFAI.Player.Engine.Audio;
+using SharpFAI.Player.Engine.Events;
+using SharpFAI.Player.Engine.Play;
 using SharpFAI.Framework;
 using SharpFAI.Serialization;
 using SharpFAI.Util;
@@ -49,6 +51,42 @@ public class TestOpeningTimeline
         Assert.That(timeline.EntryTimes[1], Is.EqualTo(-.15).Within(1e-7));
         Assert.That(timeline.EntryTimes[2], Is.EqualTo(.60).Within(1e-7));
         Assert.That(HitsoundSynth.HitsoundTimes(timeline.EntryTimes)[0], Is.EqualTo(.60).Within(1e-7));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void OpeningTileTempoExcludesTheCountdownAndUsesPlaybackSpeed(bool separateCountdown)
+    {
+        Level level = Chart(90, offset: 750, separateCountdown);
+        var floors = level.CreateFloors();
+        var track = new ManualTrack(floors, LevelRenderer.BuildTimeline(level, floors), []);
+        var tempo = track.TempoAt(0)!.Value;
+        Assert.That(tempo.Authored, Is.EqualTo(120));
+        Assert.That(tempo.Effective, Is.EqualTo(360).Within(.0001));
+    }
+
+    [Test]
+    public void TileTempoUsesChartSpeedAndTheTimeToTheNextTile()
+    {
+        Level level = new(new Dictionary<string, object>
+        {
+            ["angleData"] = new JArray(0, 90, 90, 999, 90, 90),
+            ["settings"] = new JObject { ["bpm"] = 120, ["pitch"] = 50, ["countdownTicks"] = 1 },
+            ["actions"] = new JArray(
+                JObject.Parse("""{"floor":1,"eventType":"SetSpeed","speedType":"Bpm","beatsPerMinute":180}"""),
+                JObject.Parse("""{"floor":2,"eventType":"Pause","duration":1}""")),
+        });
+        var events = PlaybackEventBinder.BindForPlayback(level);
+        var floors = level.CreateFloors();
+        var track = new ManualTrack(floors, LevelRenderer.BuildTimeline(level, floors, events), events);
+
+        var corner = track.TempoAt(1)!.Value;
+        Assert.That(corner.Authored, Is.EqualTo(180));
+        Assert.That(corner.Effective, Is.EqualTo(180).Within(1e-6));
+        Assert.That(track.TempoAt(2)!.Value.Effective, Is.EqualTo(45).Within(1e-6));
+        Assert.That(track.TempoAt(3)!.Value.Effective, Is.Null);
+        Assert.That(track.TempoAt(track.LastFloor)!.Value.Effective, Is.Null);
+        Assert.That(track.TempoAt(-1), Is.Null);
     }
 
     private static Level Chart(int angle, int offset, bool separateCountdown) => new(new Dictionary<string, object>

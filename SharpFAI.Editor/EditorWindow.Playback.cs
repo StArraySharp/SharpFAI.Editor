@@ -21,6 +21,10 @@ internal sealed unsafe partial class EditorWindow
         bool InspectDecoration, JObject? Decoration, JObject[] Decorations);
 
     private readonly Stopwatch _playbackClock = Stopwatch.StartNew();
+    private long _documentLoadStarted = Stopwatch.GetTimestamp();
+    private double _documentLoadSeconds;
+    internal long InitialDocumentLoadStarted { init => _documentLoadStarted = value; }
+    private readonly PlaybackPerformanceWindow _playbackPerformance = new(L.T);
     private LevelRenderer? _playback;
     private PlaybackView _playbackView;
     private PlaybackRevision? _requestedRevision;
@@ -75,6 +79,8 @@ internal sealed unsafe partial class EditorWindow
             return;
         }
         PlaybackView previous = _playbackView;
+        EndTimelineRangePreview();
+        StopPlaybackLoop();
         _playbackView = view;
         if (view != PlaybackView.Edit) _playback?.ClearEditorInsertedTrack();
         _startPlayback = view is PlaybackView.Auto or PlaybackView.Manual;
@@ -127,10 +133,10 @@ internal sealed unsafe partial class EditorWindow
             if (_playback is { Level: not null } editRenderer)
                 _savedEditCamera = (editRenderer.Camera.Position, editRenderer.Camera.Zoom);
         }
-        if (_startPlayback && rate == PlaybackRate.Configured && (!_hasFloorSelection || _inspectDecoration))
-            _playbackFloor = 0;
-        else if (_startPlayback && startFloor is int floor)
+        if (_startPlayback && startFloor is int floor)
             _playbackFloor = floor;
+        else if (_startPlayback && rate == PlaybackRate.Configured && (!_hasFloorSelection || _inspectDecoration))
+            _playbackFloor = 0;
         else if (previous == PlaybackView.Edit || view == PlaybackView.Preview)
             _playbackFloor = _floor;
         else if (view == PlaybackView.Manual && _playbackFloor is null && HasCurrentPlayback)
@@ -148,10 +154,31 @@ internal sealed unsafe partial class EditorWindow
 
     private void PauseToPreview()
     {
+        StopPlaybackLoop();
         _startPlayback = false;
         _playback?.Pause();
         _playback?.SetManualPlay(false);
         _playbackView = PlaybackView.Preview;
+    }
+
+    private void StopPlaybackLoop()
+    {
+        _loopingSelection = null;
+        if (_playback is { } renderer)
+            renderer.PlaybackLoop = null;
+    }
+
+    private void SeekPerformanceSample(PlaybackPerformance.Sample sample)
+    {
+        if (!HasCurrentPlayback || _playback is not { } renderer)
+            return;
+        bool editing = _playbackView == PlaybackView.Edit;
+        SeekTimeline(renderer, sample.Time, editing, -1);
+        if (!editing)
+        {
+            SelectFloor(sample.Floor, false);
+            _playbackFloor = null;
+        }
     }
 
     private void UpdatePlayback()
@@ -263,6 +290,11 @@ internal sealed unsafe partial class EditorWindow
     PlaybackReady:
         if (!HasCurrentPlayback)
             return;
+        if (_documentLoadStarted != 0)
+        {
+            _documentLoadSeconds = Stopwatch.GetElapsedTime(_documentLoadStarted).TotalSeconds;
+            _documentLoadStarted = 0;
+        }
 
         if (_playbackFloor is int requestedFloor)
         {
@@ -286,11 +318,19 @@ internal sealed unsafe partial class EditorWindow
             bool manual = _playbackView == PlaybackView.Manual;
             renderer.PlaySession.NoFail = _noFail;
             renderer.SetManualPlay(manual);
+            if (_loopingSelection is { } loop)
+            {
+                renderer.PlaybackLoop = loop;
+                renderer.Seek(loop.Start);
+            }
             if (!renderer.IsPlaying)
                 renderer.Play();
         }
         else if (_playbackView == PlaybackView.Auto && !renderer.IsPlaying)
+        {
+            StopPlaybackLoop();
             _playbackView = PlaybackView.Preview;
+        }
     }
 
     private void FeedEditorWheel(ImGuiIO* io, float x, float y, bool ctrl, bool shift)
@@ -449,6 +489,9 @@ internal sealed unsafe partial class EditorWindow
         }
     }
 
+    private static string PlaybackLoadingStatus(LevelRenderer? renderer) => renderer?.LoadError ??
+        (renderer?.IsLoading == true ? L.F("SyncStage", L.LoadPhase(renderer.LoadPhase)) : L.T("Syncing"));
+
     private bool DrawPlaybackCanvasToolbar(bool ready, LevelRenderer? renderer)
     {
         if (ImGui.Button(L.T("ReturnToEdit"), default) != 0)
@@ -467,17 +510,26 @@ internal sealed unsafe partial class EditorWindow
         ImGui.SameLine();
         if (!ready || renderer is null)
         {
-            string status = renderer?.LoadError ?? (renderer?.IsLoading == true ? L.F("SyncStage", L.LoadPhase(renderer.LoadPhase)) : L.T("Syncing"));
+            string status = PlaybackLoadingStatus(renderer);
             ImGui.TextUnformatted(status);
         }
         else
         {
-            ImGui.TextUnformatted($"{renderer.CurrentIndex:N0} / {renderer.FloorCount - 1:N0}   {renderer.PlayTime:F3} s");
+            string position = $"{renderer.CurrentIndex:N0} / {renderer.FloorCount - 1:N0}   {renderer.PlayTime:F3} s";
+            if (_documentLoadSeconds > 0) position += " · " + L.F("LoadCompletedTime", _documentLoadSeconds);
+            ImGui.TextUnformatted(position);
+            if (renderer.CurrentFloorTempo is { } tempo)
+            {
+                string bpm = L.F("PlaybackTileBpm", tempo.Authored, tempo.Effective is double effective ? effective : "—");
+                ContinueToolbar(ImGui.CalcTextSize(bpm).x);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextWrapped(bpm);
+                WidgetDraw.ItemTooltip(L.T("PlaybackTileBpmHelp"));
+            }
             if (_playbackView == PlaybackView.Manual)
             {
-                ImGui.SameLine();
                 bool noFail = _noFail;
-                if (Toggle(L.T("NoFail"), ref noFail))
+                if (ToolbarCheckbox("NoFail", ref noFail))
                     SetNoFail(noFail);
             }
             else if (!_showTimeline)
@@ -756,6 +808,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void DisposePlayback()
     {
+        CancelTimelineWaveform();
         _playback?.Dispose();
         if (_playbackFbo != 0)
             GL.DeleteFramebuffer(_playbackFbo);

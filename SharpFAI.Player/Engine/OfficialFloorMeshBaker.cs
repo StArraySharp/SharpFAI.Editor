@@ -154,7 +154,6 @@ internal static unsafe class OfficialFloorMeshBaker
         cache ??= new BakeCache();
         Vector3 min = new(float.PositiveInfinity);
         Vector3 max = new(float.NegativeInfinity);
-        System.Diagnostics.Debug.Assert(sizeof(FloorVertex) == Layout.Stride);
         int vertexCapacity = 0, indexCapacity = 0, instanceCapacity = 0;
         if (floorIndices is not null || shapes is not null)
         {

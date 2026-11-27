@@ -95,6 +95,9 @@ internal sealed unsafe class LevelPanel
             return;
         }
 
+        if (renderer.LoadTotalMilliseconds > 0)
+            ImGui.TextUnformatted($"加载完成 · 共 {renderer.LoadTotalMilliseconds / 1000:F2} 秒");
+
         DrawPlayback(renderer);
         DrawManualPlay(renderer);
         DrawAudio(renderer, calibration);
@@ -189,7 +192,7 @@ internal sealed unsafe class LevelPanel
         ImGui.PopTextWrapPos();
 
         if (renderer.IsPlaying && session.TargetFloor >= 0)
-            ImGui.TextUnformatted($"{(session.Holding ? "长按中" : "下一块")} #{session.TargetFloor:N0} · BPM {renderer.BpmTimesSpeed:0.#}");
+            ImGui.TextUnformatted($"{(session.Holding ? "长按中" : "下一块")} #{session.TargetFloor:N0}");
         else if (session.Completed)
             ImGui.TextUnformatted("手打完成，按 Enter 重玩");
         else if (!session.Failed)

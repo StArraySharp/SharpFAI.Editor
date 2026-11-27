@@ -9,7 +9,8 @@ using SharpFAI.Player.ModSupport;
 
 namespace SharpFAI.Editor.Mods;
 
-internal sealed record ModPackage(ModManifest Manifest, string Root, bool Development, bool IsDropIn = false, bool IsArchive = false)
+internal sealed record ModPackage(ModManifest Manifest, string Root, bool Development, bool IsDropIn = false,
+    string? SettingsDirectory = null)
 {
     internal string SettingsPath
     {
@@ -20,7 +21,7 @@ internal sealed record ModPackage(ModManifest Manifest, string Root, bool Develo
                 ? Path.GetFileName(package) : Path.GetFileNameWithoutExtension(Manifest.EntryAssembly.Replace('\\', '/'));
             if (name.EndsWith(".sharpfaimod", StringComparison.OrdinalIgnoreCase))
                 name = name[..^".sharpfaimod".Length];
-            return Path.Combine(Path.GetDirectoryName(package) ?? package, name + ".Settings.json");
+            return Path.Combine(SettingsDirectory ?? Path.GetDirectoryName(package) ?? package, name + ".Settings.json");
         }
     }
 
@@ -29,7 +30,8 @@ internal sealed record ModPackage(ModManifest Manifest, string Root, bool Develo
     private static readonly Regex IdFormat = new(@"^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+$", RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly string ApiVersion = typeof(ISharpFaiMod).Assembly.GetName().Version!.ToString(3);
-    internal static ModPackage Read(string directory, bool development, string? manifestPath = null, bool isDropIn = false)
+    internal static ModPackage Read(string directory, bool development, string? manifestPath = null, bool isDropIn = false,
+        string? settingsDirectory = null)
     {
         var candidates = Directory.EnumerateFiles(directory, "*.json")
             .Where(path => File.Exists(Path.ChangeExtension(path, ".dll"))).Take(2).ToArray();
@@ -44,31 +46,7 @@ internal sealed record ModPackage(ModManifest Manifest, string Root, bool Develo
         var manifest = ReadManifest(input.ReadToEnd(), candidates.Length == 1 ? Path.GetFileName(Path.ChangeExtension(file, ".dll")) : null);
         if (!File.Exists(Resolve(directory, manifest.EntryAssembly)))
             throw new InvalidDataException("The Mod entry assembly was not found.");
-        return new(manifest, directory, development, IsDropIn: isDropIn);
-    }
-
-    internal static ModPackage ReadArchive(string path)
-    {
-        using var archive = ZipFile.OpenRead(path);
-        if (archive.Entries.Count > MaximumFiles)
-            throw new InvalidDataException("Too many package entries.");
-        var files = archive.Entries.Where(entry => entry.Name.Length != 0)
-            .ToDictionary(entry => entry.FullName.Replace('\\', '/'), OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        var candidates = files.Keys.Where(name => !name.Contains('/') && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
-            files.ContainsKey(Path.ChangeExtension(name, ".dll"))).Take(2).ToArray();
-        if (candidates.Length > 1) throw new InvalidDataException("Multiple DLL/JSON pairs in the Mod root.");
-        if (!files.TryGetValue(candidates.SingleOrDefault() ?? "mod.json", out var entry))
-            throw new InvalidDataException("The Mod manifest is missing.");
-        if (entry.Length > 128 * 1024)
-            throw new InvalidDataException("The Mod manifest is too large.");
-        using var content = new MemoryStream();
-        using (var input = entry.Open()) Copy(input, content, entry.Length);
-        content.Position = 0;
-        using var reader = new StreamReader(content);
-        var manifest = ReadManifest(reader.ReadToEnd(), candidates.Length == 1 ? Path.ChangeExtension(candidates[0], ".dll") : null);
-        if (!files.ContainsKey(manifest.EntryAssembly.Replace('\\', '/')))
-            throw new InvalidDataException("The Mod entry assembly was not found.");
-        return new(manifest, path, Development: false, IsDropIn: true, IsArchive: true);
+        return new(manifest, directory, development, IsDropIn: isDropIn, SettingsDirectory: settingsDirectory);
     }
 
     private static ModManifest ReadManifest(string json, string? entryAssembly)
@@ -140,23 +118,15 @@ internal sealed record ModPackage(ModManifest Manifest, string Root, bool Develo
 
     internal string HashAndCopy(string? target = null)
     {
-        string sourceRoot = Root;
-        if (IsArchive)
-        {
-            ArgumentNullException.ThrowIfNull(target);
-            Extract(Root, target);
-            sourceRoot = target;
-            target = null;
-        }
         var paths = new List<string>();
-        Visit(new DirectoryInfo(sourceRoot), 0);
+        Visit(new DirectoryInfo(Root), 0);
         paths.Sort(StringComparer.Ordinal);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         byte[] buffer = new byte[64 * 1024];
         long total = 0;
         foreach (string file in paths)
         {
-            string relative = Path.GetRelativePath(sourceRoot, file).Replace('\\', '/');
+            string relative = Path.GetRelativePath(Root, file).Replace('\\', '/');
             using var source = File.OpenRead(file);
             long length = source.Length;
             if ((total += length) > MaximumBytes)

@@ -17,10 +17,6 @@ public sealed class FloorMesh
     private const float Angle45 = MathF.PI / 4f;
     private const float Angle90 = MathF.PI / 2f;
     private const float Angle120 = MathF.PI * 2f / 3f;
-    private const float Angle180 = MathF.PI;
-    private const float Angle250 = 4.363323f;
-    private const float Angle270 = 4.712389f;
-    private const float Angle360 = MathF.PI * 2f;
     private const float AngleEpsilon = 0.0001f;
     private const float RayEpsilon = 0.01f;
     private const float ShadowWidth = 0.11f;

@@ -23,8 +23,37 @@
   <data name="VideoRenderCancelled" xml:space="preserve"><value>Render cancelled</value></data>
   <data name="VideoRenderOutput" xml:space="preserve"><value>Exported to {0}</value></data>
   <data name="VideoRenderSaveFirst" xml:space="preserve"><value>Save the chart once to set its asset and export folder.</value></data>
+  <data name="VideoRenderRange" xml:space="preserve"><value>Selection {0} – {1}</value></data>
+  <data name="VideoRenderRangeChanged" xml:space="preserve"><value>Open the export window again for the current chart.</value></data>
+  <data name="VideoRenderPreroll" xml:space="preserve"><value>Preroll (s)</value></data>
+  <data name="VideoRenderPrerollProgress" xml:space="preserve"><value>Rendering preroll…</value></data>
+  <data name="TimelineRangeHelp" xml:space="preserve"><value>Ctrl-drag on the timeline to set A–B.</value></data>
+  <data name="TimelineFloorRangeHelp" xml:space="preserve"><value>Shift-click or Shift-drag to select a tile range.</value></data>
+  <data name="TimelineRangeFromTiles" xml:space="preserve"><value>Set A–B from selected tiles</value></data>
+  <data name="TimelineClearRange" xml:space="preserve"><value>Clear A–B</value></data>
+  <data name="TimelineLoopRange" xml:space="preserve"><value>Loop A–B</value></data>
+  <data name="TimelineStopLoop" xml:space="preserve"><value>Stop loop</value></data>
+  <data name="TimelineExportRange" xml:space="preserve"><value>Export A–B</value></data>
+  <data name="PlaybackPerformance" xml:space="preserve"><value>Playback Performance</value></data>
+  <data name="AudioMonitor" xml:space="preserve"><value>Live Spectrum</value></data>
+  <data name="AudioMonitorNoMusic" xml:space="preserve"><value>A chart with loaded music is required.</value></data>
+  <data name="AudioMonitorPeakCount" xml:space="preserve"><value>Peak labels</value></data>
+  <data name="PerformanceFreeze" xml:space="preserve"><value>Freeze capture</value></data>
+  <data name="PerformanceClear" xml:space="preserve"><value>Clear</value></data>
+  <data name="PerformanceEmpty" xml:space="preserve"><value>Play the chart to record window frame intervals.</value></data>
+  <data name="PerformanceStats" xml:space="preserve"><value>Window frame interval · {0:N0} frames · P95 {1:0.00} ms · P99 {2:0.00} ms · Max {3:0.00} ms</value></data>
+  <data name="PerformanceSample" xml:space="preserve"><value>{0} · Tile #{1} · {2:0.00} ms · Scroll to zoom · Click to seek</value></data>
+  <data name="PerformanceStages" xml:space="preserve"><value>CPU time (ms)   Decoration texture uploads {0:0.00}   Decode wait {1:0.00}   Particle prep {2:0.00}   Native filters {3:0.00}</value></data>
   <data name="MenuTools" xml:space="preserve"><value>Tools</value></data>
   <data name="MenuHelp" xml:space="preserve"><value>Help</value></data>
+  <data name="CheckForUpdates" xml:space="preserve"><value>Check for Updates…</value></data>
+  <data name="LoadCompletedTime" xml:space="preserve"><value>Loaded in {0:F2} s</value></data>
+  <data name="PlaybackTileBpm" xml:space="preserve"><value>Tile BPM {0:G6} · Effective BPM {1:G6}</value></data>
+  <data name="PlaybackTileBpmHelp" xml:space="preserve"><value>Effective BPM is 60 divided by the playback time in seconds from this tile to the next, excluding the starting countdown.</value></data>
+  <data name="SetSpeedEffectiveBpm" xml:space="preserve"><value>Effective BPM</value></data>
+  <data name="SetSpeedEffectiveBpmHelp" xml:space="preserve"><value>Enter the target effective BPM at the chart's pitch to update this event's BPM or multiplier.</value></data>
+  <data name="SetSpeedEffectiveBpmInvalid" xml:space="preserve"><value>Enter a positive BPM that this event can reach with its current angle offset and speed mode.</value></data>
+  <data name="SetSpeedEffectiveBpmUnavailable" xml:space="preserve"><value>Available once the current tile has an interval to the next tile and chart timing has loaded.</value></data>
   <data name="Language" xml:space="preserve"><value>Language</value></data>
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="Settings" xml:space="preserve"><value>Level settings</value></data>
@@ -115,6 +144,7 @@
   <data name="EventEnabled" xml:space="preserve"><value>Event enabled</value></data>
   <data name="DeleteEvent" xml:space="preserve"><value>Delete</value></data>
   <data name="SearchEvents" xml:space="preserve"><value>Search events</value></data>
+  <data name="EventCategory" xml:space="preserve"><value>Event category</value></data>
   <data name="OtherFields" xml:space="preserve"><value>Other properties</value></data>
   <data name="ChooseAsset" xml:space="preserve"><value>Choose asset</value></data>
   <data name="Syncing" xml:space="preserve"><value>Syncing chart…</value></data>
@@ -771,6 +801,11 @@
   <data name="TimelineAndEvents" xml:space="preserve"><value>Timeline and Events</value></data>
   <data name="TimelineFloorNumber" xml:space="preserve"><value>Tile #{0}</value></data>
   <data name="TimelineFloorAtTime" xml:space="preserve"><value>Tile #{0} · {1}</value></data>
+  <data name="TimelineTileTrack" xml:space="preserve"><value>Tiles</value></data>
+  <data name="TimelineTimingEvents" xml:space="preserve"><value>Timing events</value></data>
+  <data name="TimelineCameraEvents" xml:space="preserve"><value>Camera</value></data>
+  <data name="TimelineEffectEvents" xml:space="preserve"><value>Other effects</value></data>
+  <data name="TimelineEventGroup" xml:space="preserve"><value>{0:N0} events · Click to choose</value></data>
   <data name="TimeSignature" xml:space="preserve"><value>Time signature</value></data>
   <data name="TimelineFit" xml:space="preserve"><value>Fit song</value></data>
   <data name="TimelineMeasure" xml:space="preserve"><value>Bar {0:0} · Beat {1}</value></data>
@@ -780,7 +815,7 @@
   <data name="TimelineApplyHere" xml:space="preserve"><value>Apply from this beat</value></data>
   <data name="TimelineApplyAtStart" xml:space="preserve"><value>Set initial signature</value></data>
   <data name="TimelineRemoveSignature" xml:space="preserve"><value>Remove this signature</value></data>
-  <data name="TimelineHelp" xml:space="preserve"><value>Drag to seek · Shift-drag to snap to whole beats · Wheel to zoom · Shift-wheel to pan</value></data>
+  <data name="TimelineHelp" xml:space="preserve"><value>Drag to seek · Shift-drag to snap to whole beats · Ctrl-drag to set A–B · Wheel to zoom · Shift-wheel to pan</value></data>
   <data name="Fullscreen" xml:space="preserve"><value>Fullscreen</value></data>
   <data name="Name_AddDecoration_depth" xml:space="preserve"><value>Depth</value></data>
   <data name="Name_AddDecoration_pivotOffset" xml:space="preserve"><value>Pivot offset</value></data>

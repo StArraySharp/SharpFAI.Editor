@@ -167,6 +167,7 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
             GL.DeleteTexture(oldest.Handle);
         }
 
+        using var profile = PlaybackPerformance.Measure(PlaybackPerformance.Stage.TextureUpload);
         int handle = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, handle);
         var (storage, format) = TextureFormat(image.Channels);
@@ -223,6 +224,7 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
 
     private static unsafe void Upload(Slot slot, in DecorationImage image, int rows)
     {
+        using var profile = PlaybackPerformance.Measure(PlaybackPerformance.Stage.TextureUpload);
         GL.BindTexture(TextureTarget.Texture2D, slot.Handle);
         int start = slot.UploadedRows;
         int rowBytes = image.RowBytes;

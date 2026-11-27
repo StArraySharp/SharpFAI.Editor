@@ -956,27 +956,32 @@ internal sealed class OpenGlFilterBackend : IFilterBackend, IDisposable
         int rentedBefore = _borrowed.Count;
         try
         {
-            TrimPool(screen.Width, screen.Height);
-            Target first = (Target)RentTarget(screen.Width, screen.Height, 0);
-            Target? second = null;
-            Bind(first);
-            GL.Disable(EnableCap.ScissorTest);
-            GL.ColorMask(true, true, true, true);
-            if (clearSource is { } color)
+            Target first;
+            using (PlaybackPerformance.Measure(PlaybackPerformance.Stage.Filters))
             {
-                float* rgba = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
-                GL.ClearBuffer(ClearBuffer.Color, 0, rgba);
-            }
-            else
-            {
-                // Preserve preceding cameras and history already present in the viewport.
-                int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
-                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, screen.Framebuffer);
-                GL.BlitFramebuffer(screen.X, screen.Y, screen.X + screen.Width, screen.Y + screen.Height,
-                    0, 0, first.Width, first.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
-                GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+                TrimPool(screen.Width, screen.Height);
+                first = (Target)RentTarget(screen.Width, screen.Height, 0);
+                Bind(first);
+                GL.Disable(EnableCap.ScissorTest);
+                GL.ColorMask(true, true, true, true);
+                if (clearSource is { } color)
+                {
+                    float* rgba = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
+                    GL.ClearBuffer(ClearBuffer.Color, 0, rgba);
+                }
+                else
+                {
+                    // Preserve preceding cameras and history already present in the viewport.
+                    int readFramebuffer = GL.GetInteger(GetPName.ReadFramebufferBinding);
+                    GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, screen.Framebuffer);
+                    GL.BlitFramebuffer(screen.X, screen.Y, screen.X + screen.Width, screen.Y + screen.Height,
+                        0, 0, first.Width, first.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+                    GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
+                }
             }
             drawScene();
+            using var profile = PlaybackPerformance.Measure(PlaybackPerformance.Stage.Filters);
+            Target? second = null;
             Target input = first;
             bool succeeded = true;
             for (int index = 0; index < entries.Count; index++)

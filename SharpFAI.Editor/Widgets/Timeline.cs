@@ -1,5 +1,7 @@
+using System.Globalization;
 using ImGui4NET;
 using OpenTK.Mathematics;
+using SharpFAI.Player.Engine;
 
 namespace SharpFAI.Editor.Widgets;
 
@@ -35,10 +37,22 @@ public sealed class TimelineClip
 /// <summary>
 /// Zoomable, pannable timeline with ticks, tracks and clips, including drag and snapping.
 /// </summary>
-public sealed unsafe class Timeline
+public sealed unsafe partial class Timeline
 {
+    internal const double MinimumViewLength = .005;
+    private const float BeatBandStart = .53f;
+    private static readonly double[] TickSteps =
+        [.001, .002, .005, .01, .02, .05, .1, .25, .5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
     private readonly List<TimelineClip> _clips = [];
     private readonly Dictionary<TimelineClip, (double Start, double GrabOffset)> _drag = [];
+    private double? _rangeDragStart;
+    private bool _rangeDragMoved;
+    private bool _floorRangeGesture;
+    internal PlaybackRange? PlaybackRange { get; set; }
+    private bool SelectingPlaybackRange => _rangeDragStart.HasValue;
+    internal double? RangeDragTarget { get; private set; }
+    internal bool RangeClearedBySeek { get; private set; }
+    internal bool HoveringPlaybackRange { get; private set; }
 
     /// <summary>Whether clips were modified last frame.</summary>
     public bool ClipsModified { get; private set; }
@@ -116,16 +130,24 @@ public sealed unsafe class Timeline
     /// <summary>
     /// Draw the timeline. Returns true when the playhead moved this frame.
     /// </summary>
-    public bool Draw(string id) => Draw(id, null, null, null, [], -1, true, false, double.NaN, out _);
+    public bool Draw(string id) => Draw(id, null, null, null, [], [], -1, null, false, true, false, double.NaN, out _, out _);
 
     internal bool DrawChart(string id, double duration, EditorBeatClock clock, EditorTimeSignatures signatures,
-        ReadOnlySpan<double> floorTimes, int selectedFloor, bool canSeek, bool playing, double previousPlayhead, out int floor) =>
-        Draw(id, duration, clock, signatures, floorTimes, selectedFloor, canSeek, playing, previousPlayhead, out floor);
+        ReadOnlySpan<double> floorTimes, ReadOnlySpan<TimelineEventTrack> eventTracks, int selectedFloor, int? rangeAnchor, bool editing, bool canSeek,
+        bool playing, double previousPlayhead, out int floor, out bool extend) =>
+        Draw(id, duration, clock, signatures, floorTimes, eventTracks, selectedFloor, rangeAnchor, editing, canSeek, playing,
+            previousPlayhead, out floor, out extend);
 
     private bool Draw(string id, double? duration, EditorBeatClock? clock, EditorTimeSignatures? signatures,
-        ReadOnlySpan<double> floorTimes, int selectedFloor, bool canSeek, bool playing, double previousPlayhead, out int floor)
+        ReadOnlySpan<double> floorTimes, ReadOnlySpan<TimelineEventTrack> eventTracks, int selectedFloor, int? rangeAnchor, bool editing, bool canSeek,
+        bool playing, double previousPlayhead, out int floor, out bool extend)
     {
         floor = -1;
+        extend = false;
+        RangeDragTarget = null;
+        RangeClearedBySeek = false;
+        HoveringPlaybackRange = false;
+        PickedEventGroup = null;
         float height = RulerHeight + TrackHeight * TrackCount;
         ImVec2 avail = ImGui.GetContentRegionAvail();
         ImVec2 size = WidgetDraw.V2(Math.Max(1, avail.x), height);
@@ -142,11 +164,38 @@ public sealed unsafe class Timeline
         bool active = ImGui.IsItemActive() != 0;
         ImGui.PopID();
 
+        float gutter = LaneLabelWidth(eventTracks, size.x);
+        if (gutter > 0)
+        {
+            DrawLaneLabels(draw, origin, gutter, eventTracks);
+            origin.x += gutter;
+            size.x -= gutter;
+        }
+
         int left = (int)ImGuiMouseButton.ImGuiMouseButton_Left;
         bool clicked = ImGui.IsMouseClicked(left) != 0;
         bool dragging = canSeek && active && ImGui.IsMouseDragging(left, 4f) != 0;
+        bool finishRange = canSeek && _rangeDragStart.HasValue && _rangeDragMoved && ImGui.IsMouseReleased(left) != 0;
         ImGuiIO* io = ImGui.GetIO();
         ImVec2 mouse = ImGui.GetMousePos();
+        hovered &= mouse.x >= origin.x;
+        bool onFloors = mouse.y >= origin.y + RulerHeight && mouse.y < origin.y + RulerHeight + TrackHeight;
+        if (!canSeek || !active && !finishRange)
+        {
+            _rangeDragStart = null;
+            _rangeDragMoved = false;
+            _floorRangeGesture = false;
+        }
+        if (duration is double chartEnd && canSeek && active && clicked && hovered)
+        {
+            if (io->KeyCtrl != 0)
+                _rangeDragStart = Math.Clamp(TimeAt(mouse.x, origin.x, size.x), 0, chartEnd);
+            else
+                _floorRangeGesture = editing && onFloors && io->KeyShift != 0;
+        }
+        if (!canSeek) _chartGestureStartedInPlot = false;
+        else if (clicked && active) _chartGestureStartedInPlot = hovered;
+        dragging &= _chartGestureStartedInPlot;
         bool playheadMoved = false;
         bool wheel = hovered && AllowZoom && MathF.Abs(io->MouseWheel) > 0.001f;
 
@@ -157,8 +206,8 @@ public sealed unsafe class Timeline
             else
             {
                 double zoom = Math.Exp(-io->MouseWheel * 0.15);
-                double newLength = Math.Clamp(ViewLength * zoom, 0.05,
-                    duration is double limit ? Math.Max(.05, limit) : 3600.0);
+                double newLength = Math.Clamp(ViewLength * zoom, MinimumViewLength,
+                    duration is double limit ? Math.Max(MinimumViewLength, limit) : 3600.0);
                 double anchor = ViewStart + Math.Clamp((mouse.x - origin.x) / size.x, 0.0, 1.0) * ViewLength;
                 ViewStart = anchor - (anchor - ViewStart) * (newLength / ViewLength);
                 ViewLength = newLength;
@@ -166,7 +215,7 @@ public sealed unsafe class Timeline
         }
         if (duration is double end)
         {
-            ViewLength = Math.Clamp(ViewLength, .05, Math.Max(.05, end));
+            ViewLength = Math.Clamp(ViewLength, MinimumViewLength, Math.Max(MinimumViewLength, end));
             ViewStart = TimelineNavigation.ClampStart(ViewStart, ViewLength, end);
             double margin = Math.Min(.18, 64 / (double)size.x);
             if (dragging)
@@ -183,11 +232,33 @@ public sealed unsafe class Timeline
 
         ImDrawList.PushClipRect(draw, origin, max, 1);
         DrawTracks(draw, in origin, in size);
+        DrawWaveform(draw, origin, size.x);
         DrawRuler(draw, in origin, in size, clock is null ? RulerHeight : RulerHeight * .51f);
         if (clock is not null && signatures is not null)
         {
             DrawBeatGrid(draw, origin, size, clock, signatures);
-            DrawFloorMarkers(draw, origin, size, floorTimes, selectedFloor);
+            DrawFloorMarkers(draw, origin, size, floorTimes, selectedFloor, rangeAnchor);
+            DrawEventTracks(draw, origin, size, eventTracks, hovered, canSeek && active && clicked && io->KeyShift == 0 &&
+                !SelectingPlaybackRange, !SelectingPlaybackRange && !dragging);
+        }
+        if (_rangeDragStart is double start && duration is double chartLength && (dragging || finishRange))
+        {
+            _rangeDragMoved = true;
+            double target = Math.Clamp(TimeAt(Math.Clamp(mouse.x, origin.x, max.x), origin.x, size.x), 0, chartLength);
+            PlaybackRange = new(Math.Min(start, target), Math.Max(start, target));
+            RangeDragTarget = target;
+            Playhead = target;
+        }
+        if (duration.HasValue && PlaybackRange is { IsValid: true } range)
+        {
+            HoveringPlaybackRange = hovered && mouse.x >= XAt(range.Start, origin.x, size.x) - 2 &&
+                mouse.x <= XAt(range.End, origin.x, size.x) + 2;
+            if (canSeek && clicked && active && hovered && !SelectingPlaybackRange && !_floorRangeGesture && !HoveringPlaybackRange)
+            {
+                RangeClearedBySeek = true;
+                PlaybackRange = null;
+            }
+            else DrawPlaybackRange(draw, origin, size, range);
         }
         DrawClips(draw, in origin, in size, ref playheadMoved);
         ClipsModified = playheadMoved;
@@ -195,20 +266,25 @@ public sealed unsafe class Timeline
         if (duration is double length && clock is not null && signatures is not null)
         {
             bool snap = io->KeyShift != 0;
-            bool onFloors = mouse.y >= origin.y + RulerHeight;
-            if (hovered && onFloors && !dragging)
+            if (!SelectingPlaybackRange && (hovered && onFloors && !dragging || _floorRangeGesture && dragging))
             {
-                double time = TimeAt(mouse.x, origin.x, size.x);
-                int nearest = TimelineFloorTimes.Nearest(floorTimes, time, ViewLength * 8 / size.x, selectedFloor);
+                double time = TimeAt(Math.Clamp(mouse.x, origin.x, max.x), origin.x, size.x);
+                int nearest = TimelineFloorTimes.Nearest(floorTimes, time,
+                    _floorRangeGesture ? double.PositiveInfinity : ViewLength * 8 / size.x, selectedFloor);
                 if (nearest >= 0 && floorTimes[nearest] >= 0)
                 {
                     if (!active)
                         WidgetDraw.ItemTooltip(L.F("TimelineFloorAtTime", nearest, FormatPosition(floorTimes[nearest])));
-                    if (canSeek && active && clicked && !snap)
+                    if (canSeek && active && (clicked && !snap || _floorRangeGesture) &&
+                        (clicked || nearest != selectedFloor))
+                    {
                         floor = nearest;
+                        extend = _floorRangeGesture;
+                    }
                 }
             }
-            if (canSeek && active && (clicked || dragging))
+            if (canSeek && active && _chartGestureStartedInPlot && PickedEventGroup is null && !SelectingPlaybackRange && (clicked || dragging) &&
+                (!_floorRangeGesture || floor >= 0))
             {
                 float x = Math.Clamp(mouse.x, origin.x, max.x);
                 double time = floor >= 0 ? Math.Clamp(floorTimes[floor], 0, length)
@@ -225,8 +301,8 @@ public sealed unsafe class Timeline
                     }
                 }
             }
-            if (hovered && !onFloors && !active)
-                WidgetDraw.ItemTooltip(L.T("TimelineHelp"));
+            if (hovered && !active && (mouse.y < origin.y + RulerHeight || onFloors && editing && snap))
+                WidgetDraw.ItemTooltip(L.T(onFloors ? "TimelineFloorRangeHelp" : "TimelineHelp"));
         }
         else if (hovered && clicked)
         {
@@ -240,8 +316,30 @@ public sealed unsafe class Timeline
         DrawPlayhead(draw, in origin, in size);
         ImDrawList.PopClipRect(draw);
 
-        WidgetDraw.Outline(draw, in origin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 4f);
+        ImVec2 outerOrigin = WidgetDraw.V2(origin.x - gutter, origin.y);
+        WidgetDraw.Outline(draw, in outerOrigin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 4f);
         return playheadMoved;
+    }
+
+    private void DrawPlaybackRange(ImDrawList* draw, ImVec2 origin, ImVec2 size, PlaybackRange range)
+    {
+        float start = XAt(range.Start, origin.x, size.x);
+        float end = XAt(range.End, origin.x, size.x);
+        float right = origin.x + size.x;
+        if (end < origin.x || start > right)
+            return;
+        uint color = WidgetDraw.U32(244, 181, 81);
+        ImDrawList.AddRectFilled(draw, WidgetDraw.V2(Math.Max(start, origin.x), origin.y),
+            WidgetDraw.V2(Math.Min(end, right), origin.y + size.y), WidgetDraw.WithAlpha(color, .21f));
+        Marker(start, "A");
+        Marker(end, "B");
+
+        void Marker(float x, string label)
+        {
+            if (x < origin.x || x > right) return;
+            ImDrawList.AddLine(draw, WidgetDraw.V2(x, origin.y), WidgetDraw.V2(x, origin.y + size.y), color, 2f);
+            ImDrawList.AddText(draw, WidgetDraw.V2(x + 3, origin.y + size.y - ImGui.GetTextLineHeight()), color, label);
+        }
     }
 
     private void DrawTracks(ImDrawList* draw, in ImVec2 origin, in ImVec2 size)
@@ -267,36 +365,31 @@ public sealed unsafe class Timeline
         (double step, int minorPerMajor) = ChooseTickStep(size.x);
         uint tickColor = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, 0.45f);
 
-        double first = Math.Floor(ViewStart / step) * step;
-        double end = ViewStart + ViewLength;
+        double first = Math.Floor(ViewStart / step);
+        double last = Math.Floor((ViewStart + ViewLength) / step);
 
-        for (double t = first; t <= end; t += step)
+        for (double index = first; index <= last; index++)
         {
+            double t = index * step;
             float x = XAt(t, origin.x, size.x);
-            if (x < origin.x - 1f || x > origin.x + size.x + 1f)
+            if (x >= origin.x && x <= origin.x + size.x)
             {
-                continue;
+                ImVec2 top = WidgetDraw.V2(x, origin.y + height - 6f);
+                ImVec2 bottom = WidgetDraw.V2(x, origin.y + height);
+                ImDrawList.AddLine(draw, in top, in bottom, tickColor, 1f);
+
+                string label = FormatPosition(t);
+                ImVec2 labelPos = WidgetDraw.V2(x + 3f, origin.y + 2f);
+                ImDrawList.AddText(draw, in labelPos, tickColor, label);
             }
 
-            ImVec2 top = WidgetDraw.V2(x, origin.y + height - 6f);
-            ImVec2 bottom = WidgetDraw.V2(x, origin.y + height);
-            ImDrawList.AddLine(draw, in top, in bottom, tickColor, 1f);
-
-            string label = FormatTime(t);
-            ImVec2 labelPos = WidgetDraw.V2(x + 3f, origin.y + 2f);
-            ImDrawList.AddText(draw, in labelPos, tickColor, label);
-
-            // Minor ticks
-            if (minorPerMajor > 1)
+            for (int m = 1; m < minorPerMajor; m++)
             {
-                for (int m = 1; m < minorPerMajor; m++)
-                {
-                    double minorTime = t + step * m / minorPerMajor;
-                    float minorX = XAt(minorTime, origin.x, size.x);
-                    ImVec2 minorTop = WidgetDraw.V2(minorX, origin.y + height - 3f);
-                    ImVec2 minorBottom = WidgetDraw.V2(minorX, origin.y + height);
-                    ImDrawList.AddLine(draw, in minorTop, in minorBottom, WidgetDraw.WithAlpha(tickColor, 0.6f), 1f);
-                }
+                float minorX = XAt(t + step * m / minorPerMajor, origin.x, size.x);
+                if (minorX < origin.x || minorX > origin.x + size.x) continue;
+                ImVec2 minorTop = WidgetDraw.V2(minorX, origin.y + height - 3f);
+                ImVec2 minorBottom = WidgetDraw.V2(minorX, origin.y + height);
+                ImDrawList.AddLine(draw, in minorTop, in minorBottom, WidgetDraw.WithAlpha(tickColor, 0.6f), 1f);
             }
         }
     }
@@ -309,7 +402,7 @@ public sealed unsafe class Timeline
         if (endBeat < startBeat)
             return;
 
-        float top = origin.y + RulerHeight * .53f;
+        float top = origin.y + RulerHeight * BeatBandStart;
         float bottom = origin.y + RulerHeight;
         uint bars = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .54f);
         uint beats = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .23f);
@@ -358,7 +451,7 @@ public sealed unsafe class Timeline
     }
 
     private void DrawFloorMarkers(ImDrawList* draw, ImVec2 origin, ImVec2 size,
-        ReadOnlySpan<double> floorTimes, int selectedFloor)
+        ReadOnlySpan<double> floorTimes, int selectedFloor, int? rangeAnchor)
     {
         float top = origin.y + RulerHeight;
         float middle = top + TrackHeight * .5f;
@@ -366,6 +459,14 @@ public sealed unsafe class Timeline
             WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_WindowBg, .5f));
         uint normal = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .64f);
         uint selected = WidgetDraw.U32(.37f, .87f, .81f);
+        if (rangeAnchor is int anchor && (uint)anchor < (uint)floorTimes.Length &&
+            (uint)selectedFloor < (uint)floorTimes.Length)
+        {
+            float a = XAt(floorTimes[Math.Min(anchor, selectedFloor)], origin.x, size.x);
+            float b = XAt(floorTimes[Math.Max(anchor, selectedFloor)], origin.x, size.x);
+            ImDrawList.AddRectFilled(draw, WidgetDraw.V2(a - 4, top), WidgetDraw.V2(b + 4, top + TrackHeight),
+                WidgetDraw.WithAlpha(selected, .26f));
+        }
         double end = ViewStart + ViewLength;
         double grouping = ViewLength * 6 / size.x;
         float nextLabel = origin.x;
@@ -516,37 +617,25 @@ public sealed unsafe class Timeline
 
     private (double Step, int MinorPerMajor) ChooseTickStep(float pixelWidth)
     {
-        // Aim for roughly 90 pixels per major tick
-        double raw = ViewLength * 90.0 / Math.Max(pixelWidth, 1f);
-        double[] candidates = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
-
-        foreach (double candidate in candidates)
+        double widestTime = Math.Max(Math.Abs(ViewStart), Math.Abs(ViewStart + ViewLength));
+        float spacing = Math.Max(90, ImGui.CalcTextSize(FormatPosition(-widestTime)).x + 12);
+        double minimumStep = ViewLength * spacing / Math.Max(pixelWidth, 1f);
+        foreach (double candidate in TickSteps)
         {
-            if (candidate >= raw)
-            {
-                return (candidate, candidate >= 1 ? 5 : 2);
-            }
+            if (candidate >= minimumStep)
+                return (candidate, candidate >= 1 ? 5 : candidate >= .002 ? 2 : 1);
         }
 
-        return (candidates[^1], 5);
-    }
-
-    private static string FormatTime(double seconds)
-    {
-        if (seconds >= 60)
-        {
-            int minutes = (int)(seconds / 60);
-            double rest = seconds - minutes * 60;
-            return $"{minutes}:{rest:00.##}";
-        }
-
-        return seconds.ToString("0.##") + "s";
+        return (Math.Ceiling(minimumStep / TickSteps[^1]) * TickSteps[^1], 5);
     }
 
     internal static string FormatPosition(double seconds)
     {
-        double milliseconds = Math.Round(seconds * 1000);
-        return $"{Math.Floor(milliseconds / 60000):00}:{milliseconds % 60000 / 1000:00.000}";
+        double milliseconds = Math.Round(seconds * 1000, MidpointRounding.AwayFromZero);
+        string sign = milliseconds < 0 ? "-" : "";
+        milliseconds = Math.Abs(milliseconds);
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{sign}{Math.Floor(milliseconds / 60000):00}:{milliseconds % 60000 / 1000:00.000}");
     }
 }
 

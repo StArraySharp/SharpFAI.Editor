@@ -1,4 +1,5 @@
 using ImGui4NET;
+using SharpFAI.Player.Engine;
 using SharpFAI.Serialization;
 using static SharpFAI.Player.VideoExportSession;
 
@@ -12,6 +13,7 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
     private int _height = 1080;
     private int _fps = 60;
     private bool _preferHardware = true;
+    private int _preroll = 2;
 
     public void Open()
     {
@@ -19,14 +21,16 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
         _focusOnOpen = true;
     }
 
-    public readonly record struct Settings(int Width, int Height, int Fps, bool PreferHardware)
+    public readonly record struct Settings(int Width, int Height, int Fps, bool PreferHardware, int Preroll = 2)
     {
-        public VideoExporter.Request CreateRequest(string levelPath, Level level) => new(
-            levelPath, VideoExporter.ResolveOutputPath(levelPath, level), Width, Height, Fps,
-            KeepFrames: false, BitrateKbps: 0, Zoom: 0f, HidePassedFloors: false, PreferHardware: PreferHardware);
+        public VideoExporter.Request CreateRequest(string levelPath, Level level, PlaybackRange? range = null) => new(
+            levelPath, VideoExporter.ResolveOutputPath(levelPath, level, range), Width, Height, Fps,
+            KeepFrames: false, BitrateKbps: 0, Zoom: 0f, HidePassedFloors: false, PreferHardware: PreferHardware,
+            Range: range, PrerollSeconds: Preroll);
     }
 
-    public void Draw(VideoExportStatus status, Action<Settings> start, Action cancel, string? unavailable = null)
+    public void Draw(VideoExportStatus status, Action<Settings> start, Action cancel, string? unavailable = null,
+        PlaybackRange? range = null)
     {
         if (!_open)
             return;
@@ -53,7 +57,7 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
             if (status.Active)
                 DrawProgress(status, cancel);
             else
-                DrawSettings(status, start, unavailable);
+                DrawSettings(status, start, unavailable, range);
         }
         ImGui.End();
         _open = open;
@@ -63,7 +67,8 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
 
     private void DrawProgress(VideoExportStatus status, Action cancel)
     {
-        ImGui.TextUnformatted(status.FrameCount == 0
+        ImGui.TextUnformatted(status.PrerollRemaining > 0
+            ? Text("VideoRenderPrerollProgress", "正在预滚…") : status.FrameCount == 0
             ? Text("VideoRenderPreparing", "正在准备渲染…")
             : string.Format(Text("VideoRenderProgress", "渲染中  {0:N0} / {1:N0} 帧"), status.Frame, status.FrameCount));
         ImGui.ProgressBar((float)status.Progress, new ImVec2 { x = -1f }, $"{status.Progress:P1}");
@@ -78,8 +83,15 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
             cancel();
     }
 
-    private void DrawSettings(VideoExportStatus status, Action<Settings> start, string? unavailable)
+    private void DrawSettings(VideoExportStatus status, Action<Settings> start, string? unavailable, PlaybackRange? range)
     {
+        if (range is { } clip)
+        {
+            ImGui.TextUnformatted(string.Format(Text("VideoRenderRange", "选区 {0} – {1}"),
+                TimeSpan.FromSeconds(clip.Start).ToString(@"h\:mm\:ss\.fff"),
+                TimeSpan.FromSeconds(clip.End).ToString(@"h\:mm\:ss\.fff")));
+            DrawSetting(Text("VideoRenderPreroll", "预滚 (秒)"), ref _preroll, 0, 30);
+        }
         DrawSetting(Text("VideoRenderWidth", "宽度 (px)"), ref _width, 16, 7680);
         DrawSetting(Text("VideoRenderHeight", "高度 (px)"), ref _height, 16, 4320);
         DrawSetting(Text("VideoRenderFps", "帧率 (FPS)"), ref _fps, 1, 480);
@@ -100,7 +112,7 @@ internal sealed unsafe class VideoRenderWindow(Func<string, string>? localize = 
         ImGui.Separator();
         ImGui.BeginDisabled((byte)(unavailable is not null ? 1 : 0));
         if (ImGui.Button(Text("VideoRenderStart", "开始渲染"), new ImVec2 { x = -1f }) != 0)
-            start(new Settings(_width, _height, _fps, _preferHardware));
+            start(new Settings(_width, _height, _fps, _preferHardware, _preroll));
         ImGui.EndDisabled();
 
         ImGui.PushTextWrapPos(0f);

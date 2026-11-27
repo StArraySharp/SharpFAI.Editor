@@ -23,7 +23,7 @@ public static class ChartTools
 }
 ```
 
-将以下清单保存为 `ChartTools.json`，和 `ChartTools.dll` 一起放到可执行文件旁的 `Mods/ChartTools/` 中。也可以把这两个文件压缩为 `ChartTools.sharpfaimod`，确保文件位于 ZIP 根目录。在编辑器的「设置 → Mod 管理」里启用并确认后，命令会出现在「工具」菜单。通过终端启动时可以看到命令打印的砖块数。
+将以下清单保存为 `ChartTools.json`，和 `ChartTools.dll` 一起放到可执行文件旁的 `Mods/ChartTools/` 中。编辑器会发现并启用该目录，命令会出现在「工具」菜单。分发时也可以把这两个文件压缩成 `ChartTools.sharpfaimod`，确保文件位于 ZIP 根目录，由用户在「设置 → Mod 管理」安装。
 
 ```json
 {
@@ -45,7 +45,7 @@ ChartTools.sharpfaimod
 └── locales/
 ```
 
-启动时会创建并扫描可执行文件旁的 `Mods`。压缩包和解压目录都支持，运行中新增文件可在 Mod 管理页刷新。`SHARPFAI_MODS_DIR` 可同时覆盖搜索目录和 Mod 数据目录。编辑器负责启用 Mod，并在编辑预览、播放和视频导出中调用相应的 Hook。
+启动时会创建并扫描可执行文件旁的 `Mods`。编辑器运行时也会发现新复制的目录并首次启用。压缩包通过安装入口解压到 `Mods/packages/`，运行时从目录读取清单并加载 DLL。`SHARPFAI_MODS_DIR` 可同时覆盖搜索目录和 Mod 数据目录。编辑器负责启用 Mod，并在编辑预览、播放和视频导出中调用相应的 Hook。
 
 | 字段 | 约定 |
 | --- | --- |
@@ -255,7 +255,7 @@ public sealed class ExampleMod : ISharpFaiMod, IModSettings
 
 `IModSettings` 实现可在 `ActivateAsync` 中通过 `context.GetRequiredService<IModSettingsStore>()` 获取配置文件路径，并用 `Save()` 保存代码修改的值。`Save()` 只写入已声明持久化的成员。用 `[ModSettingHidden]` 保存由代码管理的值，例如令牌，同时从设置界面隐藏该成员。
 
-- 对于放在搜索目录的 `Example.sharpfaimod` 文件或目录，配置是同级的 `Example.Settings.json`。直接添加的开发目录也按目录名保存。
+- 搜索目录中的 `Example` 文件夹和通过界面安装的 `Example.sharpfaimod` 使用 `Mods/Example.Settings.json`。直接添加的开发目录按目录名在同级保存。
 - 从界面安装的 Mod 按版本存放在 `Mods/packages/<Mod ID>/` 下，配置用入口 DLL 的基本名命名，与各版本目录同级。
 - 停用、热重载和移除会保留同级文件。再次安装同一个 Mod 可继续使用原来的设置。
 

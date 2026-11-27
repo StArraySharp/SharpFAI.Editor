@@ -332,6 +332,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
 
         ImGui.StyleColorsDark();
         ApplicationFont.LoadInterfaceFont(ImGui.GetIO(), 16f);
+        if (CapturePath is null)
+            _playbackPerformance.IsOpen = _imguiLayout.Load()?.Contains(SavedPerformanceWindow, StringComparison.Ordinal) == true;
         BuildKeyMap();
         TextInput += e => ImGuiIO.AddInputCharacter(ImGui.GetIO(), (uint)e.Unicode);
         MouseWheel += e => ImGuiIO.AddMouseWheelEvent(ImGui.GetIO(), e.OffsetX, e.OffsetY);
@@ -342,6 +344,9 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
 
     protected override void OnUnload()
     {
+        if (_context != null && CapturePath is null)
+            _imguiLayout.Save(_playbackPerformance.IsOpen ? SavedPerformanceWindow : null);
+        _applicationUpdate?.Dispose();
         _displayFrameLimit.Dispose();
         _inputMethod?.Dispose();
         _videoExport.Dispose();
@@ -411,9 +416,18 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         Title = $"SharpFAI Player — {renderer}";
     }
 
+    private readonly PlaybackPerformanceWindow _playbackPerformance = new();
+    private const string SavedPerformanceWindow = "; SharpFAI playback performance=open";
+    private readonly ImGuiLayoutStore _imguiLayout = ImGuiLayoutStore.ForApplication(editor: false);
+    private ApplicationUpdateWindow? _applicationUpdate;
+    internal Func<string?, string[]>? RestartArguments { get; init; }
+
     protected override void OnRenderFrame(FrameEventArgs e)
     {
         base.OnRenderFrame(e);
+
+        using var performance = _playbackPerformance.BeginFrame(_renderer.Level,
+            ExportRequest is null && CapturePath is null && _renderer.IsPlaying && !_renderer.IsLoading);
 
         ApplyPendingApplicationSettings();
         TickMods();
@@ -458,6 +472,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
         ImGui_ImplOpenGL3.RenderDrawData(drawData);
         UpdateCapture();
         SwapBuffers();
+        if (_playbackPerformance.IsCapturing)
+            performance.Present();
     }
 
     private ImDrawData* BuildOverlay(float lastDeltaTime, bool rendering)
@@ -474,9 +490,23 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
 
         float menuBottom = DrawMenuBar(rendering);
         _levelPanel.Draw(_renderer, menuBottom, rendering, _audioCalibration);
+        if (!rendering)
+            _playbackPerformance.Draw(sample =>
+            {
+                _renderer.Pause();
+                _renderer.Seek(sample.Time);
+            });
         _videoRenderWindow.Draw(CurrentExport.Status, RequestVideoExport, CancelVideoExport,
             _renderer.Level is not null && !_renderer.IsLoading ? null : "请先加载关卡");
         _audioCalibration.Draw(_renderer);
+        if (RestartArguments is { } arguments)
+        {
+            _applicationUpdate ??= new();
+            _applicationUpdate.Draw(chinese: true, canRestart: !rendering, () =>
+            {
+                if (_applicationUpdate.Install(arguments(_renderer.LevelPath))) Close();
+            });
+        }
         _settingsWindow.Draw(chinese: true, editor: false, ApplicationSettings.PlayerDefaults, TryApplyApplicationSettings);
         _modUi?.DrawWindows(rendering || _settingsWindow.IsOpen);
         if (!rendering && _modUi is { } ui)
@@ -621,6 +651,8 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
                 ImGui.BeginDisabled();
             if (ImGui.MenuItem("音画校准…") != 0)
                 _audioCalibration.Open();
+            if (ImGui.MenuItem("播放性能", null, (byte)(_playbackPerformance.IsOpen ? 1 : 0)) != 0)
+                _playbackPerformance.IsOpen = !_playbackPerformance.IsOpen;
             if (rendering)
                 ImGui.EndDisabled();
 
@@ -639,9 +671,14 @@ internal sealed unsafe partial class PlayerWindow : GameWindow
             _videoRenderWindow.Open();
         _modUi?.DrawPlayerRenderMenu();
         _modUi?.DrawMenuBar();
+        if (_applicationUpdate is { } updater && ImGui.MenuItem("检查更新…") != 0)
+            updater.CheckNow();
 
         DrawSettingsMenuItem(rendering);
-        _menuBarFrameRate.Draw(rendering ? "视频渲染中…" : _renderer.Status, _applicationSettings.ShowFrameRate);
+        string tempo = !rendering && !_renderer.IsLoading && _renderer.CurrentFloorTempo is { } bpm
+            ? $" · 砖块设定 BPM {bpm.Authored:G6} · 实时 BPM {bpm.Effective?.ToString("G6") ?? "—"}"
+            : "";
+        _menuBarFrameRate.Draw(rendering ? "视频渲染中…" : _renderer.Status, _applicationSettings.ShowFrameRate, tempo);
 
         ImGui.EndMainMenuBar();
         return bottom;

@@ -6,6 +6,14 @@ namespace SharpFAI.Editor.Tests;
 
 public sealed class TimeSignatureTimelineTests
 {
+    [TestCase(0, "00:00.000")]
+    [TestCase(.001, "00:00.001")]
+    [TestCase(59.9996, "01:00.000")]
+    [TestCase(6000.123, "100:00.123")]
+    [TestCase(-.001, "-00:00.001")]
+    public void TimelinePositionAlwaysShowsMilliseconds(double seconds, string label) =>
+        Assert.That(Timeline.FormatPosition(seconds), Is.EqualTo(label));
+
     [Test]
     public void FloorMarkersKeepTheSelectionAtSharedTimestampsAndRespectTheHitDistance()
     {

@@ -471,8 +471,13 @@ internal sealed unsafe partial class EditorWindow
         _eventPage = 0;
     }
 
+    private uint _footerDock;
+    private float? _footerContentHeight;
+    private float? _appliedFooterContentHeight;
+
     private void DrawPalette()
     {
+        UpdateTimelineWaveform();
         if (!_showPalette && !_showTimeline)
             return;
         bool open = true;
@@ -499,9 +504,29 @@ internal sealed unsafe partial class EditorWindow
             DrawPlaybackModeCheckboxes();
             ContinueToolbar(76 * _uiScale);
             DrawPlaybackSpeed();
-            if (_showPalette)
-                DrawEventPalette();
-            DrawChartTimeline(HasCurrentPlayback ? _playback : null, _playbackView == PlaybackView.Edit);
+            var timelineRenderer = _showTimeline && HasCurrentPlayback &&
+                _playback is { EditorTiming: not null } renderer && double.IsFinite(renderer.Duration)
+                    ? renderer : null;
+            bool usingSnapshot = _showTimeline && timelineRenderer is null && HasTimelineSnapshot;
+            bool hasTimeline = timelineRenderer is not null || usingSnapshot;
+            int trackCount = usingSnapshot ? 1 + _timelineEventTracks.Length : TimelineTrackCount;
+            int timelineVersion = _document.PlaybackVersion;
+            float clippedEventHeight = _showPalette ? DrawEventPalette(hasTimeline ? TimelineHeight(trackCount) : 0) : 0;
+            if (timelineVersion != _document.PlaybackVersion)
+            {
+                timelineRenderer = null;
+                if (HasTimelineSnapshot) trackCount = 1 + _timelineEventTracks.Length;
+            }
+            DrawChartTimeline(timelineRenderer, _playbackView == PlaybackView.Edit, trackCount);
+            if (ImGui.GetWindowDockID() == _footerDock)
+            {
+                _footerContentHeight = MathF.Ceiling(ImGui.GetCursorPosY() + ImGui.GetStyle()->WindowPadding.y + clippedEventHeight);
+                if (_preserveRestoredFooterSize)
+                {
+                    _appliedFooterContentHeight = _footerContentHeight;
+                    _preserveRestoredFooterSize = _showTimeline && timelineRenderer is null && _playback?.LoadError is null;
+                }
+            }
         }
         ImGui.End();
         if (!open)
@@ -522,39 +547,65 @@ internal sealed unsafe partial class EditorWindow
     private static float EventButtonSide => MathF.Ceiling(3 * ImGui.GetTextLineHeight() +
         2 * ImGui.GetStyle()->FramePadding.y);
 
-    private void DrawEventPalette()
+    private float DrawEventPalette(float timelineHeight)
     {
-        ImGui.Separator();
-        for (int i = 0; i < _catalog.Categories.Length; i++)
+        string category = EditorCatalog.Name(_catalog.Categories[_category].Key);
+        float categoryWidth = Math.Max(104 * _uiScale, ImGui.CalcTextSize(category).x + ImGui.GetFrameHeight() +
+            2 * ImGui.GetStyle()->FramePadding.x);
+        ContinueToolbar(categoryWidth);
+        ImGui.SetNextItemWidth(Math.Clamp(ImGui.GetContentRegionAvail().x, 1, categoryWidth));
+        if (ImGui.BeginCombo("##event-category", category) != 0)
         {
-            string label = EditorCatalog.Name(_catalog.Categories[i].Key);
-            if (i > 0)
-                ContinueToolbar(ImGui.CalcTextSize(label).x + ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x);
-            if (ImGui.RadioButton(label + "###" + _catalog.Categories[i].Key, (byte)(i == _category ? 1 : 0)) != 0)
+            for (int i = 0; i < _catalog.Categories.Length; i++)
             {
-                _category = i;
-                _eventSearch = "";
+                string key = _catalog.Categories[i].Key;
+                bool selected = i == _category;
+                if (ImGui.Selectable(EditorCatalog.Name(key) + "###" + key, (byte)(selected ? 1 : 0), 0, default) != 0)
+                {
+                    _category = i;
+                    _eventSearch = "";
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
             }
+            ImGui.EndCombo();
         }
+        WidgetDraw.ItemTooltip(L.T("EventCategory"));
         ContinueToolbar(105 * _uiScale);
         ImGui.SetNextItemWidth(Math.Clamp(ImGui.GetContentRegionAvail().x, 1, 210 * _uiScale));
         if (EditText("##event-search", L.T("SearchEvents"), _eventSearch, true) is { } search)
             _eventSearch = search;
 
-        float eventHeight = _showTimeline
-            ? Math.Max(1, ImGui.GetContentRegionAvail().y - TimelineRulerHeight - TimelineFloorHeight -
-                ImGui.GetFrameHeightWithSpacing() - ImGui.GetStyle()->ItemSpacing.y)
-            : 0;
+        var choices = PaletteEvents();
+        var events = choices as string[] ?? choices.ToArray();
+        if (events.Length == 0) return 0;
+
+        float width = ImGui.GetContentRegionAvail().x;
+        ImVec2 spacing = ImGui.GetStyle()->ItemSpacing;
+        float side = Math.Clamp(MathF.Floor(width), 1, EventButtonSide);
+        int columns = Math.Max(1, (int)((width + spacing.x) / (side + spacing.x)));
+        int rows = (events.Length + columns - 1) / columns;
+        float fullHeight = rows * side + (rows - 1) * spacing.y;
+        float eventHeight = fullHeight;
+        if (timelineHeight > 0 && rows > 1)
+        {
+            float reserved = timelineHeight + ImGui.GetFrameHeightWithSpacing() + spacing.y;
+            float available = ImGui.GetContentRegionAvail().y - reserved;
+            int visibleRows = Math.Clamp((int)((available + spacing.y) / (side + spacing.y)), 1, rows);
+            eventHeight = visibleRows * side + (visibleRows - 1) * spacing.y;
+        }
+        else
+        {
+            // The timeline placeholder can overflow the parent while the buttons keep their full height.
+            ImGui.SetNextWindowScroll(WidgetDraw.V2(-1, 0));
+        }
         if (ImGui.BeginChild("##event-buttons", WidgetDraw.V2(0, eventHeight), 0,
                 (int)ImGuiWindowFlags.ImGuiWindowFlags_NoScrollbar) != 0)
         {
-            float side = Math.Clamp(MathF.Floor(ImGui.GetContentRegionAvail().x), 1, EventButtonSide);
-            bool first = true;
             int shortcut = 0;
-            foreach (string name in PaletteEvents())
+            for (int index = 0; index < events.Length; index++)
             {
-                if (!first) ContinueToolbar(side);
-                first = false;
+                if (index % columns != 0) ImGui.SameLine();
+                string name = events[index];
                 EditorEvent? definition = _catalog.Find(name);
                 bool removesEvent = PaletteToggleTarget(definition) is not null;
                 bool disabled = !removesEvent && (definition is null || !CanAddEvent(definition));
@@ -582,6 +633,7 @@ internal sealed unsafe partial class EditorWindow
             }
         }
         ImGui.EndChild();
+        return fullHeight - eventHeight;
     }
 
     private static void DrawEventButtonLabel(string label)
@@ -663,6 +715,8 @@ internal sealed unsafe partial class EditorWindow
             DrawField(target, field, type, fields);
         }
 
+        if (type == "SetSpeed")
+            DrawSetSpeedEffectiveBpm(target);
         if (type == "SetFilterAdvanced" && fields.All(field => field.Key != "filterProperties"))
             DrawAdvancedFilter(target);
         EditorField[] otherFields = InspectorFields.OtherFields(target, fields, type).ToArray();
@@ -707,11 +761,8 @@ internal sealed unsafe partial class EditorWindow
             ImGui.TextUnformatted(label);
         JToken? value = target[key] ?? field.Default;
         bool vector = field.Type is "Vector2" or "FloatPair" or "Vector2Range" || key == "velocity" && value is JArray;
-        float width = ImGui.GetContentRegionAvail().x;
-        float column = Math.Clamp(width * .40f, 94 * _uiScale, 175 * _uiScale);
         float labelWidth = ImGui.CalcTextSize(label).x + (field.Optional ? ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x : 0);
-        if (!vector && labelWidth + ImGui.GetStyle()->ItemSpacing.x <= column && width - column >= 86 * _uiScale)
-            ImGui.SameLine(column + ImGui.GetStyle()->WindowPadding.x);
+        if (!vector) AlignScalarPropertyValue(labelWidth);
         ImGui.SetNextItemWidth(-1);
         ImGui.BeginDisabled((byte)(field.Optional && !enabled ? 1 : 0));
         JToken? updated = null;
@@ -807,6 +858,14 @@ internal sealed unsafe partial class EditorWindow
     private static double Number(JToken? value, double fallback = 0) =>
         double.TryParse(value is JValue scalar ? Convert.ToString(scalar.Value, CultureInfo.InvariantCulture) : null,
             NumberStyles.Float, CultureInfo.InvariantCulture, out double number) && double.IsFinite(number) ? number : fallback;
+
+    private void AlignScalarPropertyValue(float labelWidth)
+    {
+        float width = ImGui.GetContentRegionAvail().x;
+        float column = Math.Clamp(width * .40f, 94 * _uiScale, 175 * _uiScale);
+        if (labelWidth + ImGui.GetStyle()->ItemSpacing.x <= column && width - column >= 86 * _uiScale)
+            ImGui.SameLine(column + ImGui.GetStyle()->WindowPadding.x);
+    }
 
     private static double Component(JArray? value, int index, double fallback = 0) =>
         value is not null && index < value.Count ? Number(value[index], fallback) : fallback;

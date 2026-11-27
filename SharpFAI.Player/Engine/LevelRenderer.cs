@@ -7,6 +7,7 @@ using Thrust.Graphics;
 using Thrust.Scene;
 using SharpFAI.Framework;
 using SharpFAI.Serialization;
+using SharpFAI.Util;
 using System.Diagnostics;
 
 namespace SharpFAI.Player.Engine;
@@ -364,6 +365,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
     {
         public double[] EntryTimes { get; init; } = [];
         public double[] FloorBpms { get; init; } = [];
+        public IReadOnlyDictionary<int, FloorTimingCalculator.SpeedContext>? SpeedContexts { get; init; }
         public double[] SweepStart { get; init; } = [];
         public double[] SweepDelta { get; init; } = [];
         public PlanetTrackFloor[] PlanetTrack { get; init; } = [];
@@ -378,6 +380,22 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
         public double Pitch { get; init; } = 1.0;
         public double SnapBpm { get; init; } = 120.0;
+
+        internal (double Authored, double? Effective)? TempoAt(int floor, double? playbackRate = null)
+        {
+            if ((uint)floor >= (uint)FloorBpms.Length) return null;
+            double? effective = null;
+            if (floor < EntryTimes.Length - 1)
+            {
+                double interval = EntryTimes[floor + 1] - EntryTimes[floor];
+                // The first entry interval also includes the opening countdown.
+                if (floor == 0) interval -= (CountdownTicks - 1) * (60.0 / SnapBpm);
+                double bpm = 60 * ((playbackRate ?? Pitch) / interval);
+                if (bpm > 0 && double.IsFinite(bpm))
+                    effective = bpm;
+            }
+            return (FloorBpms[floor], effective);
+        }
     }
 
     /// <summary>Whether playback is running.</summary>
@@ -391,6 +409,8 @@ public sealed unsafe partial class LevelRenderer : IDisposable
 
     /// <summary>Current floor index.</summary>
     public int CurrentIndex => _currentIndex;
+
+    internal (double Authored, double? Effective)? CurrentFloorTempo => _manualTrack?.TempoAt(_currentIndex);
 
     /// <summary>
     /// 行星的连续角度（度，不做 360 折返）。手打判定需要它：官方用角度差而不是时间差。

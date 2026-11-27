@@ -21,6 +21,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private static string InspectorWindow => L.T("Inspector") + "###inspector";
     private string PaletteWindow => L.T(_showTimeline ? _showPalette ? "TimelineAndEvents" : "Timeline" : "Palette") + "###palette";
     private static string ParticleWindow => L.T("ParticleEditor") + "###particle";
+    private static uint EditorDockspaceId => ImGui.GetID("##editor-dockspace");
 
     private readonly EditorCatalog _catalog;
     private EditorDocument _document;
@@ -90,6 +91,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ApplyTheme(style);
         ApplicationFont.LoadInterfaceFont(io, 17f);
         LoadApplicationSettings();
+        LoadEditorLayout();
         _lastChartPath = _recentChart.Read();
         RememberOpenedChart();
         InitializePlayback();
@@ -116,8 +118,17 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         TickMods();
         ApplyPendingApplicationSettings();
         _autoBackup.Update(_document);
-        if (ClientSize.X <= 0 || ClientSize.Y <= 0)
+        bool visible = ClientSize.X > 0 && ClientSize.Y > 0;
+        bool samplePerformance = visible && _playback?.IsPlaying == true &&
+            _videoExport?.Request is null && _modFrameJob is null;
+        using var performance = _modPerformanceJob is { } profile
+            ? profile.Metrics.BeginFrame(samplePerformance && profile.Sampling)
+            : _playbackPerformance.BeginFrame(_document, samplePerformance);
+        if (!visible)
+        {
+            AdvanceModPerformance();
             return;
+        }
         UpdateVideoRender();
         UpdateModFrameCapture();
         ImGuiIO* io = ImGui.GetIO();
@@ -135,8 +146,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             RequestClose();
         }
         ApplyViewShortcuts();
+        if (_canvasOnly || !_showTimeline) EndTimelineRangePreview();
         if (_canvasOnly)
-            ImGui.DockSpaceOverViewport(0, ImGui.GetMainViewport(), (int)ImGuiDockNodeFlags.ImGuiDockNodeFlags_KeepAliveOnly);
+            ImGui.DockSpaceOverViewport(EditorDockspaceId, ImGui.GetMainViewport(),
+                (int)ImGuiDockNodeFlags.ImGuiDockNodeFlags_KeepAliveOnly);
         else
         {
             _menuBarFrameRate.Sample(args.Time);
@@ -149,6 +162,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             HandleShortcuts(spaceModifiers);
         _numericDrawn = false;
         UpdatePlayback();
+        BeginModPerformanceSample();
         if (_canvasOnly)
             DrawCanvasOnly();
         else
@@ -172,6 +186,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             DrawShortcuts();
             DrawFindComment();
             DrawVideoRender();
+            _playbackPerformance.Draw(SeekPerformanceSample);
+            DrawAudioMonitor();
+            DrawApplicationUpdate();
             DrawDialogs();
             DrawCompatibleExport();
             _settingsWindow.Draw(L.IsChinese, editor: true, SharpFAI.Player.ApplicationSettings.EditorDefaults,
@@ -180,16 +197,14 @@ internal sealed unsafe partial class EditorWindow : GameWindow
                 _audioCalibration.Draw(renderer, L.IsChinese);
             DrawSaveNotice();
         }
+        else
+            _audioMonitor.ClearSource();
         _modUi?.DrawWindows(_settingsWindow.IsOpen);
         if (!_numericDrawn)
             FinishNumericEdit();
         ApplyConfiguredPlaybackShortcut();
-        _inputMethod?.Update(IsFocused, !_audioCalibration.IsOpen && (_playbackView switch
-        {
-            PlaybackView.Edit => _hasFloorSelection || _inspectDecoration,
-            PlaybackView.Preview => _playback is { SelectedFloor: >= 0 },
-            _ => true,
-        }));
+        // Ctrl+Space must reach the chart even when there is no selected tile. Text fields still own the IME.
+        _inputMethod?.Update(IsFocused, !ShortcutOverlayOpen);
         UpdateTitle();
 
         GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
@@ -199,6 +214,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui_ImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
         _windowStream.Current?.Capture(FramebufferSize.X, FramebufferSize.Y);
         SwapBuffers();
+        performance.Present();
+        AdvanceModPerformance();
     }
 
     private static void ApplyTheme(ImGuiStyle* style)
@@ -242,6 +259,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
     protected override void OnUnload()
     {
+        EndModPerformance();
+        if (_context != null)
+            SaveEditorLayout();
+        _applicationUpdate?.Dispose();
         CancelCompatibleExport();
         _autoBackup.CompleteWrite(wait: true);
         _displayFrameLimit.Dispose();
@@ -263,20 +284,32 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private void DrawDockspace()
     {
         ImGuiViewport* viewport = ImGui.GetMainViewport();
-        uint dock = ImGui.DockSpaceOverViewport(0, viewport);
-        if (!_resetLayout)
-            return;
+        uint dock = EditorDockspaceId;
+        var root = ImGui.DockBuilderGetNode(dock);
+        if (_resetLayout || root == null)
+            ResetDockspace(dock, viewport);
+        else if (_restoreLayoutDocks)
+            RestoreDockspaceSlots(root);
+        else
+            ResizeFooterDock();
+        ImGui.DockSpaceOverViewport(dock, viewport);
+    }
 
+    private void ResetDockspace(uint dock, ImGuiViewport* viewport)
+    {
         _resetLayout = false;
+        _restoreLayoutDocks = _preserveRestoredFooterSize = false;
         ImGui.DockBuilderRemoveNode(dock);
         ImGui.DockBuilderAddNode(dock, (int)ImGuiDockNodeFlagsPrivate.ImGuiDockNodeFlags_DockSpace);
         ImGui.DockBuilderSetNodePos(dock, viewport->WorkPos);
         ImGui.DockBuilderSetNodeSize(dock, viewport->WorkSize);
         uint canvas = dock;
-        float footerHeight = TimelineRulerHeight + TimelineFloorHeight +
-            5 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
-        float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .46f);
+        float footerHeight = TimelineContentHeight +
+            3 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
+        float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .60f);
         uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, footerRatio, null, &canvas);
+        _footerDock = footer;
+        _footerContentHeight = _appliedFooterContentHeight = null;
         uint left = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Left, 0.22f, null, &canvas);
         uint right = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Right, 0.30f, null, &canvas);
         ImGui.DockBuilderDockWindow(CanvasWindow, canvas);
@@ -286,6 +319,26 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderDockWindow(PaletteWindow, footer);
         ImGui.DockBuilderFinish(dock);
         _modUi?.SetDocks(left, right, footer, canvas);
+    }
+
+    private void ResizeFooterDock()
+    {
+        // Only resize when measured content changes, so the user can still move the splitter.
+        if (!(_showPalette || _showTimeline) || _footerContentHeight is not float desired ||
+            _appliedFooterContentHeight == desired || _resetLayout || _footerDock == 0) return;
+        var footer = ImGui.DockBuilderGetNode(_footerDock);
+        if (footer == null || footer->ParentNode == null || footer->ParentNode->SplitAxis != ImGuiAxis.ImGuiAxis_Y)
+            return;
+        var children = footer->ParentNode->ChildNodes;
+        var sibling = children.e0 == footer ? children.e1 : children.e0;
+        if (sibling == null) return;
+        float total = sibling->Size.y + footer->Size.y;
+        if (total <= 0) return;
+
+        _appliedFooterContentHeight = desired;
+        float maximum = total * .65f;
+        footer->SizeRef.y = Math.Clamp(desired, Math.Min(ImGui.GetFrameHeightWithSpacing() * 2, maximum), maximum);
+        sibling->SizeRef.y = total - footer->SizeRef.y;
     }
 
     private void DrawMenu()
@@ -333,6 +386,9 @@ internal sealed unsafe partial class EditorWindow : GameWindow
             ToggleMenu(L.T("Inspector"), ref _showInspector);
             ToggleMenu(L.T("Palette"), ref _showPalette);
             ToggleMenu(L.T("Timeline"), ref _showTimeline);
+            ToggleMenu(L.T("AudioMonitor"), ref _audioMonitor.IsOpen);
+            if (ImGui.MenuItem(L.T("PlaybackPerformance"), null, (byte)(_playbackPerformance.IsOpen ? 1 : 0)) != 0)
+                _playbackPerformance.IsOpen = !_playbackPerformance.IsOpen;
             ToggleMenu(L.T("FloorNumbers"), ref _showBrickNumbers, "Ctrl+F");
             _modUi?.DrawItems(MenuSlot.View);
             _modUi?.DrawWindowMenu();
@@ -364,7 +420,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         }
         if (ImGui.BeginMenu(L.T("MenuRender")) != 0)
         {
-            if (ImGui.MenuItem(L.T("VideoRenderTitle") + "…") != 0) _videoRenderWindow.Open();
+            if (ImGui.MenuItem(L.T("VideoRenderTitle") + "…") != 0) OpenVideoRender();
+            if (_timelineDocument == _document && _chartTimeline.PlaybackRange is { IsValid: true } range &&
+                ImGui.MenuItem(L.T("TimelineExportRange") + "…") != 0)
+                OpenVideoRender(range);
             _modUi?.DrawItems(MenuSlot.Render);
             _modUi?.DrawExportItems();
             ImGui.EndMenu();
@@ -380,6 +439,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         if (ImGui.BeginMenu(L.T("MenuHelp")) != 0)
         {
             ToggleMenu(L.T("Shortcuts"), ref _showShortcuts, "Alt+Shift+H");
+            if (_applicationUpdate is { } updater && ImGui.MenuItem(L.T("CheckForUpdates")) != 0)
+                updater.CheckNow();
             _modUi?.DrawItems(MenuSlot.Help);
             ImGui.EndMenu();
         }
@@ -444,8 +505,10 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ClampSelection();
     }
 
-    private void SetDocument(EditorDocument document)
+    private void SetDocument(EditorDocument document, long? loadStarted = null)
     {
+        _documentLoadStarted = loadStarted ?? System.Diagnostics.Stopwatch.GetTimestamp();
+        _documentLoadSeconds = 0;
         SwitchPlaybackView(PlaybackView.Edit);
         _playbackFrameAvailable = false;
         _document = document;
@@ -506,13 +569,18 @@ internal sealed unsafe partial class EditorWindow : GameWindow
                 return false;
             if (!Path.HasExtension(file))
                 file += ".adofai";
-            _document.Save(file);
-            _savedAt = Stopwatch.GetTimestamp();
-            if (_document.Path != previousPath)
-                RememberOpenedChart();
+            SaveToPath(file);
             return true;
         }
         catch (Exception error) { ShowError(error); return false; }
+    }
+
+    private void SaveToPath(string path, bool overwrite = true)
+    {
+        string? previous = _document.Path;
+        _document.Save(path, overwrite);
+        _savedAt = Stopwatch.GetTimestamp();
+        if (previous != _document.Path) RememberOpenedChart();
     }
 
     private void ShowError(Exception error) { _error = error.Message; _openError = true; }

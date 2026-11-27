@@ -37,7 +37,7 @@ internal sealed partial class EditorWindow
 
     private ModFrameJob StartModFrameCapture(FrameCaptureRequest request, EditorDocument document, CancellationToken token)
     {
-        if (_modFrameJob is not null || _videoExport?.Request is not null)
+        if (_modFrameJob is not null || _videoExport?.Request is not null || _modPerformanceJob is not null)
             throw new InvalidOperationException("A render is already running. Retry when it completes.");
         if (request.Width is < 16 or > 4096 || request.Height is < 16 or > 4096 ||
             (long)request.Width * request.Height > 4096L * 2160 ||
