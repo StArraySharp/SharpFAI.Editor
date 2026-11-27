@@ -2,7 +2,7 @@
 
 ## 安装和连接
 
-MultiPlatforms 发布包的 `Mods/` 已包含解压后的 MCP。使用单独下载的编辑器时，可在「设置 → Mod 管理」安装发布附件 `SharpFAI.Mcp.sharpfaimod`，或将解压后的文件夹复制到 `Mods`。从源码单独构建 Mod 可在仓库根目录执行以下命令。
+MultiPlatforms 发布包的 `Mods/` 已包含解压后的 MCP。MCP Mod 1.1.0 的新工具需要 SharpFAI Editor 1.0.5 或更高版本。使用单独下载的编辑器时，可在「设置 → Mod 管理」安装发布附件 `SharpFAI.Mcp.sharpfaimod`，或将解压后的文件夹复制到 `Mods`。从源码单独构建 Mod 可在仓库根目录执行以下命令。
 
 ```powershell
 dotnet build mods/SharpFAI.Mcp/SharpFAI.Mcp.csproj -c Release
