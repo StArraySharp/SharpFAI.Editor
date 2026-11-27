@@ -68,11 +68,55 @@ public sealed class TestImageDecorationSize
 
             Assert.Multiple(() =>
             {
+                Assert.That(original.Images["sprite.png"].Pixels, Is.Empty);
+                Assert.That(original.PixelCache.CachedBytes, Is.Zero);
                 Assert.That((texture.Width, texture.Height), Is.EqualTo((120, 80)));
                 Assert.That(texture.TextureBytes, Is.EqualTo(original.Images["sprite.png"].TextureBytes / 4));
                 Assert.That(reducedFrame.Pixels, Is.EqualTo(originalFrame.Pixels));
                 Assert.That(reducedFrame.Pose.TextureScale, Is.EqualTo(originalFrame.Pose.TextureScale));
             });
+
+            string file = Path.Combine(directory.FullName, "sprite.png");
+            Assert.That(original.PrefetchPixels("sprite.png", out _), Is.EqualTo(DecorationPixelStatus.Waiting));
+            Assert.That(original.ReadPixels("sprite.png", out var decoded), Is.True);
+            Assert.That(decoded.Pixels, Is.EqualTo(DecorationImage.ReadFile(file, 100).Pixels));
+            Assert.That(original.PixelCache.CachedBytes, Is.EqualTo(decoded.Pixels.LongLength));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Test]
+    public void DecorationPixelCacheEvictsLeastRecentlyUsedPixelsAndReloadsExactly()
+    {
+        var directory = Directory.CreateTempSubdirectory("sharpfai-decoration-cache-");
+        try
+        {
+            const int bytesPerImage = 8 * 8 * 4;
+            var cache = new DecorationPixelCache(2 * bytesPerImage);
+            foreach (string name in new[] { "first", "second", "third" })
+            {
+                string path = Path.Combine(directory.FullName, name + ".png");
+                using var source = new Image<Rgba32>(8, 8);
+                source[3, 2] = new Rgba32(51, 99, 30, 128);
+                source.SaveAsPng(path);
+                cache.Add(name, path, 100, DecorationImage.IdentifyFile(path, 100));
+            }
+
+            Assert.That(cache.ReadRequired("first", out var first), Is.True);
+            Assert.That(cache.ReadRequired("second", out var second), Is.True);
+            Assert.That(cache.ReadRequired("first", out _), Is.True);
+            Assert.That(cache.ReadRequired("third", out _), Is.True);
+            Assert.That(cache.CachedBytes, Is.EqualTo(2 * bytesPerImage));
+            Assert.That(cache.AlphaBounds("second"), Is.EqualTo(second.AlphaBounds));
+            Assert.That(cache.Prefetch("first", out var reused), Is.EqualTo(DecorationPixelStatus.Ready));
+            Assert.That(reused.Pixels, Is.SameAs(first.Pixels));
+            Assert.That(cache.Prefetch("second", out _), Is.EqualTo(DecorationPixelStatus.Waiting));
+            Assert.That(cache.ReadRequired("second", out var reloaded), Is.True);
+            Assert.That(reloaded.Pixels, Is.EqualTo(second.Pixels).And.Not.SameAs(second.Pixels));
+            Assert.That(cache.CachedBytes, Is.EqualTo(2 * bytesPerImage));
         }
         finally
         {
@@ -502,6 +546,22 @@ public sealed class TestImageDecorationSize
 
         Assert.That(DecorationHitbox.TouchesPlanet(points, new Vector2(0, 105)), Is.True);
         Assert.That(DecorationHitbox.TouchesPlanet(points, new Vector2(51, 0)), Is.False);
+    }
+
+    [Test]
+    public void HitboxBoundsKeepEdgeContactsAndLeaveDegenerateShapesToSat()
+    {
+        Vector2[] solid = [new(0, 0), new(8, 0), new(8, 4), new(0, 4)];
+        var touching = solid.Select(point => point + new Vector2(8, 0)).ToArray();
+        var distant = solid.Select(point => point + new Vector2(9, 0)).ToArray();
+        Vector2[] line = [new(20, 0), new(21, 0), new(21, 0), new(20, 0)];
+        var bounds = DecorationHitbox.BroadPhaseBounds(solid);
+
+        Assert.That(DecorationHitbox.Overlaps(solid, touching), Is.True);
+        Assert.That(DecorationHitbox.MayOverlap(bounds, DecorationHitbox.BroadPhaseBounds(touching)), Is.True);
+        Assert.That(DecorationHitbox.MayOverlap(bounds, DecorationHitbox.BroadPhaseBounds(distant)), Is.False);
+        Assert.That(DecorationHitbox.BroadPhaseBounds(line), Is.Null);
+        Assert.That(DecorationHitbox.MayOverlap(bounds, DecorationHitbox.BroadPhaseBounds(line)), Is.True);
     }
 
     [Test]

@@ -7,27 +7,38 @@ namespace SharpFAI.Player.Engine;
 /// <summary>Draws decoration floors with the track pipeline while retaining decoration draw order.</summary>
 internal sealed class ObjectFloorRenderer : IDisposable
 {
-    private const int MeshLimit = 128;
+    private const long MeshBudget = 32L * 1024 * 1024;
     private readonly record struct MeshKey(TrackStyleInfo Style, float Angle, bool Midspin, FloorIcon Icon, bool RedSwirl,
         (FloorTexture Icon, FloorTexture Outline)? IconTextures);
-    private sealed class Entry(OfficialFloorRenderer renderer, Matrix4 bounds)
+    private sealed class Entry(MeshKey key, OfficialFloorRenderer renderer, Matrix4 bounds, long frame)
     {
+        public MeshKey Key { get; } = key;
         public OfficialFloorRenderer Renderer { get; } = renderer;
         public Matrix4 Bounds { get; } = bounds;
-        public long LastUse { get; set; }
+        public long Bytes { get; } = renderer.DecorationAllocationBytes + 512;
+        public long LastFrame { get; set; } = frame;
     }
 
     private readonly GlMeshUploader _uploader = new();
     private readonly OfficialFloorRenderer _pipeline;
     private readonly bool _ownsPipeline;
-    private readonly Dictionary<MeshKey, Entry> _meshes = [];
-    private readonly OfficialFloorMeshBaker.BakeCache _bakeCache = new(MeshLimit);
-    private long _sequence;
+    private readonly Dictionary<MeshKey, LinkedListNode<Entry>> _meshes = [];
+    private readonly LinkedList<Entry> _recent = new();
+    // The renderer already keeps each exact shape. Keep texture resolution cached without a second mesh cache.
+    private readonly OfficialFloorMeshBaker.BakeCache _bakeCache = new(shapeCacheLimit: 0);
+    private long _frame, _bytes;
 
     public ObjectFloorRenderer(OfficialFloorRenderer? pipeline)
     {
         _ownsPipeline = pipeline is null;
         _pipeline = pipeline ?? new OfficialFloorRenderer(_uploader, OfficialFloorRenderer.GetTextureCapacity());
+    }
+
+    public void BeginFrame()
+    {
+        _frame++;
+        while (_bytes > MeshBudget && _recent.Last is { } oldest && oldest.Value.LastFrame < _frame - 1)
+            RemoveOldest(oldest);
     }
 
     public Matrix4 BoundsFor(ObjectFloorState state, double time, bool editor) => MeshFor(state, time, editor).Bounds;
@@ -69,7 +80,7 @@ internal sealed class ObjectFloorRenderer : IDisposable
         float angle = state.Style.Sprite ? 180f : state.Angle % 360f;
         var key = new MeshKey(state.Style, angle, state.Midspin && !state.Style.Sprite,
             icon, icon == FloorIcon.Swirl && state.RedSwirl, iconTextures);
-        if (!_meshes.TryGetValue(key, out var entry))
+        if (!_meshes.TryGetValue(key, out var node))
         {
             var floor = new Floor(-180, 180 - key.Angle, System.Numerics.Vector2.Zero)
             {
@@ -94,16 +105,28 @@ internal sealed class ObjectFloorRenderer : IDisposable
                 renderer.Dispose();
                 throw;
             }
-            if (_meshes.Count == MeshLimit)
+            var entry = new Entry(key, renderer, bounds, _frame);
+            while (_bytes + entry.Bytes > MeshBudget && _recent.Last is { } oldest && oldest.Value.LastFrame != _frame)
             {
-                var oldest = _meshes.MinBy(pair => pair.Value.LastUse);
-                _meshes.Remove(oldest.Key);
-                oldest.Value.Renderer.Dispose();
+                RemoveOldest(oldest);
             }
-            _meshes.Add(key, entry = new Entry(renderer, bounds));
+            _bytes += entry.Bytes;
+            _meshes.Add(key, _recent.AddFirst(entry));
+            return entry;
         }
-        entry.LastUse = ++_sequence;
-        return entry;
+        _recent.Remove(node);
+        _recent.AddFirst(node);
+        node.Value.LastFrame = _frame;
+        return node.Value;
+    }
+
+    private void RemoveOldest(LinkedListNode<Entry> node)
+    {
+        var entry = node.Value;
+        _recent.Remove(node);
+        _meshes.Remove(entry.Key);
+        _bytes -= entry.Bytes;
+        entry.Renderer.Dispose();
     }
 
     private static Matrix4 Bounds(ReadOnlySpan<System.Numerics.Vector2> outline)
@@ -124,9 +147,10 @@ internal sealed class ObjectFloorRenderer : IDisposable
 
     public void Dispose()
     {
-        foreach (var entry in _meshes.Values)
+        foreach (var entry in _recent)
             entry.Renderer.Dispose();
         _meshes.Clear();
+        _recent.Clear();
         if (_ownsPipeline)
             _pipeline.Dispose();
         _uploader.Dispose();

@@ -39,31 +39,60 @@ internal sealed class DecorationTextureStream(long idleTextureBudget = 192L * 10
     {
         if (!_images.TryGetValue(name, out Slot? slot))
             slot = Acquire(name, image, allowOverBudget: true)!;
-        if (slot.UploadedRows < slot.Height)
-            Upload(slot, image, slot.Height - slot.UploadedRows);
+        int rows = Math.Max(1, 8 * 1024 * 1024 / image.RowBytes);
+        while (slot.UploadedRows < slot.Height)
+            Upload(slot, image, Math.Min(rows, slot.Height - slot.UploadedRows));
         slot.LastUsed = _frame;
         return slot.Handle;
+    }
+
+    public bool IsComplete(string name) => _images.TryGetValue(name, out var slot) && slot.UploadedRows == slot.Height;
+
+    public bool ReserveComplete(string name, double neededAt)
+    {
+        if (!_images.TryGetValue(name, out var slot) || slot.UploadedRows != slot.Height)
+            return false;
+        slot.NeededAt = Math.Max(slot.NeededAt, neededAt);
+        return true;
+    }
+
+    public bool TryUse(string name, out int handle, out long bytes)
+    {
+        if (_images.TryGetValue(name, out var slot) && slot.UploadedRows == slot.Height)
+        {
+            slot.LastUsed = _frame;
+            handle = slot.Handle;
+            bytes = slot.Bytes;
+            return true;
+        }
+        handle = 0;
+        bytes = 0;
+        return false;
     }
 
     public bool Prefetch(string name, in DecorationImage image, double neededAt) =>
         Prefetch(name, image, neededAt, int.MaxValue, out bool ready) || !ready;
 
     // A partially uploaded texture is reserved but cannot be drawn until all rows exist.
-    public bool Prefetch(string name, in DecorationImage image, double neededAt, int byteBudget, out bool ready)
+    public bool Prefetch(string name, in DecorationImage image, double neededAt, int byteBudget, out bool ready,
+        bool required = false) => UploadPending(name, image, neededAt, byteBudget, out ready, required) > 0;
+
+    public int UploadPending(string name, in DecorationImage image, double neededAt, int byteBudget, out bool ready,
+        bool required = false)
     {
         if (!_images.TryGetValue(name, out Slot? slot))
-            slot = Acquire(name, image, allowOverBudget: false);
+            slot = Acquire(name, image, allowOverBudget: required);
         ready = slot is not null && slot.UploadedRows == slot.Height;
         if (slot is null)
-            return false;
+            return 0;
         slot.NeededAt = Math.Max(slot.NeededAt, neededAt);
         if (ready)
-            return false;
+            return 0;
 
         int rows = Math.Min(slot.Height - slot.UploadedRows, Math.Max(1, byteBudget / image.RowBytes));
         Upload(slot, image, rows);
         ready = slot.UploadedRows == slot.Height;
-        return true;
+        return rows * image.RowBytes;
     }
 
     public bool TryTake(string name, out int handle)

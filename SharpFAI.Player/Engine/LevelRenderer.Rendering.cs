@@ -144,6 +144,7 @@ public sealed unsafe partial class LevelRenderer
         PumpLoad();
 
         PumpEffectWarmup();
+        _imageDecorations?.PixelCache.DrainWarnings(_warnings);
 
         // Shader hot reload: rebuild on the next frame
         if (_shaderReloadPending)
@@ -193,6 +194,10 @@ public sealed unsafe partial class LevelRenderer
 
     internal void RenderAfterClear(Vector4 background) => Render(background);
 
+    internal bool TryRenderEditorPreview(Vector4 background) => Render(background, stageBeforeClear: true);
+
+    internal bool ShouldStageEditorPreview => _progressScrubbing || !_isPlaying || WaitingForSeekFrame;
+
     private SceneRenderView? _sceneRenderView;
     private bool _lastFrameRenderedScene;
     internal Vector2 ScenePlaybackTarget => _planetCenter;
@@ -204,16 +209,16 @@ public sealed unsafe partial class LevelRenderer
         finally { _sceneRenderView = null; }
     }
 
-    private void Render(Vector4? clearedBackground)
+    private bool Render(Vector4? clearedBackground, bool stageBeforeClear = false)
     {
         _lastFrameRenderedScene = _sceneRenderView is not null;
-        UpdateFilterClock();
         if (_preparingLevelEffects)
         {
+            UpdateFilterClock();
             DrawCalls = 0;
             DrawnTriangles = 0;
             _filterBackend?.ObserveCameraFrame(_playTime);
-            return;
+            return false;
         }
 
         float neutralZoom = _camera.Zoom;
@@ -233,6 +238,34 @@ public sealed unsafe partial class LevelRenderer
 
         try
         {
+            bool resumeAfterSeek = WaitingForSeekFrame;
+            if (stageBeforeClear || resumeAfterSeek)
+            {
+                if ((_sceneRenderView is not null || !_cameraRenderDisabled || _cameraFree) &&
+                    PrepareDecorationFrame(prefetchUpcoming: false) is { } sprites)
+                {
+                    bool ready = sprites.StageVisibleTextures(_imageDecorations!, _playTime);
+                    if (resumeAfterSeek && ready)
+                    {
+                        if (_seekLeadStarted == 0)
+                            _seekLeadStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                        bool buffered = sprites.PrefetchTextures(_imageDecorations!, _playTime, requiredLead: .35);
+                        // The target frame is complete. Don't pin playback on an oversized future burst.
+                        ready = buffered || System.Diagnostics.Stopwatch.GetElapsedTime(_seekLeadStarted).TotalSeconds >= .20;
+                    }
+                    if (!ready)
+                        return false;
+                    _decorationFramePrepared = true;
+                }
+                _prepareSeekFrame = false;
+            }
+            if (stageBeforeClear)
+            {
+                Vector4 color = clearedBackground.GetValueOrDefault();
+                GL.ClearColor(color.X, color.Y, color.Z, color.W);
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+            }
+            UpdateFilterClock();
             BeginModFrame();
             SceneColorHistory? history = null;
             if (_visualSettings.ScreenEffects && _backdrop?.UsesHistory == true)
@@ -314,9 +347,11 @@ public sealed unsafe partial class LevelRenderer
             }
             history?.Capture(_playTime);
             ApplyModStage(SharpFAI.ModApi.RenderStage.SceneAfterNative);
+            return true;
         }
         finally
         {
+            _decorationFramePrepared = false;
             ReleaseModFrame();
             if (shake)
             {
@@ -538,7 +573,9 @@ public sealed unsafe partial class LevelRenderer
     private static bool IsBackgroundRepeated(LevelPlaybackSettings settings) =>
         settings.LoopBackground || settings.Display == BackgroundDisplay.Tiled;
 
-    private ImageDecorationRenderer? PrepareAndDrawBackDecorations()
+    private bool _decorationFramePrepared;
+
+    private ImageDecorationRenderer? PrepareDecorationFrame(bool prefetchUpcoming = true)
     {
         if (!ShowDecorations || _imageDecorations is not { } decorations || _decorationShaderFailed)
             return null;
@@ -550,9 +587,8 @@ public sealed unsafe partial class LevelRenderer
                 sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
                     AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
                     CollectDecorationQuads, DecorationFloorOpacity, _visualSettings.VisibleDecorations,
-                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive, _sceneRenderView);
-                DrawDecorations(background: true);
-                return sprites.SyncedCount > 0 ? sprites : null;
+                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive, _sceneRenderView, prefetchUpcoming);
+                return sprites;
             }
         }
         catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
@@ -561,6 +597,15 @@ public sealed unsafe partial class LevelRenderer
             _warnings.Add($"装饰着色器不可用：{error.Message}");
         }
         return null;
+    }
+
+    private ImageDecorationRenderer? PrepareAndDrawBackDecorations()
+    {
+        var sprites = _decorationFramePrepared ? _decorationRenderer : PrepareDecorationFrame();
+        if (sprites is null)
+            return null;
+        DrawDecorations(background: true);
+        return sprites.SyncedCount > 0 ? sprites : null;
     }
 
     private ImageDecorationRenderer? DecorationShader()

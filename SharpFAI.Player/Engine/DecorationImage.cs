@@ -38,19 +38,25 @@ internal readonly record struct DecorationImage(int Width, int Height, byte[] Pi
 
     static DecorationImage() => ResizeDecoder.Configuration.MaxDegreeOfParallelism = 1;
 
+    public static DecorationImage IdentifyFile(string path, int texturePercent)
+    {
+        ImageInfo source = Image.Identify(ResizeDecoder, path);
+        return new DecorationImage(ScaledSize(source.Width, texturePercent), ScaledSize(source.Height, texturePercent), [])
+        {
+            SourceWidth = source.Width,
+            SourceHeight = source.Height,
+        };
+    }
+
+    private static int ScaledSize(int source, int percent) => Math.Max(1, (int)Math.Round(source * (percent / 100d)));
+
     public static DecorationImage ReadFile(string path, int texturePercent)
     {
-        if (texturePercent == 100)
-        {
-            var original = ImageDecoder.DecodeFile(path);
-            ImageDecoder.FlipVertically(original.Pixels, original.Width, original.Height);
-            return Pack(original);
-        }
-
+        // Parallelism is across source files. Avoid nested per-image workers competing with the render thread.
         using var image = Image.Load<Rgba32>(ResizeDecoder, path);
         int sourceWidth = image.Width, sourceHeight = image.Height;
-        int width = Math.Max(1, (int)Math.Round(sourceWidth * (texturePercent / 100d)));
-        int height = Math.Max(1, (int)Math.Round(sourceHeight * (texturePercent / 100d)));
+        int width = ScaledSize(sourceWidth, texturePercent);
+        int height = ScaledSize(sourceHeight, texturePercent);
         if (width != sourceWidth || height != sourceHeight)
         {
             image.Mutate(operation => operation.Resize(new ResizeOptions

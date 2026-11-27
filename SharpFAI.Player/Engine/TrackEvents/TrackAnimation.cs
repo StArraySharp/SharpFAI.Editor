@@ -51,6 +51,12 @@ internal readonly record struct TrackAnimationWindow(
     public bool FadeReplacesOpacity(double opacityStart) =>
         Appear == TrackAnimation.Fade && AppearStart > opacityStart;
 
+    public bool Scatters => Disappear is TrackAnimation.Scatter or TrackAnimation.Scatter_Far;
+
+    public Vector2 ScatterOffset => Scatter * (Disappear == TrackAnimation.Scatter_Far ? 8f : 4f);
+
+    public float ScatterProgress(double time) => MathF.Sin(Progress(time, DisappearStart, Duration) * MathF.PI * 0.5f);
+
     public void Apply(double time, bool hidePassed, double opacityStart, ref FloorRenderTransform transform, ref float opacity)
     {
         if (hidePassed && time >= NextEntry)
@@ -81,7 +87,8 @@ internal readonly record struct TrackAnimationWindow(
             };
         }
 
-        if (Disappear == TrackAnimation.None || time < DisappearStart || double.IsPositiveInfinity(DisappearStart))
+        // Scatter changes motion channels and leaves opacity alone, so later MoveTrack events can still use the floor.
+        if (Disappear == TrackAnimation.None || Scatters || time < DisappearStart || double.IsPositiveInfinity(DisappearStart))
         {
             return;
         }
@@ -90,8 +97,6 @@ internal readonly record struct TrackAnimationWindow(
         float eased = MathF.Sin(progress * MathF.PI * 0.5f);
         transform = Disappear switch
         {
-            TrackAnimation.Scatter => Offset(transform, Scatter * (4f * eased), ScatterRotation * eased),
-            TrackAnimation.Scatter_Far => Offset(transform, Scatter * (8f * eased), ScatterRotation * eased),
             TrackAnimation.Retract => Offset(Scale(transform, 1f - eased), Next * eased, 0f),
             TrackAnimation.Shrink => Scale(transform, 1f - progress),
             TrackAnimation.Shrink_Spin => Offset(Scale(transform, 1f - progress), Vector2.Zero, -MathF.PI * eased),

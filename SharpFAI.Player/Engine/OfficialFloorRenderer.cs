@@ -72,6 +72,8 @@ internal sealed unsafe class OfficialFloorRenderer(GlMeshUploader uploader, int 
     public long DrawnTriangles { get; private set; }
     public int TriangleCount => (_geometry?.Stream?.IndexCount ?? _meshHandle?.IndexCount ?? 0) / 3;
     public long GeometryBytes => _meshHandle is { } handle ? handle.VertexBytes + handle.IndexBytes : 0;
+    internal long DecorationAllocationBytes => GeometryBytes + _floorData.LongLength * sizeof(FloorData) +
+        (long)_dataRows * RowWidth * sizeof(float) * 4;
 
     public bool UsesLevelStream(FloorShapeLibrary shapes) =>
         _geometry is { IsLevelStream: true, Stream: { } stream } && ReferenceEquals(stream.Shapes, shapes);

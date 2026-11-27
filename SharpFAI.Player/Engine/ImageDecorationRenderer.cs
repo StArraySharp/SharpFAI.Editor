@@ -230,14 +230,20 @@ internal sealed class ImageDecorationRenderer : IDisposable
     private readonly Stack<List<VisibleDecoration>> _stencilLists = [];
     private int _legacyGlobalMask;
     private readonly Dictionary<string, int> _textures = new(StringComparer.Ordinal);
-    private readonly DecorationTextureStream _animationTextures = new();
+    private readonly DecorationTextureStream _animationTextures = new(512L * 1024 * 1024);
     private readonly DecorationTextureStream _staticTextures = new(1280L * 1024 * 1024, preferReuse: false);
     private long _residentStaticBytes;
-    private ImageDecorationTimeline? _animationTimeline;
+    private ImageDecorationTimeline.AnimationFrame[]? _uploadPlan;
     private double _animationTime = double.NegativeInfinity;
-    private int _nextAnimationUpload;
-    private int _nextStaticUpload;
+    private int _nextTextureUpload;
+    private bool[] _readyUploads = [];
     private readonly List<VisibleDecoration> _visible = [];
+    private readonly HashSet<string> _stagingImages = new(StringComparer.Ordinal);
+    private readonly record struct StaticSprite(ImageDecorationTimeline.Item Item, int Version,
+        Matrix4 Model, Vector2 HalfExtent);
+    private StaticSprite[] _staticSprites = [];
+    private ImageDecorationTimeline? _staticTimeline;
+    private float _staticTileSize;
     private readonly List<PainterOrder> _painterOrder = [];
     private readonly List<VisibleDecoration> _synced = [];
     private bool _hasVisibleMask;
@@ -419,7 +425,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         float authoredZoom, Func<int, bool, (Vector2 Center, Vector2 Scale, float Rotation)> floor,
         Func<string, Vector2> planet, bool collectEditorQuads = false, Func<int, float>? floorOpacity = null,
         DecorationKinds visibleKinds = DecorationKinds.All, Func<float>? readVolume = null,
-        bool forceFloorOutlines = false, bool animateSpeedIcons = true, SceneRenderView? scene = null)
+        bool forceFloorOutlines = false, bool animateSpeedIcons = true, SceneRenderView? scene = null,
+        bool prefetchUpcoming = true)
     {
         _visible.Clear();
         _painterOrder.Clear();
@@ -429,11 +436,27 @@ internal sealed class ImageDecorationRenderer : IDisposable
         _editorQuads.Clear();
         _animationTextures.BeginFrame(time);
         _staticTextures.BeginFrame(time);
+        _floorObjects?.BeginFrame();
         _floorObjectTime = time;
         _editFloorIcons = !animateSpeedIcons || collectEditorQuads;
         _forceFloorOutlines = forceFloorOutlines;
         float? volume = null;
         Matrix4 view = camera.ViewProjection;
+        Vector2 viewHalf = Vector2.Zero;
+        if (scene is null)
+        {
+            if (!ReferenceEquals(_staticTimeline, timeline) || _staticTileSize != tileSize ||
+                _staticSprites.Length != timeline.Items.Count)
+            {
+                _staticTimeline = timeline;
+                _staticTileSize = tileSize;
+                _staticSprites = new StaticSprite[timeline.Items.Count];
+            }
+            var (sin, cos) = MathF.SinCos(MathHelper.DegreesToRadians(camera.Rotation));
+            Vector2 half = new(camera.WorldViewWidth * .5f, camera.WorldViewHeight * .5f);
+            viewHalf = new Vector2(MathF.Abs(cos) * half.X + MathF.Abs(sin) * half.Y,
+                MathF.Abs(sin) * half.X + MathF.Abs(cos) * half.Y);
+        }
         var drawables = _frameState.Update(timeline, time, collectEditorQuads, visibleKinds);
         foreach (ref readonly var drawable in CollectionsMarshal.AsSpan(drawables))
         {
@@ -452,8 +475,34 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     volume ??= readVolume?.Invoke() ?? 0f;
                 pose = pose with { Tint = color.EvaluateColor(pose.Tint, time, volume.GetValueOrDefault()) };
             }
-            Matrix4 model = ModelFor(pose.ObjectFloor is null ? pixels : Vector2.One,
-                item, pose, camera, tileSize, authoredZoom, floor, planet);
+            Matrix4 model;
+            if (scene is null && item.HasFixedPose && pose.RelativeTo == "Global" && pose.Parallax == Vector2.Zero &&
+                !item.StickToFloor && !item.LockScale && !item.LockRotation && item.Particles is null && pose.ObjectFloor is null)
+            {
+                ref var cached = ref _staticSprites[item.Index];
+                if (!ReferenceEquals(cached.Item, item) || cached.Version != item.TimingVersion)
+                {
+                    model = ModelFor(pixels, item, pose, camera, tileSize, authoredZoom, floor, planet);
+                    var half = new Vector2((MathF.Abs(model.Row0.X) + MathF.Abs(model.Row1.X)) * .5f,
+                        (MathF.Abs(model.Row0.Y) + MathF.Abs(model.Row1.Y)) * .5f);
+                    cached = new StaticSprite(item, item.TimingVersion, model, half);
+                }
+                model = cached.Model;
+                Vector2 center = model.Row3.Xy;
+                // A conservative world-space test avoids constructing a clip matrix for offscreen artwork.
+                // The margin covers rounding in the world-to-clip transform on very long charts.
+                Vector2 distance = Vector2.Abs(center - camera.Position);
+                Vector2 margin = Vector2.One + (Vector2.Abs(center) + Vector2.Abs(camera.Position) +
+                    cached.HalfExtent + viewHalf) * .000002f;
+                Vector2 edge = cached.HalfExtent + viewHalf + margin;
+                if (distance.X > edge.X || distance.Y > edge.Y)
+                    continue;
+            }
+            else
+            {
+                model = ModelFor(pose.ObjectFloor is null ? pixels : Vector2.One,
+                    item, pose, camera, tileSize, authoredZoom, floor, planet);
+            }
             bool screen = IsScreenRelative(pose);
             Matrix4 clip = Project(model, pose, screen);
             if (item.Particles is { } particles)
@@ -505,13 +554,55 @@ internal sealed class ImageDecorationRenderer : IDisposable
             int floor = right.Item.Floor.CompareTo(left.Item.Floor);
             return floor == 0 ? left.Item.Index.CompareTo(right.Item.Index) : floor;
         });
-        PrefetchTextures(timeline, time);
+        // A jump or runtime trigger may introduce images that have no authored prefetch deadline.
+        // Start with the target frame's visible sprites before spending work on future activations.
+        foreach (var decoration in _visible)
+        {
+            if (decoration.Pose.ObjectFloor is not null)
+                continue;
+            string name = decoration.Pose.Image;
+            var stream = timeline.AnimationFrames.Contains(name) ? _animationTextures : _staticTextures;
+            if (!_textures.ContainsKey(name) && !stream.IsComplete(name))
+                timeline.PrefetchPixels(name, out _, currentFrame: true);
+        }
+        if (prefetchUpcoming)
+            PrefetchTextures(timeline, time);
 
         Matrix4 Project(Matrix4 model, ImageDecorationTimeline.Pose pose, bool screen) => screen ? model
             : scene is { } sceneView ? sceneView.ProjectDecoration(model, pose.SyncFloorDepth ? 0 : pose.Depth) : model * view;
 
         bool Outside(Matrix4 clip, bool screen) => !screen && scene.HasValue
             ? SceneRenderView.OutsideClip(clip, new Vector3(.5f, .5f, 0)) : IsOutsideViewport(clip);
+    }
+
+    internal bool StageVisibleTextures(ImageDecorationTimeline timeline, double time)
+    {
+        bool ready = true, transferred = false;
+        _stagingImages.Clear();
+        foreach (var decoration in _visible)
+        {
+            string name = decoration.Pose.Image;
+            if (decoration.Pose.ObjectFloor is not null || !_stagingImages.Add(name) || _textures.ContainsKey(name))
+                continue;
+
+            var stream = timeline.AnimationFrames.Contains(name) ? _animationTextures : _staticTextures;
+            double neededAt = time + .05;
+            if (stream.ReserveComplete(name, neededAt))
+                continue;
+            var status = timeline.PrefetchPixels(name, out var pixels, currentFrame: true);
+            if (status == DecorationPixelStatus.Unavailable)
+                continue; // A missing file is skipped; an oversized asset uses the required draw path.
+            if (status == DecorationPixelStatus.Ready && !transferred)
+            {
+                using var state = new GlRenderStateScope();
+                GL.ActiveTexture(TextureUnit.Texture0);
+                transferred = stream.Prefetch(name, pixels, neededAt, 4 * 1024 * 1024, out bool uploaded, required: true);
+                if (uploaded)
+                    continue;
+            }
+            ready = false;
+        }
+        return ready;
     }
 
     private void AddVisible(VisibleDecoration decoration)
@@ -533,74 +624,90 @@ internal sealed class ImageDecorationRenderer : IDisposable
             _hasForegroundBlend = true;
     }
 
-    private void PrefetchTextures(ImageDecorationTimeline timeline, double time)
+    internal bool PrefetchTextures(ImageDecorationTimeline timeline, double time, double requiredLead = 0)
     {
-        var animated = timeline.AnimationUploads;
-        var statics = timeline.StaticTexturePrefetches;
-        const double animationLookahead = .8;
-        const double staticLookahead = 12;
-        if (!ReferenceEquals(timeline, _animationTimeline) || time < _animationTime || time - _animationTime > .16)
+        var plan = timeline.TexturePrefetches;
+        const double lookahead = 3;
+        if (!ReferenceEquals(plan, _uploadPlan) || time < _animationTime || time - _animationTime > .25)
         {
-            _animationTimeline = timeline;
-            _nextAnimationUpload = FirstUpcoming(animated, time, static frame => frame.Start);
-            _nextStaticUpload = FirstUpcoming(statics, time, static frame => frame.Start);
+            _uploadPlan = plan;
+            _nextTextureUpload = FirstUpcoming(plan, time, static frame => frame.Start);
+            if (_readyUploads.Length < plan.Length)
+                _readyUploads = new bool[plan.Length];
+            else
+                Array.Clear(_readyUploads, 0, plan.Length);
         }
         _animationTime = time;
-        bool animationDue = _nextAnimationUpload < animated.Length && animated[_nextAnimationUpload].Start <= time + animationLookahead;
-        bool staticDue = _nextStaticUpload < statics.Length && statics[_nextStaticUpload].Start <= time + staticLookahead;
-        if (!animationDue && !staticDue)
-            return;
 
-        int active = GL.GetInteger(GetPName.ActiveTexture);
-        GL.ActiveTexture(TextureUnit.Texture0);
-        int texture = GL.GetInteger(GetPName.TextureBinding2D);
+        while (_nextTextureUpload < plan.Length &&
+               (_readyUploads[_nextTextureUpload] || plan[_nextTextureUpload].Start <= time))
+            _nextTextureUpload++;
+
+        const int chunk = 2 * 1024 * 1024;
+        int budget = 3 * chunk, candidates = 0;
+        long uploadStart = 0;
+        int active = -1, texture = 0;
         try
         {
-            while (_nextAnimationUpload < animated.Length && animated[_nextAnimationUpload].Start <= time + animationLookahead)
+            // Missing pixels at the head of the schedule must not block other due uploads.
+            // Scan a small chronological window to start multiple independent decodes.
+            for (int i = _nextTextureUpload; i < plan.Length && plan[i].Start <= time + lookahead && candidates < 24; i++)
             {
-                var frame = animated[_nextAnimationUpload];
-                if (frame.Start <= time || _textures.ContainsKey(frame.Image) ||
-                    !timeline.Images.TryGetValue(frame.Image, out var image))
+                if (_readyUploads[i])
+                    continue;
+                var (start, name) = plan[i];
+                var stream = timeline.AnimationFrames.Contains(name) ? _animationTextures : _staticTextures;
+                double neededAt = start + .15;
+                if (_textures.ContainsKey(name) || stream.ReserveComplete(name, neededAt))
                 {
-                    _nextAnimationUpload++;
+                    _readyUploads[i] = true;
                     continue;
                 }
-                bool transferred = _animationTextures.Prefetch(frame.Image, image, frame.Start + .05,
-                    4 * 1024 * 1024, out bool ready);
-                if (ready)
-                    _nextAnimationUpload++;
-                if (transferred || !ready)
-                    break;
-            }
-            while (_nextStaticUpload < statics.Length && statics[_nextStaticUpload].Start <= time + staticLookahead)
-            {
-                var (name, start) = statics[_nextStaticUpload];
-                if (start <= time)
-                {
-                    _nextStaticUpload++;
+                candidates++;
+                var status = timeline.PrefetchPixels(name, out var image);
+                if (status == DecorationPixelStatus.Unavailable)
+                    _readyUploads[i] = true;
+                if (status != DecorationPixelStatus.Ready || budget <= 0)
                     continue;
-                }
-                if (_textures.ContainsKey(name))
+
+                if (active < 0)
                 {
-                    _nextStaticUpload++;
-                    continue;
+                    active = GL.GetInteger(GetPName.ActiveTexture);
+                    GL.ActiveTexture(TextureUnit.Texture0);
+                    texture = GL.GetInteger(GetPName.TextureBinding2D);
+                    uploadStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 }
-                var image = timeline.Images[name];
-                // Start large uploads farther ahead and keep the per-frame transfer
-                // small until the texture is close to its first use after a seek.
-                int transferBudget = (start - time <= 2 ? 4 : 1) * 1024 * 1024;
-                bool transferred = _staticTextures.Prefetch(name, image, start + .05, transferBudget, out bool ready);
-                if (ready)
-                    _nextStaticUpload++;
-                if (transferred || !ready)
-                    break;
+                // Prioritize the earliest ready texture. Give large images multiple bounded chunks
+                // while there is budget, leaving their unfinished rows reserved for the next frame.
+                while (budget > 0)
+                {
+                    int transferred = stream.UploadPending(name, image, neededAt, Math.Min(chunk, budget), out bool complete);
+                    budget -= transferred;
+                    if (System.Diagnostics.Stopwatch.GetElapsedTime(uploadStart).TotalMilliseconds >= 3)
+                        budget = 0;
+                    if (complete || transferred == 0)
+                    {
+                        _readyUploads[i] = complete;
+                        break;
+                    }
+                }
             }
         }
         finally
         {
-            GL.BindTexture(TextureTarget.Texture2D, texture);
-            GL.ActiveTexture((TextureUnit)active);
+            if (active >= 0)
+            {
+                GL.BindTexture(TextureTarget.Texture2D, texture);
+                GL.ActiveTexture((TextureUnit)active);
+            }
         }
+
+        if (requiredLead <= 0)
+            return true;
+        for (int i = _nextTextureUpload; i < plan.Length && plan[i].Start <= time + requiredLead; i++)
+            if (!_readyUploads[i])
+                return false;
+        return true;
     }
 
     private static int FirstUpcoming<T>(T[] entries, double time, Func<T, double> start)
@@ -796,12 +903,14 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 continue;
             }
 
-            var image = timeline.Images[pose.Image];
             var repeat = _frameState.Repeat(pose.Image);
+            TextureBinding texture = TextureFor(timeline, pose, repeat);
+            if (texture.Texture == 0)
+                continue;
             // For untiled sprites, apply the edge clamp in the texture sampler.
             bool clampWithSampler = item.Tile == Vector2.One && repeat == (false, false);
             Box2i? scissor = null;
-            if (clampWithSampler && image.AlphaBounds is { } alpha)
+            if (clampWithSampler && timeline.AlphaBounds(pose.Image) is { } alpha)
             {
                 if (clip.Row0.W == 0 && clip.Row1.W == 0 && clip.Row3.W == 1)
                     scissor = scissors.Clip(clip, alpha, viewport, pose.Smoothing);
@@ -809,7 +918,6 @@ internal sealed class ImageDecorationRenderer : IDisposable
                     continue;
             }
 
-            TextureBinding texture = TextureFor(timeline, pose, repeat);
             Vector4 tint = pose.Tint;
             tint.W *= pose.Opacity;
             if (UseInstancing && pose.Blend == DecorationBlendMode.None && scissor is null)
@@ -1101,6 +1209,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 spriteBound = true;
             }
             var spriteTexture = TextureFor(timeline, pose);
+            if (spriteTexture.Texture == 0)
+                continue;
             _sprite.Set(clip, new Vector4(1f, 1f, 1f, pose.Opacity), item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks);
             spriteTexture.Bind(0);
             GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
@@ -1150,11 +1260,18 @@ internal sealed class ImageDecorationRenderer : IDisposable
         if (_textures.TryGetValue(pose.Image, out int texture))
             return new(texture, sampler);
 
-        var image = timeline.Images[pose.Image];
-        if (timeline.AnimationFrames.Contains(pose.Image))
-            return new(_animationTextures.Get(pose.Image, image), sampler);
-        long bytes = image.StorageBytes;
-        int handle = _staticTextures.Get(pose.Image, image);
+        bool animated = timeline.AnimationFrames.Contains(pose.Image);
+        var stream = animated ? _animationTextures : _staticTextures;
+        if (!stream.TryUse(pose.Image, out int handle, out long bytes))
+        {
+            // Offline and real-time captures wait for required pixels instead of dropping a sprite.
+            if (!timeline.ReadPixels(pose.Image, out var image))
+                return default;
+            handle = stream.Get(pose.Image, image);
+            bytes = image.StorageBytes;
+        }
+        if (animated)
+            return new(handle, sampler);
         // Keep commonly reused smaller artwork from competing with upcoming large backgrounds.
         const long residentBudget = 640L * 1024 * 1024;
         if (bytes <= 16L * 1024 * 1024 && _residentStaticBytes + bytes <= residentBudget &&
@@ -1403,7 +1520,9 @@ internal sealed class ImageDecorationRenderer : IDisposable
             GL.UseProgram(_depthSpriteProgram);
             GL.BindVertexArray(_vao);
             var repeat = _frameState.Repeat(pose.Image);
-            TextureFor(timeline, pose, repeat).Bind(0);
+            var texture = TextureFor(timeline, pose, repeat);
+            if (texture.Texture == 0) continue;
+            texture.Bind(0);
             var tint = pose.Tint;
             tint.W *= pose.Opacity;
             bool clampWithSampler = item.Tile == Vector2.One && repeat == (false, false);

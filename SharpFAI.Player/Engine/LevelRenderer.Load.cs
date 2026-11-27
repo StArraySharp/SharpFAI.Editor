@@ -527,10 +527,11 @@ public sealed unsafe partial class LevelRenderer
             return;
 
         const long baseBudget = 384 * mib;
+        const double openingLookahead = 12;
         _texturePrewarmBudget = TextureWarmupBudget(baseBudget);
         long reserveLimit = Math.Min(_texturePrewarmBudget - 64 * mib, 1152 * mib);
-        _textureWarmupOrder = decorations.StaticTextureUploads;
-        var animation = decorations.AnimationUploads.Where(entry => decorations.Images.ContainsKey(entry.Image))
+        _textureWarmupOrder = decorations.StaticTextureUploads.Where(entry => entry.Start <= openingLookahead).ToArray();
+        var animation = decorations.AnimationUploads.Where(entry => entry.Start <= .8 && decorations.Images.ContainsKey(entry.Image))
             .DistinctBy(entry => entry.Image, StringComparer.Ordinal).ToArray();
         if (animation.Sum(entry => decorations.Images[entry.Image].StorageBytes) <= 64 * mib)
             _textureWarmupOrder = _textureWarmupOrder.Concat(animation.Select(entry => (entry.Image, entry.Start)))
@@ -538,7 +539,7 @@ public sealed unsafe partial class LevelRenderer
 
         // Reserve part of the normal preload budget for nearby activations whose combined uploads
         // are most likely to overrun the playback transfer budget.
-        var large = decorations.StaticTextureUploads.Select(entry =>
+        var large = _textureWarmupOrder.Select(entry =>
             (entry.Image, entry.Start, Bytes: decorations.Images[entry.Image].StorageBytes))
             .Where(entry => entry.Bytes >= 16 * mib && entry.Bytes <= reserveLimit).ToArray();
         int bestStart = 0, bestEnd = 0;
@@ -576,12 +577,6 @@ public sealed unsafe partial class LevelRenderer
                 _reservedLargeTextureBytes += entry.Bytes;
         }
 
-        // Give early scene assets and reused sprites precedence over one-time
-        // images so a cold jump can reuse more of the next scene's working set.
-        _textureWarmupOrder = _textureWarmupOrder.OrderBy(entry => entry.Start > 12)
-            .ThenByDescending(entry => decorations.TextureUseSeconds.GetValueOrDefault(entry.Image))
-            .ThenByDescending(entry => uses.GetValueOrDefault(entry.Image))
-            .ThenBy(entry => entry.Start).ToArray();
     }
 
     private static long TextureWarmupBudget(long fallback)
@@ -716,19 +711,27 @@ public sealed unsafe partial class LevelRenderer
             while (_staticTextureIndex < _textureWarmupOrder.Length)
             {
                 var (name, firstUse) = _textureWarmupOrder[_staticTextureIndex];
-                var image = decorations.Images[name];
-                long bytes = image.StorageBytes;
+                var status = decorations.PrefetchPixels(name, out var image);
+                if (_staticTextureIndex + 1 < _textureWarmupOrder.Length)
+                    decorations.PrefetchPixels(_textureWarmupOrder[_staticTextureIndex + 1].Image, out _);
+                if (status == DecorationPixelStatus.Waiting)
+                    return;
+                long bytes = status == DecorationPixelStatus.Ready ? image.StorageBytes : 0;
                 if (_reservedLargeTextures.Contains(name))
                 {
-                    bool transferred = sprites.PrewarmLargeTexture(name, image, firstUse, out bool ready);
-                    if (!ready && transferred)
-                        return;
+                    if (status == DecorationPixelStatus.Ready)
+                    {
+                        bool transferred = sprites.PrewarmLargeTexture(name, image, firstUse, out bool ready);
+                        if (!ready && transferred)
+                            return;
+                        if (ready)
+                            _prewarmedTextureBytes += bytes;
+                    }
                     _reservedLargeTextures.Remove(name);
-                    _reservedLargeTextureBytes -= bytes;
-                    if (ready)
-                        _prewarmedTextureBytes += bytes;
+                    _reservedLargeTextureBytes -= decorations.Images[name].StorageBytes;
                 }
-                else if (_prewarmedTextureBytes + _reservedLargeTextureBytes + bytes <= _texturePrewarmBudget)
+                else if (status == DecorationPixelStatus.Ready &&
+                         _prewarmedTextureBytes + _reservedLargeTextureBytes + bytes <= _texturePrewarmBudget)
                 {
                     sprites.PrewarmTexture(name, image);
                     _prewarmedTextureBytes += bytes;
@@ -757,11 +760,7 @@ public sealed unsafe partial class LevelRenderer
     private void FinishEffectWarmup()
     {
         _textureWarmupOrder = [];
-        // Bulk image decoding leaves large temporary buffers behind. Reclaim them
-        // during the loading screen on exceptionally large charts, before audio starts.
-        if (_imageDecorations is { } loaded &&
-            loaded.Images.Values.Sum(image => image.Pixels.LongLength) >= 1024L * 1024 * 1024)
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+        _imageDecorations?.PixelCache.DrainWarnings(_warnings);
         _preparingLevelEffects = false;
         _loadPhase = string.Empty;
         _loadStartedAt = 0.0;
@@ -873,6 +872,7 @@ public sealed unsafe partial class LevelRenderer
         _runtimeTrackBeforeOffline = false;
         _offlineSubSample = false;
         _progressScrubbing = false;
+        _prepareSeekFrame = false;
         _floorVisualTime = double.NaN;
         _selectedFloor = -1;
         _entryTimes = [];

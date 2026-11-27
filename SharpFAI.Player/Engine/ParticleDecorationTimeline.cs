@@ -20,6 +20,7 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         double Clock);
     private readonly List<Command> _commands = [];
     private readonly List<Run> _runs = [];
+    private (double End, double Lifetime)[] _particleHistory = [];
     private readonly uint _seed = (uint)(Read(source.ParticleFields.GetValueOrDefault("randomSeed"), 0) is > 0 and <= int.MaxValue
         ? (int)Read(source.ParticleFields.GetValueOrDefault("randomSeed"), 0) : index + 1);
     private bool _dirty = true;
@@ -44,9 +45,21 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         if (_dirty)
             Rebuild();
 
-        int capacity = 0;
-        for (int i = _runs.Count - 1; i >= 0; i--)
+        int firstFuture = 0, high = _runs.Count;
+        while (firstFuture < high)
         {
+            int middle = firstFuture + (high - firstFuture) / 2;
+            if (_runs[middle].Start <= time) firstFuture = middle + 1;
+            else high = middle;
+        }
+
+        int capacity = 0;
+        for (int i = firstFuture - 1; i >= 0; i--)
+        {
+            // Use the same subtraction as the individual lifetime checks, including boundary births.
+            var (latestEnd, longestLifetime) = _particleHistory[i];
+            if (latestEnd < time - longestLifetime)
+                break;
             Run run = _runs[i];
             if (time < run.Start)
                 continue;
@@ -158,6 +171,25 @@ internal sealed class ParticleDecorationTimeline(AddParticleDecoration source, i
         }
         if (running)
             AddRun(double.PositiveInfinity);
+
+        _particleHistory = new (double End, double Lifetime)[_runs.Count];
+        double latestEnd = double.NegativeInfinity, longestLifetime = 0;
+        for (int i = 0; i < _runs.Count; i++)
+        {
+            Run run = _runs[i];
+            if (run.Burst == -1)
+            {
+                latestEnd = double.NegativeInfinity;
+                longestLifetime = 0;
+            }
+            else if (run.Burst >= 0)
+            {
+                latestEnd = Math.Max(latestEnd, run.End);
+                double lifetime = Math.Max(run.Settings.Lifetime.X, run.Settings.Lifetime.Y);
+                longestLifetime = Math.Max(longestLifetime, lifetime / Math.Max(run.Settings.Speed, .001f));
+            }
+            _particleHistory[i] = (latestEnd, longestLifetime);
+        }
 
         void AddRun(double end)
         {

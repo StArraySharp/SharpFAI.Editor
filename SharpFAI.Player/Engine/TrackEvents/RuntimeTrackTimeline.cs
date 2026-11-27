@@ -94,7 +94,8 @@ internal sealed class RuntimeTrackTimeline
         }
         ref readonly TrackAnimationWindow window = ref _animation[floor];
         return new FloorTimeRange(window.Appear == TrackAnimation.Fade ? window.AppearStart : double.NegativeInfinity,
-            window.Disappear == TrackAnimation.None ? double.PositiveInfinity : window.DisappearStart + window.Duration);
+            window.Disappear == TrackAnimation.None || window.Scatters
+                ? double.PositiveInfinity : window.DisappearStart + window.Duration);
     }
 
     public Dictionary<int, MotionBounds> GetMotionBounds(CancellationToken token)
@@ -267,7 +268,8 @@ internal sealed class RuntimeTrackTimeline
         float opacity = basis.Opacity;
         double opacityStart = double.NegativeInfinity;
         ref readonly Motion motion = ref CollectionsMarshal.GetValueRefOrNullRef(_motion, floor);
-        if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(in motion))
+        bool hasMotion = !Unsafe.IsNullRef(in motion);
+        if (hasMotion)
         {
             transform = new FloorRenderTransform(
                 new Vector2(motion.X?.At(time) ?? transform.Offset.X, motion.Y?.At(time) ?? transform.Offset.Y),
@@ -279,8 +281,36 @@ internal sealed class RuntimeTrackTimeline
                 opacityStart = tween.Timing.Start;
             }
         }
-        _animation[floor].Apply(time, hidePassed, opacityStart, ref transform, ref opacity);
+        ref readonly TrackAnimationWindow animation = ref _animation[floor];
+        if (animation.Scatters && time >= animation.DisappearStart)
+        {
+            Motion noMotion = default;
+            ref readonly Motion scatterMotion = ref (hasMotion ? ref motion : ref noMotion);
+            var (offset, rotation) = ScatterPose(scatterMotion, basis.Transform, animation, time);
+            transform = transform with { Offset = offset, Rotation = rotation };
+        }
+        animation.Apply(time, hidePassed, opacityStart, ref transform, ref opacity);
         return (transform, basis.Hidden ? 0f : opacity);
+    }
+
+    private static (Vector2 Offset, float Rotation) ScatterPose(in Motion motion, in FloorRenderTransform basis,
+        in TrackAnimationWindow animation, double time, bool completeMoves = false)
+    {
+        double start = animation.DisappearStart;
+        float progress = animation.ScatterProgress(time);
+        Vector2 spread = animation.ScatterOffset;
+        return (new Vector2(Channel(motion.X, basis.Offset.X, spread.X, relative: true),
+                Channel(motion.Y, basis.Offset.Y, spread.Y, relative: true)),
+            Channel(motion.Rotation, basis.Rotation, animation.ScatterRotation, relative: false));
+
+        float Channel(Tween? move, float baseline, float delta, bool relative)
+        {
+            if (move is { } later && later.Timing.Start >= start)
+                return completeMoves ? later.To : later.At(time);
+            float from = move?.At(start) ?? baseline;
+            float target = (relative ? from : baseline) + delta;
+            return from + (target - from) * progress;
+        }
     }
 
     public (Vector2 Offset, float Rotation) PlanetMotionAt(int floor, double time)
@@ -333,11 +363,19 @@ internal sealed class RuntimeTrackTimeline
     {
         FloorTrackState basis = _baseline[floor];
         ref Motion motion = ref CollectionsMarshal.GetValueRefOrAddDefault(_motion, floor, out _);
+        ref readonly TrackAnimationWindow animation = ref _animation[floor];
+        bool followsScatter = (position.HasValue || rotation.HasValue) && animation.Scatters &&
+            timing.Start >= animation.DisappearStart;
+        // Start the replacement channels at the scattered pose, without changing unauthored axes.
+        var (fromOffset, fromRotation) = followsScatter
+            ? ScatterPose(motion, basis.Transform, animation, timing.Start, completeMoves: true)
+            : (new Vector2(motion.X?.To ?? basis.Transform.Offset.X, motion.Y?.To ?? basis.Transform.Offset.Y),
+                motion.Rotation?.To ?? basis.Transform.Rotation);
         if (position is Vector2 offset)
         {
             Vector2 target = basis.Transform.Offset + offset;
-            Change(ref motion.X, basis.Transform.Offset.X, target.X, timing);
-            Change(ref motion.Y, basis.Transform.Offset.Y, target.Y, timing);
+            if (float.IsFinite(target.X)) motion.X = new Tween(fromOffset.X, target.X, timing);
+            if (float.IsFinite(target.Y)) motion.Y = new Tween(fromOffset.Y, target.Y, timing);
         }
 
         if (scale is Vector2 size)
@@ -346,14 +384,13 @@ internal sealed class RuntimeTrackTimeline
             Change(ref motion.ScaleY, basis.Transform.Scale.Y, size.Y, timing);
         }
 
-        if (rotation is float angle)
+        if (rotation is float angle && float.IsFinite(angle))
         {
-            Change(ref motion.Rotation, basis.Transform.Rotation, angle, timing);
+            motion.Rotation = new Tween(fromRotation, angle, timing);
         }
 
         if (opacity is float alpha && float.IsFinite(alpha))
         {
-            ref readonly TrackAnimationWindow animation = ref _animation[floor];
             bool followsFade = timing.Start >= animation.AppearStart &&
                 animation.FadeReplacesOpacity(motion.Opacity?.Timing.Start ?? double.NegativeInfinity);
             // An opacity event completes the previous tween, including a fade-in, before replacing it.

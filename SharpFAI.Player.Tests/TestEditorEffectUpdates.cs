@@ -252,6 +252,7 @@ public sealed class TestEditorEffectUpdates
 
     private static void AssertEquivalent(ImageDecorationTimeline patched, ImageDecorationTimeline rebuilt)
     {
+        Assert.That(patched.TexturePrefetches, Is.EqualTo(rebuilt.TexturePrefetches));
         foreach (double time in new[] { 0, .5, .75, 1, 1.5, 2, 4, .75 })
             for (int i = 0; i < patched.Items.Count; i++)
                 Assert.That(patched.Items[i].At(time), Is.EqualTo(rebuilt.Items[i].At(time)), $"item {i} at {time}");

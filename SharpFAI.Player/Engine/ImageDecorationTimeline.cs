@@ -189,6 +189,7 @@ internal sealed class ImageDecorationTimeline
         public string[] Tags { get; } = Tags(source.Tag).Distinct(StringComparer.Ordinal).ToArray();
         public DecorationHitbox? Hitbox { get; } = DecorationHitbox.From(source);
         public int TimingVersion { get; private set; }
+        public bool HasFixedPose => _changes.Count == 0;
 
         public void Add(MoveImageDecoration item, TrackTiming timing, IReadOnlyDictionary<string, DecorationImage> images)
             => Add(new Motion(item, timing), images);
@@ -590,12 +591,35 @@ internal sealed class ImageDecorationTimeline
     }
 
     public List<Item> Items { get; } = [];
+    // Generated sprites keep their pixels here. File-backed entries hold only layout data.
     public Dictionary<string, DecorationImage> Images { get; } = new(StringComparer.Ordinal);
+    internal DecorationPixelCache PixelCache { get; } = new();
+
+    internal DecorationPixelStatus PrefetchPixels(string name, out DecorationImage image, bool currentFrame = false) =>
+        Images.TryGetValue(name, out image) && image.Pixels.Length != 0 ? DecorationPixelStatus.Ready :
+            PixelCache.Prefetch(name, out image, currentFrame);
+
+    internal bool ReadPixels(string name, out DecorationImage image) =>
+        (Images.TryGetValue(name, out image) && image.Pixels.Length != 0) || PixelCache.ReadRequired(name, out image);
+
+    internal Box2? AlphaBounds(string name) => Images.GetValueOrDefault(name).AlphaBounds ?? PixelCache.AlphaBounds(name);
     internal HashSet<string> AnimationFrames { get; } = new(StringComparer.Ordinal);
     internal readonly record struct AnimationFrame(double Start, string Image);
     internal AnimationFrame[] AnimationUploads { get; private set; } = [];
     internal (string Image, double Start)[] StaticTextureUploads { get; private set; } = [];
     internal (string Image, double Start)[] StaticTexturePrefetches { get; private set; } = [];
+    private AnimationFrame[] _texturePrefetches = [];
+    private double _textureScheduleEnd;
+    private bool _textureScheduleDirty;
+    internal AnimationFrame[] TexturePrefetches
+    {
+        get
+        {
+            if (_textureScheduleDirty)
+                BuildTextureSchedule();
+            return _texturePrefetches;
+        }
+    }
     internal Dictionary<string, double> TextureUseSeconds { get; } = new(StringComparer.Ordinal);
     public bool LegacyMasks { get; private init; }
     public HashSet<Item> ChangedItems { get; } = [];
@@ -645,6 +669,7 @@ internal sealed class ImageDecorationTimeline
         if (EditableDecoration(replacement.SourceIndex, decoration) is not { } item)
             return;
         item.EditInitial(replacement, Images);
+        _textureScheduleDirty = true;
         ChangedItems.Add(item);
     }
 
@@ -664,7 +689,10 @@ internal sealed class ImageDecorationTimeline
         Dictionary<Motion, Motion> compiled = [];
         foreach (var item in affected)
             if (item.EditMotions(replacements, Images, compiled))
+            {
+                _textureScheduleDirty = true;
                 ChangedItems.Add(item);
+            }
     }
 
     public void TriggerCondition(int floor, HitMargin margin, double time, bool failed = false, bool checkpoint = false)
@@ -898,13 +926,8 @@ internal sealed class ImageDecorationTimeline
         var tagged = new Dictionary<string, List<Item>>(StringComparer.Ordinal);
         var textImages = new Dictionary<(string? Font, string Value), string>();
         var pendingTexts = new Dictionary<(string? Font, string Value), string>();
-        // Declared up front so the loops below and the local functions can share it.
-        var missingImages = new HashSet<string>(StringComparer.Ordinal);
-
-        // Decode every referenced sprite first and in parallel: building the poses needs the pixel
-        // sizes, and PNG decoding of large artwork dominates load time on decoration-heavy charts.
-        // MoveDecorations can swap in artwork the AddDecoration pass never mentions, so collect
-        // those too before the worker pool starts.
+        // Poses need file dimensions, including images swapped in by MoveDecorations.
+        // Decode the actual pixels only near use.
         List<string> pendingImages = [];
         var seenImages = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in events.OfType<AddImageDecoration>())
@@ -921,7 +944,7 @@ internal sealed class ImageDecorationTimeline
             if (item.Enabled("decorationImage", item.Image) is { Length: > 0 } image)
                 QueueImage(image);
         }
-        DecodePendingImages(pendingImages, directory, timeline.Images, warnings, token, texturePercent);
+        timeline.IdentifyImages(pendingImages, directory, warnings, token, texturePercent, prepareImage);
         RasterizePendingTexts(pendingTexts, timeline.Images, cachedImages, warnings, token);
 
         foreach (var item in events.OfType<AddImageDecoration>())
@@ -1019,8 +1042,6 @@ internal sealed class ImageDecorationTimeline
 
             if (item is SetObjectDecoration)
                 matching.RemoveWhere(static decoration => !decoration.IsObject || decoration.IsPlayerBubble);
-            if (HasNonText(matching) && item.Enabled("decorationImage", item.Image) is { Length: > 0 } image)
-                LoadImage(image);
             if (timeline._editorMoveTargets is { } editorTargets && item.SourceIndex >= 0 &&
                 outcomes.Length == 0 && collision.Length == 0)
             {
@@ -1058,31 +1079,16 @@ internal sealed class ImageDecorationTimeline
             }
         }
 
-        List<AnimationFrame> frames = [];
-        foreach (Item item in timeline.Items)
-            item.CollectAnimationFrames(timeline.AnimationFrames, frames);
-        timeline.AnimationUploads = frames.Distinct().OrderBy(frame => frame.Start).ToArray();
-        Dictionary<string, double> staticUses = new(StringComparer.Ordinal);
-        Dictionary<(string Image, double Bucket), double> activations = [];
-        double endTime = times.Length == 0 ? 0 : times[^1];
-        foreach (Item item in timeline.Items)
-            item.CollectStaticTextureUses(legacyMasks, staticUses, activations, timeline.Images,
-                timeline.TextureUseSeconds, endTime);
-        timeline.StaticTextureUploads = staticUses.OrderBy(use => use.Value)
-            .Where(use => timeline.Images.ContainsKey(use.Key) && !timeline.AnimationFrames.Contains(use.Key))
-            .Select(use => (use.Key, use.Value)).ToArray();
-        timeline.StaticTexturePrefetches = timeline.StaticTextureUploads.Concat(activations
-                .Where(use => !timeline.AnimationFrames.Contains(use.Key.Image))
-                .Select(use => (Image: use.Key.Image, Start: use.Value)))
-            .Distinct().OrderBy(use => use.Start).ToArray();
+        timeline._textureScheduleEnd = times.Length == 0 ? 0 : times[^1];
+        timeline.BuildTextureSchedule();
         return timeline.Items.Count != 0 || timeline._conditions.Count != 0 ? timeline : null;
 
         void QueueImage(string image)
         {
             if (!seenImages.Add(image))
                 return;
-            if (cachedImages?.TryGetValue(image, out var pixels) == true)
-                timeline.Images.Add(image, pixels);
+            if (cachedImages?.TryGetValue(image, out var cached) == true && cached.Pixels.Length != 0)
+                timeline.Images.Add(image, cached);
             else
                 pendingImages.Add(image);
         }
@@ -1096,16 +1102,6 @@ internal sealed class ImageDecorationTimeline
             if (textImages.ContainsKey(textKey) || pendingTexts.ContainsKey(textKey))
                 return;
             pendingTexts.Add(textKey, TextImageKey(font, value));
-        }
-
-        static bool HasNonText(HashSet<Item> matching)
-        {
-            foreach (var decoration in matching)
-            {
-                if (!decoration.IsText)
-                    return true;
-            }
-            return false;
         }
 
         string? LoadText(string? font, JToken? tokenText)
@@ -1125,25 +1121,6 @@ internal sealed class ImageDecorationTimeline
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes((font ?? "") + "\0" + value)));
 
-        // The MoveDecorations pass may swap in an image the first pass never saw.
-        void LoadImage(string name)
-        {
-            if (directory is null || timeline.Images.ContainsKey(name) || !missingImages.Add(name))
-                return;
-            try
-            {
-                string fullPath = Path.GetFullPath(Path.Combine(directory, name));
-                string relative = Path.GetRelativePath(directory, fullPath);
-                if (Path.IsPathRooted(relative) || relative == ".." ||
-                    relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                    return;
-                timeline.Images[name] = DecorationImage.ReadFile(prepareImage?.Invoke(fullPath) ?? fullPath, texturePercent);
-            }            catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
-                SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
-            {
-                warnings.Add($"无法读取装饰贴图 {name}：{error.Message}");
-            }
-        }
     }
 
     /// <summary>
@@ -1193,72 +1170,87 @@ internal sealed class ImageDecorationTimeline
             warnings.Add($"无法栅格化文字装饰 {key}：{message}");
     }
 
-    /// <summary>
-    /// Decode the queued decoration images in parallel. Large artwork dominates load time on
-    /// decoration-heavy levels, and PNG decoding is independent per file.
-    /// </summary>
-    private static void DecodePendingImages(List<string> pending, string? directory,
-        Dictionary<string, DecorationImage> images, List<string> warnings, CancellationToken token, int texturePercent)
+    private void BuildTextureSchedule()
+    {
+        _textureScheduleDirty = false;
+        AnimationFrames.Clear();
+        TextureUseSeconds.Clear();
+        List<AnimationFrame> frames = [];
+        Dictionary<string, double> staticUses = new(StringComparer.Ordinal);
+        Dictionary<(string Image, double Bucket), double> activations = [];
+        foreach (Item item in Items)
+        {
+            item.CollectAnimationFrames(AnimationFrames, frames);
+            item.CollectStaticTextureUses(LegacyMasks, staticUses, activations, Images, TextureUseSeconds, _textureScheduleEnd);
+        }
+        AnimationUploads = frames.Distinct().OrderBy(frame => frame.Start).ToArray();
+        StaticTextureUploads = staticUses.OrderBy(use => use.Value)
+            .Where(use => Images.ContainsKey(use.Key) && !AnimationFrames.Contains(use.Key))
+            .Select(use => (use.Key, use.Value)).ToArray();
+        StaticTexturePrefetches = StaticTextureUploads.Concat(activations
+                .Where(use => !AnimationFrames.Contains(use.Key.Image))
+                .Select(use => (Image: use.Key.Image, Start: use.Value)))
+            .Distinct().OrderBy(use => use.Start).ToArray();
+        _texturePrefetches = AnimationUploads
+            .Concat(staticUses.Where(use => Images.ContainsKey(use.Key))
+                .Select(use => new AnimationFrame(use.Value, use.Key)))
+            .Concat(activations.Select(use => new AnimationFrame(use.Value, use.Key.Image)))
+            .Distinct().OrderBy(use => use.Start).ToArray();
+    }
+
+    private void IdentifyImages(List<string> pending, string? directory, List<string> warnings,
+        CancellationToken token, int texturePercent, Func<string, string>? prepareImage)
     {
         if (pending.Count == 0 || string.IsNullOrEmpty(directory))
             return;
 
-        // A single file is the common case (a MoveDecorations swap); avoid the scheduler
-        // round-trip that Parallel.ForEach adds for one item.
-        if (pending.Count == 1)
+        var layouts = new (string? Path, DecorationImage Image, string? Error)[pending.Count];
+        if (pending.Count == 1 || prepareImage is not null)
         {
-            Decode(pending[0]);
-            return;
+            for (int i = 0; i < pending.Count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                Identify(i);
+            }
         }
-        bool Decode(string name)
+        else
         {
-            try
+            Parallel.For(0, pending.Count, new ParallelOptions
             {
-                string fullPath = Path.GetFullPath(Path.Combine(directory, name));
-                string relative = Path.GetRelativePath(directory, fullPath);
-                if (Path.IsPathRooted(relative) || relative == ".." ||
-                    relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                    return false;
-                images[name] = DecorationImage.ReadFile(fullPath, texturePercent);
-                return true;
-            }
-            catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
-                SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
+                CancellationToken = token,
+                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount - 1, 1, 4),
+            }, Identify);
+        }
+        for (int i = 0; i < layouts.Length; i++)
+        {
+            var (path, image, error) = layouts[i];
+            string name = pending[i];
+            if (path is not null)
             {
-                warnings.Add($"无法读取装饰贴图 {name}：{error.Message}");
-                return false;
+                Images.Add(name, image);
+                PixelCache.Add(name, path, texturePercent, image);
             }
+            else if (error is not null)
+                warnings.Add($"无法读取装饰贴图 {name}：{error}");
         }
 
-        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, DecorationImage>(
-            StringComparer.Ordinal);
-        var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
-        Parallel.ForEach(pending, new ParallelOptions
-        {
-            CancellationToken = token,
-            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1),
-        }, name =>
+        void Identify(int index)
         {
             try
             {
-                string fullPath = Path.GetFullPath(Path.Combine(directory, name));
+                string fullPath = Path.GetFullPath(Path.Combine(directory, pending[index]));
                 string relative = Path.GetRelativePath(directory, fullPath);
                 if (Path.IsPathRooted(relative) || relative == ".." ||
                     relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                     return;
-                results[name] = DecorationImage.ReadFile(fullPath, texturePercent);
+                string path = prepareImage?.Invoke(fullPath) ?? fullPath;
+                layouts[index] = (path, DecorationImage.IdentifyFile(path, texturePercent), null);
             }
-            catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or
-                SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
+            catch (Exception error) when (DecorationPixelCache.IsReadError(error))
             {
-                failures[name] = error.Message;
+                layouts[index].Error = error.Message;
             }
-        });
-
-        foreach (var (name, pixels) in results)
-            images[name] = pixels;
-        foreach (var (name, message) in failures)
-            warnings.Add($"无法读取装饰贴图 {name}：{message}");
+        }
     }
 
     private static string[] Tags(string? tags) => string.IsNullOrWhiteSpace(tags) || tags == "NO TAG"

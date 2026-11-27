@@ -246,6 +246,7 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void SyncAudio()
     {
+        if (WaitingForSeekFrame) return;
         if (SyncModAudio()) return;
         if (!_audioAvailable || _progressScrubbing)
         {

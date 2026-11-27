@@ -289,7 +289,7 @@ internal sealed unsafe partial class EditorWindow
             RenderPlaybackFrame(renderer, size);
         }
         DrawPlaybackImage(size);
-        if (!canUseScene || renderer is null)
+        if (!canUseScene || renderer is null || _playbackFramePending)
         {
             ResetCanvasGesture();
             return;

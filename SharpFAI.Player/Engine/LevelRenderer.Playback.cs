@@ -13,6 +13,9 @@ public sealed unsafe partial class LevelRenderer
 
     private bool _playbackZoomNeedsReset = true;
     private bool _progressScrubbing;
+    private bool _prepareSeekFrame;
+    private long _seekLeadStarted;
+    private bool WaitingForSeekFrame => _prepareSeekFrame && _isPlaying && !_offlineSubSample;
     private bool _startFromSelectedFloor;
 
     private float PlaybackBaseZoom => _settings.CameraZoom is float zoom
@@ -26,6 +29,7 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
+        double previousTime = _playTime;
         PauseStartTiming pause = default;
         bool selectedPause = _startFromSelectedFloor && _pauseStarts?.TryGetValue(_selectedFloor, out pause) == true;
         _startFromSelectedFloor = false;
@@ -67,6 +71,8 @@ public sealed unsafe partial class LevelRenderer
         }
 
         SetRuntimeTrackMode(true);
+        _prepareSeekFrame |= _playTime != previousTime && _imageDecorations is not null;
+        _seekLeadStarted = 0;
         _isPlaying = true;
         _filterClockPaused = false;
         _audioNeedsResync = true;
@@ -169,6 +175,8 @@ public sealed unsafe partial class LevelRenderer
         }
 
         SetRuntimeTrackMode(false);
+        _prepareSeekFrame = _playTime > 0 && _imageDecorations is not null;
+        _seekLeadStarted = 0;
         _startFromSelectedFloor = false;
         _trackRuntime?.Reset();
         _isPlaying = false;
@@ -234,6 +242,14 @@ public sealed unsafe partial class LevelRenderer
         else
             ResetDecorationContacts();
         _playTime = target;
+        _prepareSeekFrame = _imageDecorations is not null;
+        _seekLeadStarted = 0;
+        if (WaitingForSeekFrame)
+        {
+            StopModAudio();
+            _music?.Pause();
+            _hitsound?.Pause();
+        }
         if (PlayInput.Enabled && _manualTrack is { LastFloor: >= 1 } track)
         {
             ClearManualAttempt();
@@ -260,8 +276,10 @@ public sealed unsafe partial class LevelRenderer
     /// </summary>
     private void UpdatePlayback(double delta)
     {
-        if (_floors.Count == 0 || _progressScrubbing)
+        if (_floors.Count == 0 || _progressScrubbing || WaitingForSeekFrame)
         {
+            if (WaitingForSeekFrame)
+                PlayInput.Clear();
             return;
         }
 

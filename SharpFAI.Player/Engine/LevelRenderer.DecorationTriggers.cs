@@ -10,6 +10,8 @@ public sealed unsafe partial class LevelRenderer
         public readonly DecorationHitbox Definition = definition;
         public readonly Vector2[] Vertices = new Vector2[definition.VertexCount];
         public readonly int[] Targets = targets;
+        public Box2? Bounds;
+        public bool NeedsBounds;
         public bool Active;
         public bool Touching;
         public double Fired = double.NegativeInfinity;
@@ -112,6 +114,8 @@ public sealed unsafe partial class LevelRenderer
             if (ImageDecorationRenderer.IsScreenRelative(pose))
                 model *= inverseView ??= Matrix4.Invert(_camera.ViewProjection);
             state.Definition.FillVertices(model, pixels, state.Vertices);
+            if (state.NeedsBounds)
+                state.Bounds = DecorationHitbox.BroadPhaseBounds(state.Vertices);
         }
 
         PlanetTrackFloor track = _planetTrack[_currentIndex];
@@ -140,8 +144,9 @@ public sealed unsafe partial class LevelRenderer
             var state = _decorationHitboxes[source];
             foreach (int other in state.Targets)
             {
-                if (_decorationHitboxes[other].Active &&
-                    DecorationHitbox.Overlaps(state.Vertices, _decorationHitboxes[other].Vertices))
+                var candidate = _decorationHitboxes[other];
+                if (candidate.Active && DecorationHitbox.MayOverlap(state.Bounds, candidate.Bounds) &&
+                    DecorationHitbox.Overlaps(state.Vertices, candidate.Vertices))
                     return true;
             }
             return false;
@@ -170,6 +175,14 @@ public sealed unsafe partial class LevelRenderer
                         targets.UnionWith(indexes);
             targets.Remove(i);
             frames[i] = new HitboxFrame(definition, targets.ToArray());
+        }
+        foreach (var frame in frames)
+        {
+            if (frame.Targets.Length == 0)
+                continue;
+            frame.NeedsBounds = true;
+            foreach (int target in frame.Targets)
+                frames[target].NeedsBounds = true;
         }
         return frames;
     }

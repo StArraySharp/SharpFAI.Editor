@@ -79,6 +79,37 @@ internal sealed record DecorationHitbox(bool Kills, string? Shape, Vector2 Scale
     public static bool Overlaps(ReadOnlySpan<Vector2> first, ReadOnlySpan<Vector2> second) =>
         !Separated(first, second) && !Separated(second, first);
 
+    internal static Box2? BroadPhaseBounds(ReadOnlySpan<Vector2> vertices)
+    {
+        Vector2 origin = vertices[0];
+        Vector2 min = origin, max = origin, direction = Vector2.Zero;
+        double area = 0;
+        foreach (var point in vertices)
+        {
+            if (!float.IsFinite(point.X) || !float.IsFinite(point.Y))
+                return null;
+            min = Vector2.ComponentMin(min, point);
+            max = Vector2.ComponentMax(max, point);
+            Vector2 delta = point - origin;
+            area = Math.Max(area, Math.Abs((double)direction.X * delta.Y - (double)direction.Y * delta.X));
+            if (direction == Vector2.Zero)
+                direction = delta;
+        }
+
+        // Let the original SAT decide degenerate and nearly degenerate shapes. Leave a margin
+        // for rounding in its float projections and preserve contact at a shared edge.
+        Vector2 extent = max - min;
+        float span = Math.Max(extent.X, extent.Y);
+        Vector2 magnitude = Vector2.ComponentMax(Vector2.Abs(min), Vector2.Abs(max));
+        if (area <= (double)span * span * .000001 || Math.Max(magnitude.X, magnitude.Y) >= 1e15f)
+            return null;
+        Vector2 margin = (magnitude + new Vector2(span)) * .000004f + new Vector2(.001f);
+        return new Box2(min - margin, max + margin);
+    }
+
+    internal static bool MayOverlap(Box2? first, Box2? second) => first is not { } a || second is not { } b ||
+        !(a.Max.X < b.Min.X || b.Max.X < a.Min.X || a.Max.Y < b.Min.Y || b.Max.Y < a.Min.Y);
+
     private static bool Separated(ReadOnlySpan<Vector2> first, ReadOnlySpan<Vector2> second)
     {
         Vector2 previous = first[^1];

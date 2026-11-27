@@ -48,6 +48,7 @@ internal sealed unsafe partial class EditorWindow
     private bool _playbackHovered;
     private bool _playbackPan;
     private bool _playbackFrameAvailable;
+    private bool _playbackFramePending;
     private int _playbackFbo;
     private int _playbackTexture;
     private int _playbackWidth;
@@ -430,7 +431,7 @@ internal sealed unsafe partial class EditorWindow
             _playbackHovered = ImGui.IsItemHovered() != 0;
 
             if (ready && renderer is not null && _playbackView == PlaybackView.Preview)
-                NavigatePlaybackPreview(renderer, selectTiles: !_canvasOnly);
+                NavigatePlaybackPreview(renderer, selectTiles: !_canvasOnly && !_playbackFramePending);
             if (ready && renderer is { CanNavigateEditorPlayback: true } && _playbackView is PlaybackView.Auto or PlaybackView.Manual)
                 NavigateActivePlayback(renderer);
             else
@@ -553,6 +554,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void RenderPlaybackFrame(LevelRenderer renderer, ImVec2 size, SceneRenderView? scene = null)
     {
+        _playbackFramePending = false;
         ImVec2 scale = ImGui.GetIO()->DisplayFramebufferScale;
         int width = Math.Max(1, (int)(size.x * scale.x));
         int height = Math.Max(1, (int)(size.y * scale.y));
@@ -570,6 +572,7 @@ internal sealed unsafe partial class EditorWindow
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, _playbackFbo);
             if (width != _playbackWidth || height != _playbackHeight)
             {
+                _playbackFrameAvailable = false;
                 GL.BindTexture(TextureTarget.Texture2D, _playbackTexture);
                 GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb8, width, height,
                     0, PixelFormat.Rgb, PixelType.UnsignedByte, 0);
@@ -603,15 +606,25 @@ internal sealed unsafe partial class EditorWindow
             renderer.SetEditorTilesOnly(tilesOnly);
             var background = tilesOnly ? new Vector4(.059f, .065f, .083f, 1) : renderer.BackgroundColor;
             background.W = 1;
-            GL.ClearColor(background.X, background.Y, background.Z, background.W);
-            GL.Clear(ClearBufferMask.ColorBufferBit);
             renderer.ShowDecorations = !editing || (!_hideAllDecorations && !tilesOnly);
             renderer.ShowPositionTrackGuides = editing && !_canvasOnly;
             renderer.CollectDecorationQuads = editing && !tilesOnly && !_canvasOnly;
-            if (scene is { } view) renderer.RenderEditorScene(background, view);
-            else if (tilesOnly) renderer.RenderEditorTiles();
-            else renderer.RenderAfterClear(background);
-            _playbackFrameAvailable = true;
+            if (!tilesOnly && scene is null && renderer.ShouldStageEditorPreview)
+            {
+                // Keep presenting the last complete frame while the newest seek target uploads.
+                _playbackFramePending = !renderer.TryRenderEditorPreview(background);
+                if (!_playbackFramePending)
+                    _playbackFrameAvailable = true;
+            }
+            else
+            {
+                GL.ClearColor(background.X, background.Y, background.Z, background.W);
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                if (scene is { } view) renderer.RenderEditorScene(background, view);
+                else if (tilesOnly) renderer.RenderEditorTiles();
+                else renderer.RenderAfterClear(background);
+                _playbackFrameAvailable = true;
+            }
         }
         finally
         {

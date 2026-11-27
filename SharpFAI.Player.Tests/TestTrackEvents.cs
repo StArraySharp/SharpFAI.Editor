@@ -259,6 +259,42 @@ public class TestTrackEvents
         Assert.That(timeline.TransformAt(2, .9, false).Opacity, Is.EqualTo(1));
     }
 
+    [TestCase("Scatter")]
+    [TestCase("Scatter_Far")]
+    public void OpeningMoveTrackCanBringScatteredFloorsBack(string animation)
+    {
+        Level level = Chart(
+            $$"""{"floor":1,"eventType":"AnimateTrack","trackDisappearAnimation":"{{animation}}","beatsBehind":-100,"justThisTile":true}""",
+            """{"floor":1,"eventType":"MoveTrack","opacity":0,"duration":0,"angleOffset":-900}""",
+            """{"floor":1,"eventType":"MoveTrack","opacity":100,"positionOffset":[0,0],"rotationOffset":0,"duration":4,"angleOffset":-720}""",
+            """{"floor":3,"eventType":"MoveTrack","startTile":[1,"Start"],"endTile":[1,"Start"],"opacity":0,"duration":0}""");
+        RuntimeTrackTimeline timeline = Runtime(level, 5, start: 3);
+
+        timeline.Advance(.75);
+        var scattered = timeline.TransformAt(1, .75, false);
+        Assert.That(scattered.Opacity, Is.EqualTo(1));
+        Assert.That(scattered.Transform.Offset, Is.Not.EqualTo(Vector2.Zero));
+
+        timeline.Advance(2.5);
+        var returning = timeline.TransformAt(1, 2.5, false);
+        Assert.That(returning.Transform.Offset, Is.EqualTo(scattered.Transform.Offset * .5f));
+        Assert.That(returning.Transform.Rotation, Is.EqualTo(scattered.Transform.Rotation * .5f));
+        Assert.That(returning.Opacity, Is.EqualTo(.5f));
+
+        timeline.Advance(3.6);
+        var restored = timeline.TransformAt(1, 3.6, false);
+        Assert.That(restored.Transform.Offset, Is.EqualTo(Vector2.Zero));
+        Assert.That(restored.Transform.Rotation, Is.Zero);
+        Assert.That(restored.Opacity, Is.EqualTo(1));
+        Assert.That(timeline.VisibilityAt(1).Intersects(new(3.6, 3.6)), Is.True);
+        Assert.That(timeline.TransformAt(1, 4.1, true).Opacity, Is.Zero);
+
+        timeline.Advance(4.6);
+        Assert.That(timeline.TransformAt(1, 4.6, false).Opacity, Is.Zero);
+        timeline.Advance(2.5);
+        Assert.That(timeline.TransformAt(1, 2.5, false), Is.EqualTo(returning));
+    }
+
     [TestCase("Extend")]
     [TestCase("Fade")]
     public void OpeningFloorsAreVisibleDuringPositiveAudioLeadIn(string animation)
