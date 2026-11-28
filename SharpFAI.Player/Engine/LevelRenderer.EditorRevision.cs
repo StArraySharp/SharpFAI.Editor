@@ -328,7 +328,7 @@ public sealed unsafe partial class LevelRenderer
                 if (Has(EditorLayers.Manual | EditorLayers.Rate)) update.Manual = new ManualTrack(nextFloors, timeline, events);
                 if (Has(EditorLayers.Audio | EditorLayers.Rate))
                     update.Audio = BuildAudio(model, path, nextFloors, timeline, settings, reuse: audio,
-                        reuseHitsound: !Has(EditorLayers.Timing) && settings.Hitsound == previousSettings.Hitsound);
+                        reuseHitsound: !Has(EditorLayers.Timing) && settings.Hitsound == previousSettings.Hitsound, cancellation: token);
                 // A track edit rebuilt every dependent timeline. Bind the new schedules
                 // together before publishing them to the render thread.
                 if (trackChanged && update.Decoration is { } decorations)

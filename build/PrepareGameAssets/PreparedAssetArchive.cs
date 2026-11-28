@@ -201,6 +201,8 @@ internal static partial class PreparedAssetArchive
 
     private static string? ResourceKey(string path)
     {
+        if (EventIconPath().IsMatch(path))
+            return "Resources.LevelEditor.LevelEvents." + path["EventIcons/".Length..];
         if (path.StartsWith("Textures/", StringComparison.Ordinal) && path.EndsWith(".png", StringComparison.Ordinal))
             return "Resources.Filters." + path["Textures/".Length..];
         if (path.StartsWith("Metadata/Textures/", StringComparison.Ordinal) && path.EndsWith(".png.meta", StringComparison.Ordinal))
@@ -225,6 +227,9 @@ internal static partial class PreparedAssetArchive
 
     [GeneratedRegex(@"\A[0-9a-f]{64}\z")]
     private static partial Regex Fingerprint();
+
+    [GeneratedRegex(@"\AEventIcons/[a-z0-9]+\.png\z")]
+    private static partial Regex EventIconPath();
 
     [GeneratedRegex(@"\A[A-Za-z0-9_ .-]{1,255}\z")]
     private static partial Regex SafeName();

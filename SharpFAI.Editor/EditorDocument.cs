@@ -145,10 +145,10 @@ internal sealed partial class EditorDocument
     public static int Floor(JObject value) => value.Value<int?>("floor") ?? 0;
     public static string Type(JObject value) => value.Value<string>("eventType") ?? "";
 
-    public void SetTimeSignature(double beat, TimeSignature? signature)
+    public void SetTimeSignature(double beat, TimeSignature? signature, double? timelineBpm = null)
     {
         var before = TimeSignatures;
-        var after = before.WithChange(beat, signature);
+        var after = before.WithChange(beat, signature, timelineBpm);
         if (before.Changes.SequenceEqual(after.Changes))
             return;
         JToken? previous = _level.root[TimeSignatureKey]?.DeepClone();

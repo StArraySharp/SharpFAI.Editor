@@ -396,7 +396,7 @@ public sealed partial class LevelRenderer
             try
             {
                 token.ThrowIfCancellationRequested();
-                var next = (byte[])(output ?? source.Pcm).Clone();
+                var next = output is not null ? (byte[])output.Clone() : source.IsStreamed ? source.ReadPcm(token) : (byte[])source.Pcm.Clone();
                 entry.Value.Process(new(source.SampleRate, source.Channels), MemoryMarshal.Cast<byte, short>(next.AsSpan()));
                 output = next;
             }

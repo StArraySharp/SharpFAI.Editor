@@ -14,7 +14,7 @@ public sealed unsafe partial class LevelRenderer
     internal readonly record struct EditorAudioReuse(string? MusicPath, DecodedAudio? Music, DecodedAudio? Hitsound, double Rate = 1.0);
 
     /// <summary>
-    /// Background side: decode the music and synthesize the hitsound (CPU only, no OpenAL calls).
+    /// Background side: probe the music stream and synthesize the hitsound (CPU only, no OpenAL calls).
     /// The caller may set <paramref name="reuseHitsound"/> when the timing and hitsound settings are unchanged.
     /// </summary>
     internal static (string? MusicPath, DecodedAudio? Music, DecodedAudio? Hitsound) BuildAudio(
@@ -25,7 +25,7 @@ public sealed unsafe partial class LevelRenderer
         LevelPlaybackSettings settings,
         Action<string, double>? markPhase = null,
         EditorAudioReuse? reuse = null,
-        bool reuseHitsound = false, Func<string, string>? prepareMusic = null)
+        bool reuseHitsound = false, Func<string, string>? prepareMusic = null, CancellationToken cancellation = default)
     {
         if (settings.SkipAudio)
             return default;
@@ -35,8 +35,8 @@ public sealed unsafe partial class LevelRenderer
             musicPath = prepareMusic(musicPath);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         DecodedAudio? music = reuse is { } prior && string.Equals(musicPath, prior.MusicPath, StringComparison.Ordinal)
-            ? prior.Music : musicPath is null ? null : AudioDecoder.Decode(musicPath);
-        markPhase?.Invoke("解码音乐", clock.Elapsed.TotalMilliseconds);
+            ? prior.Music : musicPath is null ? null : AudioDecoder.OpenStream(musicPath, cancellation);
+        markPhase?.Invoke("读取音乐信息", clock.Elapsed.TotalMilliseconds);
 
         clock.Restart();
         DecodedAudio? hitsound = null;
@@ -51,6 +51,9 @@ public sealed unsafe partial class LevelRenderer
     }
 
     private bool _audioBackendReady;
+    private bool _bufferingNativeAudio;
+    private AudioClip? _bufferingMusic;
+    private AudioClip? _bufferingHitsound;
     private string? _musicLoadWarning;
     private string? _hitsoundPresetWarning;
 
@@ -69,7 +72,7 @@ public sealed unsafe partial class LevelRenderer
             _music = new AudioClip { Name = "Music", Volume = PlaybackMusicGain };
             _hitsound = new AudioClip { Name = "Hitsound", Volume = _hitsoundVolume * _hitsoundOutputGain };
             if (result.Music is { } music)
-                _music.LoadDecoded(AtPlaybackRate(music));
+                _music.LoadDecoded(music, _pitch);
             if (result.Hitsound is { } hitsound)
                 _hitsound.LoadDecoded(hitsound);
         }
@@ -97,7 +100,7 @@ public sealed unsafe partial class LevelRenderer
         if (backendReady && _music is { } musicClip && _hitsound is { } hitsoundClip)
         {
             if (musicChanged)
-                _music = musicClip = UpdateEditorClip(musicClip, music is null ? null : AtPlaybackRate(music));
+                _music = musicClip = UpdateEditorClip(musicClip, music, _pitch);
             if (hitsoundChanged)
                 _hitsound = hitsoundClip = UpdateEditorClip(hitsoundClip, hitsound);
 
@@ -112,24 +115,24 @@ public sealed unsafe partial class LevelRenderer
         UpdateAudioStatus(backendReady);
     }
 
-    private static AudioClip UpdateEditorClip(AudioClip clip, DecodedAudio? audio)
+    private static AudioClip UpdateEditorClip(AudioClip clip, DecodedAudio? audio, double rate = 1.0)
     {
-        if (audio is not null)
-        {
-            clip.LoadDecoded(audio);
-        }
-        else if (clip.IsLoaded)
-        {
-            // AudioClip has no unload operation. Replace only the clip whose PCM was removed.
-            clip.Dispose();
-            return new AudioClip { Name = clip.Name };
-        }
-        return clip;
+        if (audio is not null && clip.LoadDecoded(audio, rate))
+            return clip;
+        // Clear the previous track even when its replacement could not be loaded.
+        clip.Dispose();
+        return new AudioClip { Name = clip.Name };
     }
 
     private void SetAudioData(string? musicPath, DecodedAudio? music, DecodedAudio? hitsound)
     {
-        // Retain the original PCM and path for export, even without OpenAL.
+        // Retain the sources for export, even without OpenAL.
+        if (!ReferenceEquals(_audioMusic, music))
+        {
+            _trackAudioWindow?.Dispose();
+            _trackAudioWindow = null;
+            _trackAudioFailed = false;
+        }
         _audioMusicPath = musicPath;
         _audioMusic = music;
         _audioHitsound = hitsound;
@@ -186,13 +189,6 @@ public sealed unsafe partial class LevelRenderer
         previous = warning;
     }
 
-    private DecodedAudio AtPlaybackRate(DecodedAudio source) => _pitch == 1.0 ? source : new DecodedAudio
-    {
-        Pcm = source.Pcm,
-        Channels = source.Channels,
-        SampleRate = Math.Max(1, (int)Math.Round(source.SampleRate * _pitch)),
-    };
-
     private static DecodedAudio? SynthesizeHitsound(List<Floor> floors, PlaybackTimeline timeline)
     {
         if (floors.Count == 0)
@@ -217,11 +213,8 @@ public sealed unsafe partial class LevelRenderer
             return false;
         }
 
-        bool wasPlaying = _isPlaying;
-        double position = _playTime;
-
-        DecodedAudio? decoded = AudioDecoder.Decode(wavPath);
-        if (decoded is null || decoded.Pcm.Length == 0 || !clip.LoadDecoded(decoded))
+        DecodedAudio? decoded = AudioDecoder.OpenStream(wavPath);
+        if (decoded is null || !clip.LoadDecoded(decoded))
         {
             return false;
         }
@@ -229,28 +222,22 @@ public sealed unsafe partial class LevelRenderer
         clip.Volume = _hitsoundVolume * _hitsoundOutputGain;
         _audioHitsound = decoded;
 
-        double target = (position + HitsoundClockShift) / _pitch;
-        clip.Seek(Math.Max(0.0, target));
-        if (wasPlaying && target >= 0.0 && target < clip.Duration)
-            clip.Play();
-
         UpdateAudioDuration();
         _audioNeedsResync = true;
         return true;
     }
 
     /// <summary>
-    /// Sync audio to the playback clock. Audio state only changes on play/pause/seek;
-    /// during normal playback we merely top up the queue, because seeking mid-stream cuts
-    /// the buffered audio and sounds stretched.
+    /// Fill the audio queues and tell the chart clock when it can advance.
     /// </summary>
-    private void SyncAudio()
+    private bool SyncAudio()
     {
-        if (WaitingForSeekFrame) return;
-        if (SyncModAudio()) return;
-        if (!_audioAvailable || _progressScrubbing)
+        if (WaitingForSeekFrame) return false;
+        bool? mixedAudioReady = SyncModAudio();
+        if (mixedAudioReady.HasValue || !_audioAvailable || _progressScrubbing)
         {
-            return;
+            ClearNativeAudioBuffering();
+            return mixedAudioReady ?? true;
         }
 
         if (_music is { } music)
@@ -258,54 +245,66 @@ public sealed unsafe partial class LevelRenderer
             float gain = PlaybackMusicGain;
             if (music.Volume != gain) music.Volume = gain;
         }
-        SyncClip(_music, _musicEnabled, AudioClockShift);
-        SyncClip(_hitsound, _hitsoundEnabled, HitsoundClockShift);
+        double musicTime = (_playTime + AudioClockShift) / _pitch;
+        double hitTime = (_playTime + HitsoundClockShift) / _pitch;
+        AudioClip? musicClip = ActiveClip(_music, _musicEnabled, musicTime);
+        AudioClip? hitsoundClip = ActiveClip(_hitsound, _hitsoundEnabled, hitTime);
+        if (musicClip is null && hitsoundClip is null)
+        {
+            ClearNativeAudioBuffering();
+            _audioNeedsResync = false;
+            return true;
+        }
 
-        // Clear the flag once both clips have been aligned
-        _audioNeedsResync = false;
+        if (!_audioNeedsResync && !_bufferingNativeAudio)
+        {
+            musicClip?.UpdateBuffers();
+            hitsoundClip?.UpdateBuffers();
+            // A naturally finished track does not hold the other track at its last sample.
+            if (musicClip?.IsAtEnd == true) musicClip = null;
+            if (hitsoundClip?.IsAtEnd == true) hitsoundClip = null;
+            if (musicClip?.IsOutputPlaying != false && hitsoundClip?.IsOutputPlaying != false)
+                return true;
+        }
+
+        if (_audioNeedsResync || !_bufferingNativeAudio ||
+            (musicClip is not null && !ReferenceEquals(musicClip, _bufferingMusic)) ||
+            (hitsoundClip is not null && !ReferenceEquals(hitsoundClip, _bufferingHitsound)))
+        {
+            // Both tracks share this chart time. Starting either one before the other has decoded
+            // leaves a permanent offset even once both OpenAL sources are producing samples.
+            musicClip?.PreparePlayback(musicTime);
+            hitsoundClip?.PreparePlayback(hitTime);
+            _bufferingNativeAudio = true;
+            _bufferingMusic = musicClip;
+            _bufferingHitsound = hitsoundClip;
+            _audioNeedsResync = false;
+        }
+
+        bool musicReady = musicClip?.BufferForStart() != false;
+        bool hitsoundReady = hitsoundClip?.BufferForStart() != false;
+        if ((!musicReady && musicClip!.IsLoaded) || (!hitsoundReady && hitsoundClip!.IsLoaded))
+            return false;
+
+        AudioClip.PlayPrepared(musicReady ? musicClip : null, hitsoundReady ? hitsoundClip : null);
+        ClearNativeAudioBuffering();
+        // Playback was started just now. The incoming tick's delta belongs to the buffering interval.
+        return false;
     }
 
-    /// <summary>
-    /// Aligns a clip to the playback clock using its offset in chart seconds.
-    /// </summary>
-    private void SyncClip(AudioClip? clip, bool enabled, double shift)
+    private AudioClip? ActiveClip(AudioClip? clip, bool enabled, double time)
     {
-        if (clip is not { IsLoaded: true })
-        {
-            return;
-        }
+        if (clip is { IsLoaded: true } && _isPlaying && enabled && time >= 0 && time < clip.Duration &&
+            (_audioNeedsResync || !clip.IsAtEnd))
+            return clip;
+        clip?.Pause();
+        return null;
+    }
 
-        if (!enabled)
-        {
-            clip.Pause();
-            return;
-        }
-
-        double target = (_playTime + shift) / _pitch;
-        if (!_isPlaying || target < 0.0 || target >= clip.Duration)
-        {
-            if (clip.IsPlaying)
-            {
-                clip.Pause();
-            }
-
-            return;
-        }
-
-        if (!clip.IsPlaying)
-        {
-            clip.Seek(target);
-            clip.Play();
-            clip.Update();
-            return;
-        }
-
-        if (_audioNeedsResync)
-        {
-            clip.Seek(target);
-        }
-
-        clip.Update();
+    private void ClearNativeAudioBuffering()
+    {
+        _bufferingNativeAudio = false;
+        _bufferingMusic = _bufferingHitsound = null;
     }
 
     /// <summary>
@@ -330,6 +329,7 @@ public sealed unsafe partial class LevelRenderer
     /// <summary>导出时将谱面打击音增益翻倍 / Double the chart hitsound gain for the export mix.</summary>
     public float HitsoundVolumeExport => _hitsoundVolume * 2f;
 
+    private float _playbackOutputGain = 1f;
     private float _musicOutputGain = 1f;
     private float _hitsoundOutputGain = 1f;
     private float PlaybackMusicGain => _musicVolume * _musicOutputGain *
@@ -338,9 +338,9 @@ public sealed unsafe partial class LevelRenderer
     // Local monitoring gains are independent of the chart and the export mix.
     public void SetPlaybackOutputVolumes(int master, int music, int hitsound)
     {
-        float gain = Math.Clamp(master, 0, 100) / 100f;
-        _musicOutputGain = gain * (Math.Clamp(music, 0, 100) / 100f);
-        _hitsoundOutputGain = gain * (Math.Clamp(hitsound, 0, 100) / 100f);
+        _playbackOutputGain = Math.Clamp(master, 0, 100) / 100f;
+        _musicOutputGain = _playbackOutputGain * (Math.Clamp(music, 0, 100) / 100f);
+        _hitsoundOutputGain = _playbackOutputGain * (Math.Clamp(hitsound, 0, 100) / 100f);
         _music?.Volume = PlaybackMusicGain;
         _hitsound?.Volume = _hitsoundVolume * _hitsoundOutputGain;
     }
@@ -411,10 +411,5 @@ public sealed unsafe partial class LevelRenderer
         _hitsoundShiftMs = Math.Clamp(milliseconds, -300f, 300f);
         _audioNeedsResync = true;
         UpdateAudioDuration();
-
-        if (_hitsound is { IsLoaded: true })
-        {
-            _hitsound.Seek(Math.Max(0.0, _playTime + HitsoundClockShift) / _pitch);
-        }
     }
 }

@@ -18,7 +18,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
     private static string SettingsWindow => L.T("Settings") + "###settings";
     private static string DecorationsWindow => L.T("Decorations") + "###decorations";
     private static string CanvasWindow => L.T("Chart") + "###canvas";
-    private static string InspectorWindow => L.T("Inspector") + "###inspector";
+    private string InspectorWindow => L.T(_inspectDecoration && _decoration?.Parent is not null
+        ? "DecorationInspector" : "TileInspector") + "###inspector";
     private string PaletteWindow => L.T(_showTimeline ? _showPalette ? "TimelineAndEvents" : "Timeline" : "Palette") + "###palette";
     private static string ParticleWindow => L.T("ParticleEditor") + "###particle";
     private static uint EditorDockspaceId => ImGui.GetID("##editor-dockspace");
@@ -83,11 +84,26 @@ internal sealed unsafe partial class EditorWindow : GameWindow
 
         ImGui.StyleColorsDark();
         ImGuiStyle* style = ImGui.GetStyle();
-        style->WindowRounding = 4;
-        style->FrameRounding = 4;
-        style->TabRounding = 3;
-        style->WindowPadding = WidgetDraw.V2(10, 8);
-        style->FramePadding = WidgetDraw.V2(7, 4);
+        style->WindowRounding = 6;
+        style->ChildRounding = 6;
+        style->PopupRounding = 6;
+        style->FrameRounding = 5;
+        style->TabRounding = 4;
+        style->GrabRounding = 4;
+        style->ScrollbarRounding = 6;
+        style->WindowPadding = WidgetDraw.V2(12, 9);
+        style->FramePadding = WidgetDraw.V2(8, 5);
+        style->ItemSpacing = WidgetDraw.V2(8, 6);
+        style->ItemInnerSpacing = WidgetDraw.V2(6, 5);
+        style->CellPadding = WidgetDraw.V2(6, 4);
+        style->WindowBorderSize = 0;
+        style->ChildBorderSize = 1;
+        style->FrameBorderSize = 1;
+        style->TabBarBorderSize = 0;
+        style->SeparatorSize = 1;
+        style->ScrollbarSize = 12;
+        style->GrabMinSize = 10;
+        style->DisabledAlpha = 0.5f;
         ApplyTheme(style);
         ApplicationFont.LoadInterfaceFont(io, 17f);
         LoadApplicationSettings();
@@ -206,9 +222,11 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         // Ctrl+Space must reach the chart even when there is no selected tile. Text fields still own the IME.
         _inputMethod?.Update(IsFocused, !ShortcutOverlayOpen);
         UpdateTitle();
+        if (!_canvasOnly) DrawWindowBorder();
 
         GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
-        GL.ClearColor(0.059f, 0.065f, 0.083f, 1);
+        ImVec4 background = *ImGui.GetStyleColorVec4((int)ImGuiCol.ImGuiCol_DockingEmptyBg);
+        GL.ClearColor(background.x, background.y, background.z, background.w);
         GL.Clear(ClearBufferMask.ColorBufferBit);
         ImGui.Render();
         ImGui_ImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
@@ -218,18 +236,95 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         AdvanceModPerformance();
     }
 
+    private static void DrawWindowBorder()
+    {
+        const float thickness = 2f;
+        ImGuiViewport* viewport = ImGui.GetMainViewport();
+        ImVec2 min = WidgetDraw.V2(viewport->Pos.x + thickness * .5f, viewport->Pos.y + thickness * .5f);
+        ImVec2 max = WidgetDraw.V2(viewport->Pos.x + viewport->Size.x - thickness * .5f,
+            viewport->Pos.y + viewport->Size.y - thickness * .5f);
+        WidgetDraw.Outline(ImGui.GetForegroundDrawList(viewport), min, max,
+            WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark, .85f), rounding: 0, thickness: thickness);
+    }
+
     private static void ApplyTheme(ImGuiStyle* style)
     {
         ImVec4* colors = (ImVec4*)&style->Colors;
-        colors[(int)ImGuiCol.ImGuiCol_WindowBg] = WidgetDraw.V4(0.095f, 0.105f, 0.15f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_MenuBarBg] = WidgetDraw.V4(0.075f, 0.082f, 0.115f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_FrameBg] = WidgetDraw.V4(0.13f, 0.15f, 0.21f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_Button] = WidgetDraw.V4(0.16f, 0.20f, 0.27f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_ButtonHovered] = WidgetDraw.V4(0.18f, 0.36f, 0.42f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_Header] = WidgetDraw.V4(0.13f, 0.32f, 0.37f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_HeaderHovered] = WidgetDraw.V4(0.18f, 0.36f, 0.42f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_TabSelected] = WidgetDraw.V4(0.13f, 0.32f, 0.37f, 1);
-        colors[(int)ImGuiCol.ImGuiCol_CheckMark] = WidgetDraw.V4(0.37f, 0.87f, 0.81f, 1);
+        const uint accent = 0x82BAFF, accentBright = 0xACD5FF;
+        const uint selected = 0x244C83, hovered = 0x2C5C9D, active = 0x306AB6;
+        const uint background = 0x0A1221, panel = 0x111D32, inset = 0x0E182A, border = 0x45638E;
+
+        void Set(ImGuiCol index, uint rgb, float alpha = 1f)
+        {
+            colors[(int)index] = WidgetDraw.V4(((rgb >> 16) & 255) / 255f,
+                ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f, alpha);
+        }
+
+        Set(ImGuiCol.ImGuiCol_WindowBg, panel);
+        Set(ImGuiCol.ImGuiCol_ChildBg, inset);
+        Set(ImGuiCol.ImGuiCol_PopupBg, 0x172740);
+        Set(ImGuiCol.ImGuiCol_MenuBarBg, background);
+        Set(ImGuiCol.ImGuiCol_TitleBg, inset);
+        Set(ImGuiCol.ImGuiCol_TitleBgActive, 0x1B3151);
+        Set(ImGuiCol.ImGuiCol_TitleBgCollapsed, background);
+        Set(ImGuiCol.ImGuiCol_DockingEmptyBg, background);
+        Set(ImGuiCol.ImGuiCol_ModalWindowDimBg, 0x060B16, .62f);
+
+        Set(ImGuiCol.ImGuiCol_Text, 0xEBF2FF);
+        Set(ImGuiCol.ImGuiCol_TextDisabled, 0xA0B3D0);
+        Set(ImGuiCol.ImGuiCol_TextSelectedBg, active, .85f);
+        Set(ImGuiCol.ImGuiCol_InputTextCursor, accent);
+
+        Set(ImGuiCol.ImGuiCol_Border, border, .60f);
+        Set(ImGuiCol.ImGuiCol_BorderShadow, 0x000000, 0f);
+        Set(ImGuiCol.ImGuiCol_Separator, 0x324969);
+        Set(ImGuiCol.ImGuiCol_SeparatorHovered, accent, .65f);
+        Set(ImGuiCol.ImGuiCol_SeparatorActive, accent);
+
+        Set(ImGuiCol.ImGuiCol_FrameBg, 0x182945);
+        Set(ImGuiCol.ImGuiCol_FrameBgHovered, 0x203859);
+        Set(ImGuiCol.ImGuiCol_FrameBgActive, selected);
+        Set(ImGuiCol.ImGuiCol_Button, 0x1C3151);
+        Set(ImGuiCol.ImGuiCol_ButtonHovered, hovered);
+        Set(ImGuiCol.ImGuiCol_ButtonActive, active);
+        Set(ImGuiCol.ImGuiCol_Header, selected);
+        Set(ImGuiCol.ImGuiCol_HeaderHovered, hovered);
+        Set(ImGuiCol.ImGuiCol_HeaderActive, active);
+        Set(ImGuiCol.ImGuiCol_CheckMark, accent);
+        Set(ImGuiCol.ImGuiCol_CheckboxSelectedBg, selected);
+        Set(ImGuiCol.ImGuiCol_SliderGrab, 0x619BE9);
+        Set(ImGuiCol.ImGuiCol_SliderGrabActive, accentBright);
+
+        Set(ImGuiCol.ImGuiCol_Tab, inset);
+        Set(ImGuiCol.ImGuiCol_TabHovered, hovered);
+        Set(ImGuiCol.ImGuiCol_TabSelected, selected);
+        Set(ImGuiCol.ImGuiCol_TabSelectedOverline, accent);
+        Set(ImGuiCol.ImGuiCol_TabDimmed, inset);
+        Set(ImGuiCol.ImGuiCol_TabDimmedSelected, 0x1C3456);
+        Set(ImGuiCol.ImGuiCol_TabDimmedSelectedOverline, accent, .55f);
+
+        Set(ImGuiCol.ImGuiCol_ScrollbarBg, background);
+        Set(ImGuiCol.ImGuiCol_ScrollbarGrab, 0x385477);
+        Set(ImGuiCol.ImGuiCol_ScrollbarGrabHovered, 0x4C72A0);
+        Set(ImGuiCol.ImGuiCol_ScrollbarGrabActive, 0x5F91D0);
+        Set(ImGuiCol.ImGuiCol_ResizeGrip, accent, .14f);
+        Set(ImGuiCol.ImGuiCol_ResizeGripHovered, accent, .40f);
+        Set(ImGuiCol.ImGuiCol_ResizeGripActive, accent, .70f);
+
+        Set(ImGuiCol.ImGuiCol_PlotLines, accent);
+        Set(ImGuiCol.ImGuiCol_PlotLinesHovered, accentBright);
+        Set(ImGuiCol.ImGuiCol_PlotHistogram, 0x619BE9);
+        Set(ImGuiCol.ImGuiCol_PlotHistogramHovered, accent);
+
+        Set(ImGuiCol.ImGuiCol_TableHeaderBg, 0x182842);
+        Set(ImGuiCol.ImGuiCol_TableBorderStrong, border, .65f);
+        Set(ImGuiCol.ImGuiCol_TableBorderLight, border, .36f);
+        Set(ImGuiCol.ImGuiCol_TableRowBg, 0x000000, 0f);
+        Set(ImGuiCol.ImGuiCol_TableRowBgAlt, accent, .04f);
+
+        Set(ImGuiCol.ImGuiCol_NavCursor, accent);
+        Set(ImGuiCol.ImGuiCol_NavHighlight, accent, .35f);
+        Set(ImGuiCol.ImGuiCol_DockingPreview, accent, .35f);
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -274,6 +369,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         _modUi?.Shutdown();
         _windowStream.Dispose();
         DisposeRichLevelTextPreviews();
+        _eventPaletteIcons.Dispose();
         if (_backendInitialized)
             ImGui_ImplOpenGL3.Shutdown();
         if (_context != null)
@@ -304,8 +400,8 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderSetNodePos(dock, viewport->WorkPos);
         ImGui.DockBuilderSetNodeSize(dock, viewport->WorkSize);
         uint canvas = dock;
-        float footerHeight = TimelineContentHeight +
-            3 * ImGui.GetFrameHeightWithSpacing() + EventButtonSide + 2 * ImGui.GetStyle()->WindowPadding.y;
+        float footerHeight = Math.Max(PlaybackColumnHeight, TimelineContentHeight +
+            3 * ImGui.GetFrameHeightWithSpacing() + EventTileSide) + 2 * FooterInset;
         float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .60f);
         uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, footerRatio, null, &canvas);
         _footerDock = footer;

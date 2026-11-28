@@ -33,6 +33,30 @@ public sealed class TestModRealtimeMix
         Assert.That(owner.Active, Is.Zero);
     }
 
+    [Test]
+    public void MetronomeUsesTheMusicClockInTheLiveMixAndIgnoresStemGains()
+    {
+        const long frame = 12345;
+        void Clicks(long firstFrame, double step, double offset, Span<float> samples)
+        {
+            Assert.That(firstFrame, Is.EqualTo(frame));
+            Assert.That(step, Is.EqualTo(.5 / 48000));
+            Assert.That(offset, Is.EqualTo(-.02));
+            samples.Fill(.5f);
+        }
+
+        var sources = new ModMixSources(null, null, .5, 1, -.02, 0, Clicks);
+        using var live = new RealtimeModMixer([], sources, frame, offline: false);
+        using var export = new RealtimeModMixer([], sources, frame, offline: true);
+        short[] samples = new short[8];
+        live.Render(frame, samples, new(0, 0, .5f));
+        Assert.That(samples, Is.All.EqualTo(8192));
+        live.Render(frame, samples, new(0, 0, 0));
+        Assert.That(samples, Is.All.Zero);
+        export.Render(frame, samples, new(0, 0, .5f));
+        Assert.That(samples, Is.All.Zero);
+    }
+
     private sealed class Gain(float scale) : IRealtimeAudioProcessor
     {
         public long Start { get; private set; }

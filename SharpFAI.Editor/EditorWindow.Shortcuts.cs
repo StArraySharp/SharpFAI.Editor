@@ -200,10 +200,7 @@ internal sealed unsafe partial class EditorWindow
         int number = PressedNumber();
         int[] categories = AvailableCategories().ToArray();
         if (!shift && !alt && number >= 0 && number < categories.Length)
-        {
-            _category = categories[number];
-            _eventSearch = "";
-        }
+            SelectCategory(categories[number]);
         if (Pressed(ImGuiKey.ImGuiKey_Minus)) ScaleUi(-0.1f);
         if (Pressed(ImGuiKey.ImGuiKey_Equal)) ScaleUi(0.1f);
         if (Pressed(ImGuiKey.ImGuiKey_C)) CopySelection(shift || alt, alt, cut: false);

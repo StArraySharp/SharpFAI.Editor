@@ -16,6 +16,7 @@ namespace SharpFAI.Editor;
 internal sealed unsafe partial class EditorWindow
 {
     private enum PlaybackView { Edit, Preview, Auto, Manual }
+    private enum AuditionMode { Mixed, MusicOnly, HitsoundsOnly }
     private readonly record struct PlaybackRevision(EditorDocument Document, int Version, string SourcePath, double Speed, int ModGeneration);
     private readonly record struct EditSelection(int Floor, bool HasFloor, int? RangeAnchor, int EventPage,
         bool InspectDecoration, JObject? Decoration, JObject[] Decorations);
@@ -40,6 +41,11 @@ internal sealed unsafe partial class EditorWindow
     private bool _noFail;
     private bool _tilesOnly;
     private int _playbackSpeed = 50;
+    private bool _metronomeEnabled;
+    private LevelRenderer.PlaybackTimeline? _metronomeTiming;
+    private EditorTimeSignatures? _metronomeSignatures;
+    private AuditionMode _auditionMode;
+    private int _auditionVolume = 100;
     private double _wheelSpeedRemainder;
     private bool _wheelSpeedFine;
     private readonly List<(float Delta, bool Fine)> _speedWheels = [];
@@ -290,6 +296,7 @@ internal sealed unsafe partial class EditorWindow
     PlaybackReady:
         if (!HasCurrentPlayback)
             return;
+        UpdateEditorMetronome(renderer);
         if (_documentLoadStarted != 0)
         {
             _documentLoadSeconds = Stopwatch.GetElapsedTime(_documentLoadStarted).TotalSeconds;
@@ -375,8 +382,8 @@ internal sealed unsafe partial class EditorWindow
         ImVec2 end = WidgetDraw.V2(max.x - 8, max.y - 8);
         ImVec2 start = WidgetDraw.V2(end.x - size.x - 14, end.y - size.y - 8);
         ImDrawList* draw = ImGui.GetWindowDrawList();
-        ImDrawList.AddRectFilled(draw, start, end, WidgetDraw.U32(22, 30, 43, 242), 4);
-        ImDrawList.AddText(draw, WidgetDraw.V2(start.x + 7, start.y + 4), WidgetDraw.U32(141, 237, 222), text);
+        ImDrawList.AddRectFilled(draw, start, end, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_PopupBg, .95f), 4);
+        ImDrawList.AddText(draw, WidgetDraw.V2(start.x + 7, start.y + 4), WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark), text);
     }
 
     private static PlaybackRate HeldPlaybackRate => ImGui.GetIO()->KeyCtrl != 0 ? PlaybackRate.Configured : PlaybackRate.Normal;
@@ -384,23 +391,72 @@ internal sealed unsafe partial class EditorWindow
     private void DrawPlaybackSpeed()
     {
         int speed = _playbackSpeed;
-        ImGui.SetNextItemWidth(76 * _uiScale);
         if (ImGui.DragInt("##playback-speed", ref speed, 1, 1, 1000, "%d%%",
                 (int)ImGuiSliderFlags.ImGuiSliderFlags_AlwaysClamp) != 0)
         {
             _playbackSpeed = Math.Clamp(speed, 1, 1000);
             _wheelSpeedRemainder = 0;
         }
-        if (ImGui.IsItemHovered() != 0)
-            ImGui.SetTooltip(L.T("PlaybackSpeedHelp"));
-        ContinueToolbar(ButtonWidth("100%"));
-        if (ImGui.Button("100%##reset-speed", default) != 0)
-        {
-            _playbackSpeed = 100;
-            _wheelSpeedRemainder = 0;
-        }
-        WidgetDraw.ItemTooltip(L.T("ResetPlaybackSpeed"));
+        WidgetDraw.ItemTooltip(L.T("PlaybackSpeedHelp"));
     }
+
+    private void UpdateEditorMetronome(LevelRenderer renderer)
+    {
+        var timing = _metronomeEnabled ? renderer.EditorTiming : null;
+        var signatures = timing is null ? null : _document.TimeSignatures;
+        if (ReferenceEquals(timing, _metronomeTiming) && ReferenceEquals(signatures, _metronomeSignatures))
+            return;
+        _metronomeTiming = timing;
+        _metronomeSignatures = signatures;
+        if (timing is null || signatures is null)
+        {
+            renderer.SetEditorMetronome(null);
+            return;
+        }
+
+        var clock = new EditorBeatClock(timing.EntryTimes, timing.SnapBpm);
+        renderer.SetEditorMetronome(new EditorMetronome(clock, signatures).Render);
+    }
+
+    private void DrawQuickAudition()
+    {
+        const string popup = "##quick-audition-options";
+        if (EditorControls.Action("quick-audition", EditorControls.ControlIcon.Headphones,
+                emphasized: _auditionMode != AuditionMode.Mixed || _auditionVolume != 100))
+            ImGui.OpenPopup(popup, 0);
+        WidgetDraw.ItemTooltip(L.T("QuickAudition") + " · " + AuditionLabel(_auditionMode));
+        if (ImGui.BeginPopup(popup) == 0) return;
+
+        ImGui.TextUnformatted(L.T("QuickAudition"));
+        ImGui.Separator();
+        AuditionMode mode = _auditionMode;
+        ReadOnlySpan<AuditionMode> options = [AuditionMode.Mixed, AuditionMode.MusicOnly, AuditionMode.HitsoundsOnly];
+        foreach (AuditionMode option in options)
+            if (ImGui.RadioButton(AuditionLabel(option), (byte)(mode == option ? 1 : 0)) != 0)
+                mode = option;
+
+        ImGui.Separator();
+        ImGui.TextUnformatted(L.T("AuditionVolume"));
+        ImGui.SetNextItemWidth(Math.Max(150 * _uiScale, ImGui.CalcTextSize(L.T("AuditionVolume")).x));
+        int volume = _auditionVolume;
+        ImGui.SliderInt("##audition-volume", ref volume, 0, 100, "%d%%",
+            (int)ImGuiSliderFlags.ImGuiSliderFlags_AlwaysClamp);
+        if (mode != _auditionMode || volume != _auditionVolume)
+        {
+            _auditionMode = mode;
+            _auditionVolume = volume;
+            if (_playback is { } renderer)
+                ApplyPreviewAudioVolumes(renderer);
+        }
+        ImGui.EndPopup();
+    }
+
+    private static string AuditionLabel(AuditionMode mode) => L.T(mode switch
+    {
+        AuditionMode.MusicOnly => "AuditionMusicOnly",
+        AuditionMode.HitsoundsOnly => "AuditionHitsoundsOnly",
+        _ => "AuditionMixed"
+    });
 
     private static bool SamePlaybackSource(PlaybackRevision first, PlaybackRevision second) =>
         first.Document == second.Document && first.SourcePath == second.SourcePath && first.ModGeneration == second.ModGeneration;
@@ -502,34 +558,31 @@ internal sealed unsafe partial class EditorWindow
 
         if (SceneViewAvailable)
         {
-            ImGui.SameLine();
-            if (ImGui.Button(_showSceneView ? "2D##playback-scene" : "3D##playback-scene", default) != 0)
+            string scene = _showSceneView ? "2D##playback-scene" : "3D##playback-scene";
+            ContinueToolbar(ButtonWidth(scene));
+            if (ImGui.Button(scene, default) != 0)
                 SetSceneView(!_showSceneView);
             WidgetDraw.ItemTooltip(L.T(_showSceneView ? "SceneView2D" : "SceneView3D"));
         }
-        ImGui.SameLine();
         if (!ready || renderer is null)
         {
-            string status = PlaybackLoadingStatus(renderer);
-            ImGui.TextUnformatted(status);
+            ToolbarReadout(PlaybackLoadingStatus(renderer));
         }
         else
         {
-            string position = $"{renderer.CurrentIndex:N0} / {renderer.FloorCount - 1:N0}   {renderer.PlayTime:F3} s";
-            if (_documentLoadSeconds > 0) position += " · " + L.F("LoadCompletedTime", _documentLoadSeconds);
-            ImGui.TextUnformatted(position);
+            ToolbarReadout(L.F("TileStatus", renderer.CurrentIndex, renderer.FloorCount - 1));
+            ToolbarReadout(Timeline.FormatPosition(renderer.PlayTime), accent: true);
+            if (_documentLoadSeconds > 0) ToolbarReadout(L.F("LoadCompletedTime", _documentLoadSeconds));
             if (renderer.CurrentFloorTempo is { } tempo)
             {
                 string bpm = L.F("PlaybackTileBpm", tempo.Authored, tempo.Effective is double effective ? effective : "—");
-                ContinueToolbar(ImGui.CalcTextSize(bpm).x);
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextWrapped(bpm);
+                ToolbarReadout(bpm);
                 WidgetDraw.ItemTooltip(L.T("PlaybackTileBpmHelp"));
             }
             if (_playbackView == PlaybackView.Manual)
             {
                 bool noFail = _noFail;
-                if (ToolbarCheckbox("NoFail", ref noFail))
+                if (ToolbarToggle("NoFail", ref noFail))
                     SetNoFail(noFail);
             }
             else if (!_showTimeline)
@@ -808,6 +861,7 @@ internal sealed unsafe partial class EditorWindow
 
     private void DisposePlayback()
     {
+        _audioMonitor.ClearSource();
         CancelTimelineWaveform();
         _playback?.Dispose();
         if (_playbackFbo != 0)

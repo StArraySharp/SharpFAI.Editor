@@ -15,6 +15,134 @@ namespace SharpFAI.Player.Tests;
 public sealed class TestDecorationMaskRendering
 {
     [Test, Explicit("Requires desktop OpenGL.")]
+    public void MovingPlanetObjectRendersItsOwnTrailAndHonorsTheLifetimeSetting()
+    {
+        bool checkMainThread = GLFWProvider.CheckForMainThread;
+        GLFWProvider.CheckForMainThread = false;
+        try
+        {
+            const int width = 320, height = 192;
+            using var window = new NativeWindow(new NativeWindowSettings
+            {
+                ClientSize = new(width, height), StartVisible = false, StartFocused = false,
+                APIVersion = new(4, 1), Profile = ContextProfile.Core,
+            });
+            window.MakeCurrent();
+            GL.Viewport(0, 0, width, height);
+            GL.ClearColor(0, 0, 0, 1);
+            using var renderer = new ImageDecorationRenderer();
+            var camera = new Camera2D { ViewportWidth = width, ViewportHeight = height, Zoom = 1 };
+            var timeline = new ImageDecorationTimeline();
+            var source = new AddObjectDecoration
+            {
+                ObjectType = "Planet", PlanetColorType = "Custom", PlanetColor = "00ff00",
+            };
+            var art = ObjectDecorationArt.Resolve(source, timeline.Images);
+            var pose = new ImageDecorationTimeline.Pose(art.Key, Vector2.Zero,
+                Vector2.Zero, Vector2.One, Vector2.One, Vector2.Zero, Vector2.Zero, art.Tint,
+                0, 1, -1, true, true, "RedPlanet");
+            timeline.Items.Add(new(source, pose, Vector2.One, 0));
+
+            Assert.That(DrawFrame(0, -100), Is.Zero);
+            DrawFrame(.1, -20);
+            byte trail = DrawFrame(.2, 100);
+            Assert.That(trail, Is.GreaterThan(8), "A green trail should be visible outside the planet sprite.");
+            Assert.That(DrawFrame(.2, 100), Is.EqualTo(trail), "Redrawing a paused frame must not add history.");
+            Assert.That(DrawFrame(.05, 100), Is.Zero, "Rewinding must clear the earlier path.");
+            DrawFrame(.10, -20);
+            DrawFrame(.15, 20);
+            Assert.That(DrawFrame(.20, 100, lifetime: 0), Is.Zero);
+
+            byte DrawFrame(double time, float x, double lifetime = PlanetTrail.Lifetime)
+            {
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                renderer.Prepare(timeline, time, camera, 100, camera.Zoom, static (_, _) => default,
+                    _ => new Vector2(x, 0), planetTrailLifetime: lifetime);
+                renderer.Draw(timeline, background: true, camera);
+                renderer.Draw(timeline, background: false, camera);
+                byte[] pixel = new byte[4];
+                GL.ReadPixels(198, height / 2, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
+                Assert.That(GL.GetError(), Is.EqualTo(ErrorCode.NoError));
+                return pixel[1];
+            }
+        }
+        finally
+        {
+            GLFWProvider.CheckForMainThread = checkMainThread;
+        }
+    }
+
+    [Test, Explicit("Requires desktop OpenGL.")]
+    public void PlanetObjectTrailMatchesGameplayTrailForTheSamePath()
+    {
+        bool checkMainThread = GLFWProvider.CheckForMainThread;
+        GLFWProvider.CheckForMainThread = false;
+        try
+        {
+            const int width = 256, height = 128;
+            using var window = new NativeWindow(new NativeWindowSettings
+            {
+                ClientSize = new(width, height), StartVisible = false, StartFocused = false,
+                APIVersion = new(4, 1), Profile = ContextProfile.Core,
+            });
+            window.MakeCurrent();
+            GL.Viewport(0, 0, width, height);
+            GL.ClearColor(.15f, .25f, .40f, .55f);
+            using var decorations = new ImageDecorationRenderer();
+            using var gameplay = new SpriteRenderer();
+            var camera = new Camera2D { ViewportWidth = width, ViewportHeight = height, Zoom = 1 };
+
+            foreach (string preset in new[] { "DefaultRed", "DefaultBlue" })
+            {
+                var timeline = new ImageDecorationTimeline();
+                var source = new AddObjectDecoration { ObjectType = "Planet", PlanetColorType = preset };
+                var art = ObjectDecorationArt.Resolve(source, timeline.Images);
+                var pose = new ImageDecorationTimeline.Pose(art.Key, Vector2.Zero,
+                    Vector2.Zero, Vector2.One, Vector2.One, Vector2.Zero, Vector2.Zero, art.Tint,
+                    0, 1, -1, true, true, "RedPlanet");
+                timeline.Items.Add(new(source, pose, Vector2.One, 0));
+                var trail = new PlanetTrail();
+                foreach (var (time, x) in new[] { (0d, -90f), (.1d, 0f), (.2d, 200f) })
+                {
+                    var center = new Vector2(x, 0);
+                    trail.RecordPlanet(1, center, art.Tint, time);
+                    decorations.Prepare(timeline, time, camera, 100, camera.Zoom, static (_, _) => default,
+                        _ => center, planetTrailLifetime: PlanetTrail.Lifetime);
+                }
+
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                byte[] background = Read();
+                decorations.Draw(timeline, background: true, camera);
+                decorations.Draw(timeline, background: false, camera);
+                byte[] objectPixels = Read();
+                Assert.That(objectPixels, Is.Not.EqualTo(background), preset);
+
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                var particles = trail.Build(.2).ToArray().Select(sample => new SpriteRenderer.ParticleInstance
+                {
+                    Center = sample.Center,
+                    HalfSize = new Vector2(sample.Size * .5f),
+                    Tint = sample.Tint,
+                }).ToArray();
+                gameplay.DrawParticleInstances(camera.ViewProjection, particles);
+                Assert.That(objectPixels, Is.EqualTo(Read()), preset);
+            }
+
+            static byte[] Read()
+            {
+                byte[] pixels = new byte[width * height * 4];
+                GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+                Assert.That(GL.GetError(), Is.EqualTo(ErrorCode.NoError));
+                return pixels;
+            }
+        }
+        finally
+        {
+            GLFWProvider.CheckForMainThread = checkMainThread;
+        }
+    }
+
+    [Test, Explicit("Requires desktop OpenGL.")]
     public void FloorStreamTextureMatchesExpandedMeshAcrossTextureRows()
     {
         bool checkMainThread = GLFWProvider.CheckForMainThread;

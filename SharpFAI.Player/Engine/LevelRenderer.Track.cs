@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using OpenTK.Mathematics;
 using SharpFAI.Framework;
 
@@ -220,30 +219,39 @@ public sealed unsafe partial class LevelRenderer
         renderer.SetFloorVisual(local, transform, appearance);
     }
 
+    private Thrust.Audio.AudioSampleWindow? _trackAudioWindow;
+    private bool _trackAudioFailed;
+
     private float ReadTrackVolume()
     {
-        if (_audioMusic is not { SampleRate: > 0, Channels: > 0 } music)
-        {
+        if (_trackAudioFailed || _audioMusic is not { SampleRate: > 0, Channels: > 0 } music)
             return 0f;
-        }
 
-        ReadOnlySpan<short> pcm = MemoryMarshal.Cast<byte, short>(music.Pcm);
         double musicTime = _playTime + (_offlineSubSample ? 0.0 : AudioClockShift);
-        int start = (int)Math.Clamp(
-            Math.Max(0.0, musicTime - 0.03) * music.SampleRate * music.Channels, 0, pcm.Length);
-        int end = (int)Math.Clamp(Math.Max(0.0, musicTime) * music.SampleRate * music.Channels, start, pcm.Length);
-        if (start == end)
+        long start = (long)Math.Clamp(Math.Max(0, musicTime - .03) * music.SampleRate, 0, music.FrameCount);
+        long end = (long)Math.Clamp(Math.Max(0, musicTime) * music.SampleRate, start, music.FrameCount);
+        if (start == end) return 0f;
+
+        try
         {
+            _trackAudioWindow ??= new(music, Math.Max(8192, (int)(music.SampleRate * .03 + 1)));
+            var samples = _trackAudioWindow.Read(start, (int)(end - start));
+            if (samples.IsEmpty) return 0f;
+            double power = 0;
+            foreach (short sample in samples)
+            {
+                double value = sample / 32768.0;
+                power += value * value;
+            }
+            return (float)Math.Sqrt(power / samples.Length);
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            _trackAudioWindow?.Dispose();
+            _trackAudioWindow = null;
+            _trackAudioFailed = true;
+            Console.Error.WriteLine($"[Audio] Track volume: {error.Message}");
             return 0f;
         }
-
-        double power = 0;
-        foreach (short sample in pcm[start..end])
-        {
-            double value = sample / 32768.0;
-            power += value * value;
-        }
-
-        return (float)Math.Sqrt(power / (end - start));
     }
 }

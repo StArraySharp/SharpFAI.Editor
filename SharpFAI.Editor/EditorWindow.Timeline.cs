@@ -1,3 +1,4 @@
+using System.Globalization;
 using ImGui4NET;
 using OpenTK.Mathematics;
 using SharpFAI.Editor.Widgets;
@@ -15,6 +16,7 @@ internal sealed unsafe partial class EditorWindow
     private EditorDocument? _timelineDocument;
     private LevelRenderer.PlaybackTimeline? _timelineTiming;
     private EditorBeatClock? _beatClock;
+    private EditorTimeSignatures? _timelineBeatMeters;
     private double _timelineDuration;
     private int _timelineFloor;
     private int? _timelineRangeAnchor;
@@ -23,66 +25,70 @@ internal sealed unsafe partial class EditorWindow
     private int _meterNumerator = 4;
     private string? _meterNumeratorDraft;
     private int _meterDenominator = 4;
+    private string _meterBpmDraft = "";
     private float TimelineRulerHeight => Math.Max(38 * _uiScale, 2 * ImGui.GetTextLineHeight() + 8);
     private float TimelineFloorHeight => Math.Max(21 * _uiScale, ImGui.GetTextLineHeight() + 4);
     private float TimelineContentHeight => TimelineHeight(TimelineTrackCount);
     private float TimelineHeight(int trackCount) => TimelineRulerHeight + TimelineFloorHeight * trackCount;
     private bool HasTimelineSnapshot => _timelineDocument == _document && _timelineTiming is not null;
 
-    private void DrawChartTimeline(LevelRenderer? renderer, bool editing, int trackCount)
+    private float DrawChartTimeline(LevelRenderer? renderer, bool editing, int trackCount)
     {
         if (!_showTimeline)
         {
             EndTimelineRangePreview();
-            return;
+            return 0;
         }
 
         _chartTimeline.RulerHeight = TimelineRulerHeight;
+        _chartTimeline.ExtraBeatHeight = 0;
         _chartTimeline.TrackHeight = TimelineFloorHeight;
         _chartTimeline.TrackCount = trackCount;
         if (renderer?.EditorTiming is { } currentTiming)
             UpdateTimelineSnapshot(renderer, currentTiming, editing);
+        if (_showPalette) ImGui.Separator();
         if (!HasTimelineSnapshot)
         {
             EndTimelineRangePreview();
             var origin = ImGui.GetCursorScreenPos();
-            var size = WidgetDraw.V2(Math.Max(1, ImGui.GetContentRegionAvail().x), TimelineHeight(trackCount));
+            float extra = AvailableTimelineHeight(trackCount);
+            var size = WidgetDraw.V2(Math.Max(1, ImGui.GetContentRegionAvail().x), TimelineHeight(trackCount) + extra);
             var end = WidgetDraw.V2(origin.x + size.x, origin.y + size.y);
             var draw = ImGui.GetWindowDrawList();
-            WidgetDraw.Panel(draw, origin, end, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_FrameBg), 4);
+            float rounding = ImGui.GetStyle()->FrameRounding;
+            WidgetDraw.Panel(draw, origin, end, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_ChildBg), rounding);
+            WidgetDraw.Outline(draw, origin, end, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), rounding);
+            string message = PlaybackLoadingStatus(_playback);
+            ImDrawList.PushClipRect(draw, origin, end, 1);
+            WidgetDraw.TextCentered(draw, origin, end, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_TextDisabled), message);
+            ImDrawList.PopClipRect(draw);
             ImGui.Dummy(size);
-            return;
+            return extra;
         }
 
         var timing = _timelineTiming!;
         double duration = _timelineDuration;
         bool ready = renderer is not null;
-        var clock = _beatClock!;
         var meters = _document.TimeSignatures;
+        if (_beatClock is null || !ReferenceEquals(_timelineBeatMeters, meters))
+        {
+            _beatClock = new EditorBeatClock(timing.EntryTimes, timing.SnapBpm, meters);
+            _timelineBeatMeters = meters;
+        }
+        var clock = _beatClock;
         double position = renderer?.PlayTime ?? _chartTimeline.Playhead;
         double beat = Math.Max(0, clock.BeatAt(position));
-        var current = meters.Changes[meters.IndexAt(beat)].Signature;
+        var current = meters.Changes[meters.IndexAt(beat)];
         int selectedFloor = _timelineFloor;
         bool canSeek = ready && _playbackView != PlaybackView.Manual;
 
-        string timeText = Timeline.FormatPosition(position);
-        ContinueToolbar(ImGui.CalcTextSize(timeText).x);
-        ImGui.AlignTextToFramePadding();
-        WidgetDraw.TextDisabled(timeText);
+        EditorControls.Readout(Timeline.FormatPosition(position), accent: true);
         if ((uint)selectedFloor < (uint)timing.EntryTimes.Length)
-        {
-            string floorText = L.F("TimelineFloorNumber", selectedFloor);
-            ContinueToolbar(ImGui.CalcTextSize(floorText).x);
-            ImGui.AlignTextToFramePadding();
-            WidgetDraw.TextDisabled(floorText);
-        }
+            ToolbarReadout(L.F("TimelineFloorNumber", selectedFloor));
         var (measure, beatInMeasure) = meters.PositionAt(beat);
-        string measureText = L.F("TimelineMeasure", measure, beatInMeasure);
-        ContinueToolbar(ImGui.CalcTextSize(measureText).x);
-        ImGui.AlignTextToFramePadding();
-        WidgetDraw.TextDisabled(measureText);
-        string meterLabel = current + "###edit-time-signature";
-        ContinueToolbar(ButtonWidth(meterLabel));
+        ToolbarReadout(L.F("TimelineMeasure", measure, beatInMeasure));
+        string meterLabel = $"{current.Signature} · {current.TimelineBpm ?? timing.SnapBpm:G8} BPM###edit-time-signature";
+        ContinueToolbarGroup(ButtonWidth(meterLabel));
         bool canEditMeter = canSeek && renderer?.IsPlaying == false;
         if (!canEditMeter) ImGui.BeginDisabled(1);
         if (ImGui.Button(meterLabel, default) != 0)
@@ -90,24 +96,28 @@ internal sealed unsafe partial class EditorWindow
             _meterBeat = meters.Snap(beat);
             if (clock.TimeAt(_meterBeat) > duration + 1e-7)
                 _meterBeat = meters.Snap(beat, previousOnly: true);
-            var signature = meters.Changes[meters.IndexAt(_meterBeat)].Signature;
-            (_meterNumerator, _meterDenominator) = (signature.Numerator, signature.Denominator);
+            var change = meters.Changes[meters.IndexAt(_meterBeat)];
+            (_meterNumerator, _meterDenominator) = (change.Signature.Numerator, change.Signature.Denominator);
             _meterNumeratorDraft = null;
+            _meterBpmDraft = change.Beat == _meterBeat
+                ? change.TimelineBpm?.ToString(CultureInfo.InvariantCulture) ?? "" : "";
             ImGui.OpenPopup("##chart-time-signature", 0);
         }
         WidgetDraw.ItemTooltip(L.T("TimeSignature"));
         if (!canEditMeter) ImGui.EndDisabled();
-        DrawTimeSignaturePopup(clock, meters, ready);
+        DrawTimeSignaturePopup(clock, meters, timing.SnapBpm, canEditMeter);
 
-        ContinueToolbar(ButtonWidth(L.T("TimelineFit")));
-        if (ImGui.Button(L.T("TimelineFit"), default) != 0)
-        {
-            _chartTimeline.ViewStart = 0;
-            _chartTimeline.ViewLength = Math.Max(Timeline.MinimumViewLength, duration);
-        }
         ImGui.BeginDisabled((byte)(ready ? 0 : 1));
         DrawTimelineRangeControls(duration, editing, timing.EntryTimes, canSeek);
         ImGui.EndDisabled();
+        float extraHeight = AvailableTimelineHeight(trackCount);
+        if (_chartTimeline.Waveform is not null)
+        {
+            _chartTimeline.ExtraBeatHeight = extraHeight;
+            _chartTimeline.RulerHeight += extraHeight;
+        }
+        else
+            _chartTimeline.TrackHeight += extraHeight / Math.Max(1, trackCount);
         _chartTimeline.Playhead = position;
         PlaybackRange? previousRange = _chartTimeline.PlaybackRange;
         bool moved = _chartTimeline.DrawChart("chart", duration, clock, meters, timing.EntryTimes, _timelineEventTracks, selectedFloor,
@@ -131,6 +141,14 @@ internal sealed unsafe partial class EditorWindow
         if (ready) _modUi?.DrawContext(SharpFAI.ModApi.MenuSlot.TimelineContext, "###mod-timeline-context");
         DrawTimelineEventSelection(renderer, editing);
         _lastTimelinePosition = _chartTimeline.Playhead;
+        return extraHeight;
+    }
+
+    private float AvailableTimelineHeight(int trackCount)
+    {
+        ImGuiStyle* style = ImGui.GetStyle();
+        return MathF.Floor(Math.Max(0,
+            ImGui.GetContentRegionAvail().y - TimelineHeight(trackCount) - style->CellPadding.y - style->ItemSpacing.y));
     }
 
     private void UpdateTimelineSnapshot(LevelRenderer renderer, LevelRenderer.PlaybackTimeline timing, bool editing)
@@ -150,7 +168,7 @@ internal sealed unsafe partial class EditorWindow
         {
             _timelineTiming = timing;
             _timelineSelectedFloors = null;
-            _beatClock = new EditorBeatClock(timing.EntryTimes, timing.FloorBpms, timing.SnapBpm);
+            _beatClock = null;
         }
         if (_chartTimeline.PlaybackRange is { } range)
             _chartTimeline.PlaybackRange = range.Limit(_timelineDuration);
@@ -234,7 +252,11 @@ internal sealed unsafe partial class EditorWindow
         string loop = L.T(_loopingSelection is null ? "TimelineLoopRange" : "TimelineStopLoop");
         string export = L.T("TimelineExportRange");
         ContinueToolbar(ButtonWidth("A–B"));
-        if (ImGui.Button("A–B", default) != 0)
+        bool hasRange = _chartTimeline.PlaybackRange is { IsValid: true };
+        if (hasRange) EditorControls.PushSelected();
+        bool open = ImGui.Button("A–B", default) != 0;
+        if (hasRange) ImGui.PopStyleColor();
+        if (open)
             ImGui.OpenPopup("##timeline-range", 0);
         WidgetDraw.ItemTooltip(L.T("TimelineRangeHelp"));
         if (ImGui.BeginPopup("##timeline-range", 0) != 0)
@@ -261,14 +283,12 @@ internal sealed unsafe partial class EditorWindow
         if (_chartTimeline.PlaybackRange is not { IsValid: true } range)
             return;
         string span = RangeLabel(range);
-        float spanWidth = ImGui.CalcTextSize(span).x;
+        float spanWidth = EditorControls.ReadoutWidth(span);
         float right = ImGui.GetCursorScreenPos().x + ImGui.GetContentRegionAvail().x;
         if (ImGui.GetItemRectMax().x + spanWidth + ButtonWidth(loop) + ButtonWidth(export) +
             3 * ImGui.GetStyle()->ItemSpacing.x > right)
             return;
-        ContinueToolbar(spanWidth);
-        ImGui.AlignTextToFramePadding();
-        WidgetDraw.TextDisabled(span);
+        ToolbarReadout(span);
 
         ContinueToolbar(ButtonWidth(loop));
         ImGui.BeginDisabled((byte)(canSeek ? 0 : 1));
@@ -298,7 +318,7 @@ internal sealed unsafe partial class EditorWindow
         }
     }
 
-    private void DrawTimeSignaturePopup(EditorBeatClock clock, EditorTimeSignatures meters, bool canEdit)
+    private void DrawTimeSignaturePopup(EditorBeatClock clock, EditorTimeSignatures meters, double levelBpm, bool canEdit)
     {
         if (ImGui.BeginPopup("##chart-time-signature", 0) == 0)
             return;
@@ -323,11 +343,21 @@ internal sealed unsafe partial class EditorWindow
         }
 
         TimeSignature signature = new(_meterNumerator, _meterDenominator);
-        bool valid = validNumerator && signature.IsValid;
+        string bpmHint = L.F("TimelineLevelBpm", levelBpm);
+        ImGui.SetNextItemWidth(Math.Max(100 * _uiScale, ImGui.CalcTextSize(bpmHint).x + 2 * ImGui.GetStyle()->FramePadding.x));
+        if (EditText(L.T("TimelineBpm"), bpmHint, _meterBpmDraft, live: true) is { } draft)
+            _meterBpmDraft = draft;
+        bool usesLevelBpm = string.IsNullOrWhiteSpace(_meterBpmDraft);
+        bool validBpm = EditorNumberExpression.TryEvaluate(_meterBpmDraft, out double enteredBpm) &&
+            EditorTimeSignatures.IsValidBpm(enteredBpm);
+        double? timelineBpm = usesLevelBpm ? null : enteredBpm;
+        if (!usesLevelBpm && !validBpm) WidgetDraw.TextDisabled(L.T("TimelineBpmInvalid"));
+
+        bool valid = validNumerator && signature.IsValid && (usesLevelBpm || validBpm);
         if (!valid) ImGui.BeginDisabled(1);
         if (ImGui.Button(L.T("TimelineApplyHere"), default) != 0)
         {
-            _document.SetTimeSignature(_meterBeat, signature);
+            _document.SetTimeSignature(_meterBeat, signature, timelineBpm);
             ImGui.CloseCurrentPopup();
         }
         if (_meterBeat > 0)
@@ -335,13 +365,14 @@ internal sealed unsafe partial class EditorWindow
             ImGui.SameLine();
             if (ImGui.Button(L.T("TimelineApplyAtStart"), default) != 0)
             {
-                _document.SetTimeSignature(0, signature);
+                _document.SetTimeSignature(0, signature, timelineBpm);
                 ImGui.CloseCurrentPopup();
             }
         }
         if (!valid) ImGui.EndDisabled();
         var existing = meters.Changes[meters.IndexAt(_meterBeat)];
-        if (existing.Beat == _meterBeat && (_meterBeat != 0 || existing.Signature != TimeSignature.Common))
+        if (existing.Beat == _meterBeat &&
+            (_meterBeat != 0 || existing.Signature != TimeSignature.Common || existing.TimelineBpm.HasValue))
         {
             ImGui.SameLine();
             if (ImGui.Button(L.T("TimelineRemoveSignature"), default) != 0)

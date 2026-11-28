@@ -10,6 +10,20 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
         "CameraFilterPack_VHS1.png", "CameraFilterPack_VHS2.png", "MotionBlurJitter.png",
         "Rotating_Petals_1.png", "Rotating_Petals_2.png", "Rotating_Petals_3.png", "tutorial_tile.png",
     ];
+    // Original standalone textures referenced by the sprites under Resources/LevelEditor/LevelEvents.
+    private static readonly HashSet<string> EventIconNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AddComponent", "AddDecoration", "AddObject", "AddParticle", "AddText",
+        "AnimateTrack", "AutoPlayTiles", "Bloom", "Bookmark", "CallMethod", "ChangeTrack", "Checkpoint",
+        "ColorTrack", "CustomBackground", "EditorComment", "EmitParticle", "Flash",
+        "FreeRoam", "FreeRoamRemove", "FreeRoamTwirl", "FreeRoamWarning", "HallOfMirrors", "Hide", "Hold", "KillPlayer",
+        "MoveCamera", "MoveDecorations", "MoveTrack", "MultiPlanet", "MultiTap", "Pause", "PlaySound",
+        "PositionTrack", "RecolorTrack", "RepeatEvents", "ScaleMargin", "ScalePlanets", "ScaleRadius",
+        "ScreenScroll", "ScreenTile", "SetConditionalEvents", "SetDefaultText", "SetFilter",
+        "SetFilterAdvanced", "SetFloorIcon", "SetFrameRate", "SetGameSound", "SetHitsound", "SetHoldSound",
+        "SetInputEvent", "SetObject", "SetParticle", "SetPlanetRotation", "SetSpeed", "SetText",
+        "ShakeScreen", "TileDimensions", "Twirl",
+    };
     private static readonly Regex ShaderDeclaration = new(@"(?m)^[ \t]*Shader\s+""([^""]+)""");
 
     private readonly List<string> manifest = [];
@@ -18,7 +32,9 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
     public async Task CompileAsync(string exported, ShaderLayout[] shaders, string workingDirectory, CancellationToken cancellation,
         string? connectorTexture)
     {
-        CopyTextures(Path.Combine(exported, "Texture2D"), connectorTexture, cancellation);
+        string textures = Path.Combine(exported, "Texture2D");
+        CopyTextures(textures, connectorTexture, cancellation);
+        CopyEventIcons(textures, cancellation);
         var sourceFiles = ReadShaderLabExports(exported, cancellation);
         var sourceNames = shaders.Select(shader => shader.Name).ToHashSet(StringComparer.Ordinal);
         using var compile = new ConsoleProgressBar($"Translating shaders to GLSL with HLSLcc {hlslcc.Tag}");
@@ -127,6 +143,23 @@ internal sealed class AssetCompiler(string output, CachedTool hlslcc)
     {
         using var texture = File.OpenRead(path);
         return SHA256.HashData(texture);
+    }
+
+    private void CopyEventIcons(string directory, CancellationToken cancellation)
+    {
+        using var progress = new ConsoleProgressBar("Copying original event icons");
+        int count = 0;
+        foreach (string texture in Directory.EnumerateFiles(directory, "*.png").Order(StringComparer.Ordinal))
+        {
+            cancellation.ThrowIfCancellationRequested();
+            string type = Path.GetFileNameWithoutExtension(texture);
+            if (!EventIconNames.Contains(type))
+                continue;
+            string name = type.ToLowerInvariant() + ".png";
+            AddAsset("Resources.LevelEditor.LevelEvents." + name, "EventIcons/" + name, path => File.Copy(texture, path));
+            count++;
+        }
+        progress.Complete($"{count} icons");
     }
 
     private static Dictionary<string, string> ReadShaderLabExports(string exported, CancellationToken cancellation)

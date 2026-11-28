@@ -56,9 +56,11 @@
   <data name="SetSpeedEffectiveBpmUnavailable" xml:space="preserve"><value>Available once the current tile has an interval to the next tile and chart timing has loaded.</value></data>
   <data name="Language" xml:space="preserve"><value>Language</value></data>
   <data name="Chinese" xml:space="preserve"><value>简体中文</value></data>
-  <data name="Settings" xml:space="preserve"><value>Level settings</value></data>
+  <data name="Settings" xml:space="preserve"><value>Chart settings</value></data>
   <data name="Decorations" xml:space="preserve"><value>Decorations</value></data>
-  <data name="Inspector" xml:space="preserve"><value>Tile Properties</value></data>
+  <data name="Inspector" xml:space="preserve"><value>Inspector</value></data>
+  <data name="TileInspector" xml:space="preserve"><value>Tile Properties</value></data>
+  <data name="DecorationInspector" xml:space="preserve"><value>Decoration Properties</value></data>
   <data name="CanvasOnly" xml:space="preserve"><value>Chart Only</value></data>
   <data name="HelpCanvasOnly" xml:space="preserve"><value>Alt+H   Show or hide the interface</value></data>
   <data name="UnitBeats" xml:space="preserve"><value>beats</value></data>
@@ -126,6 +128,7 @@
   <data name="EditParticle" xml:space="preserve"><value>Edit particles…</value></data>
   <data name="AddDecoration" xml:space="preserve"><value>Image</value></data>
   <data name="SearchDecorations" xml:space="preserve"><value>Filter by tile, type or tag</value></data>
+  <data name="AddDecorationAction" xml:space="preserve"><value>Add decoration</value></data>
   <data name="DecorationActions" xml:space="preserve"><value>Decoration actions</value></data>
   <data name="DecorationTypeImage" xml:space="preserve"><value>Image</value></data>
   <data name="DecorationTypeText" xml:space="preserve"><value>Text</value></data>
@@ -144,6 +147,16 @@
   <data name="EventEnabled" xml:space="preserve"><value>Event enabled</value></data>
   <data name="DeleteEvent" xml:space="preserve"><value>Delete</value></data>
   <data name="SearchEvents" xml:space="preserve"><value>Search events</value></data>
+  <data name="NoMatchingEvents" xml:space="preserve"><value>No events match your search.</value></data>
+  <data name="SearchChartSettings" xml:space="preserve"><value>Search this settings tab</value></data>
+  <data name="NoMatchingSettings" xml:space="preserve"><value>No matching settings in this tab.</value></data>
+  <data name="NoDecorations" xml:space="preserve"><value>No decorations yet.</value></data>
+  <data name="NoMatchingDecorations" xml:space="preserve"><value>No matching decorations.</value></data>
+  <data name="PreviousTile" xml:space="preserve"><value>Previous tile</value></data>
+  <data name="NextTile" xml:space="preserve"><value>Next tile</value></data>
+  <data name="PreviousEvent" xml:space="preserve"><value>Previous event</value></data>
+  <data name="NextEvent" xml:space="preserve"><value>Next event</value></data>
+  <data name="SelectTileHint" xml:space="preserve"><value>Select a tile to inspect its events.</value></data>
   <data name="EventCategory" xml:space="preserve"><value>Event category</value></data>
   <data name="OtherFields" xml:space="preserve"><value>Other properties</value></data>
   <data name="ChooseAsset" xml:space="preserve"><value>Choose asset</value></data>
@@ -211,12 +224,12 @@
   <data name="Option_Kick" xml:space="preserve"><value>Kick</value></data>
   <data name="Option_ThisTile" xml:space="preserve"><value>This tile</value></data>
   <data name="Option_End" xml:space="preserve"><value>Last tile</value></data>
-  <data name="Name_SongSettings" xml:space="preserve"><value>Song Settings</value></data>
-  <data name="Name_LevelSettings" xml:space="preserve"><value>Level Settings</value></data>
-  <data name="Name_TrackSettings" xml:space="preserve"><value>Track Settings</value></data>
-  <data name="Name_BackgroundSettings" xml:space="preserve"><value>Background Settings</value></data>
-  <data name="Name_CameraSettings" xml:space="preserve"><value>Camera Settings</value></data>
-  <data name="Name_MiscSettings" xml:space="preserve"><value>Misc Settings</value></data>
+  <data name="Name_SongSettings" xml:space="preserve"><value>Song</value></data>
+  <data name="Name_LevelSettings" xml:space="preserve"><value>Level</value></data>
+  <data name="Name_TrackSettings" xml:space="preserve"><value>Track</value></data>
+  <data name="Name_BackgroundSettings" xml:space="preserve"><value>Background</value></data>
+  <data name="Name_CameraSettings" xml:space="preserve"><value>Camera</value></data>
+  <data name="Name_MiscSettings" xml:space="preserve"><value>Misc</value></data>
   <data name="Name_Gameplay" xml:space="preserve"><value>Gameplay</value></data>
   <data name="Name_TrackFx" xml:space="preserve"><value>Track Events</value></data>
   <data name="Name_DecorationFx" xml:space="preserve"><value>Decoration Events</value></data>
@@ -418,7 +431,11 @@
   <data name="Option_Fixed" xml:space="preserve"><value>Fixed</value></data>
   <data name="LockPath" xml:space="preserve"><value>Lock path</value></data>
   <data name="PlaybackSpeedHelp" xml:space="preserve"><value>Ctrl+wheel: 10 percentage points · Ctrl+Shift+wheel: 1 point · Ctrl+Space: play at configured speed</value></data>
-  <data name="ResetPlaybackSpeed" xml:space="preserve"><value>Reset playback speed to 100%</value></data>
+  <data name="QuickAudition" xml:space="preserve"><value>Quick audition</value></data>
+  <data name="AuditionMixed" xml:space="preserve"><value>Mixed</value></data>
+  <data name="AuditionMusicOnly" xml:space="preserve"><value>Music only</value></data>
+  <data name="AuditionHitsoundsOnly" xml:space="preserve"><value>Hitsounds only</value></data>
+  <data name="AuditionVolume" xml:space="preserve"><value>Audition volume</value></data>
   <data name="TilesOnly" xml:space="preserve"><value>Tiles only</value></data>
   <data name="EditSceneModeHelp" xml:space="preserve"><value>Switch between tiles only and effects preview without changing playback</value></data>
   <data name="InlineNumberHelp" xml:space="preserve"><value>Click to enter a number or expression. Drag left or right to adjust.</value></data>
@@ -808,9 +825,15 @@
   <data name="TimelineEventGroup" xml:space="preserve"><value>{0:N0} events · Click to choose</value></data>
   <data name="TimeSignature" xml:space="preserve"><value>Time signature</value></data>
   <data name="TimelineFit" xml:space="preserve"><value>Fit song</value></data>
+  <data name="Metronome" xml:space="preserve"><value>Metronome</value></data>
+  <data name="MetronomeOn" xml:space="preserve"><value>Metronome on · Click to mute</value></data>
+  <data name="MetronomeOff" xml:space="preserve"><value>Metronome off · Click to hear the beat during playback</value></data>
   <data name="TimelineMeasure" xml:space="preserve"><value>Bar {0:0} · Beat {1}</value></data>
   <data name="TimelineAtTime" xml:space="preserve"><value>Beat at {0}</value></data>
   <data name="TimelineNumerator" xml:space="preserve"><value>Beats per bar</value></data>
+  <data name="TimelineBpm" xml:space="preserve"><value>BPM (timeline only)</value></data>
+  <data name="TimelineLevelBpm" xml:space="preserve"><value>Level BPM ({0:G8})</value></data>
+  <data name="TimelineBpmInvalid" xml:space="preserve"><value>Enter a positive BPM or leave it blank.</value></data>
   <data name="TimelineDenominator" xml:space="preserve"><value>Beat unit</value></data>
   <data name="TimelineApplyHere" xml:space="preserve"><value>Apply from this beat</value></data>
   <data name="TimelineApplyAtStart" xml:space="preserve"><value>Set initial signature</value></data>

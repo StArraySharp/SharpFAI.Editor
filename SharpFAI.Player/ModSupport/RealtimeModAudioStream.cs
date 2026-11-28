@@ -9,6 +9,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
 {
     private const int BufferCount = 6;
     private const int Frames = RealtimeModMixer.BlockFrames;
+    private sealed record GainSnapshot(ModMixGains Value);
     private readonly int _source;
     private readonly int[] _buffers = new int[BufferCount];
     private readonly Queue<int> _available = new(BufferCount);
@@ -16,7 +17,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
     private readonly Channel<short[]> _free = Channel.CreateBounded<short[]>(BufferCount);
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Task _producer;
-    private long _gains;
+    private GainSnapshot _gains;
     private long _endFrame;
     private bool _started;
     private bool _disposed;
@@ -25,7 +26,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
         ModMixSources sources, double seconds, ModMixGains gains)
     {
         _endFrame = Math.Max(0, (long)Math.Round(seconds * RealtimeModMixer.Format.SampleRate));
-        SetGains(gains);
+        _gains = new(gains);
         _source = AL.GenSource();
         try
         {
@@ -53,15 +54,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
 
     public void SetGains(ModMixGains gains)
     {
-        long bits = (uint)BitConverter.SingleToInt32Bits(gains.Music) |
-                    ((long)BitConverter.SingleToInt32Bits(gains.Hitsounds) << 32);
-        Interlocked.Exchange(ref _gains, bits);
-    }
-
-    private ModMixGains ReadGains()
-    {
-        long bits = Interlocked.Read(ref _gains);
-        return new(BitConverter.Int32BitsToSingle((int)bits), BitConverter.Int32BitsToSingle((int)(bits >> 32)));
+        if (_gains.Value != gains) Volatile.Write(ref _gains, new(gains));
     }
 
     private async Task Produce(IReadOnlyList<ModRegistration<RealtimeAudioHook>> effects,
@@ -73,7 +66,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
             while (!token.IsCancellationRequested)
             {
                 short[] samples = await _free.Reader.ReadAsync(token).ConfigureAwait(false);
-                mixer.Render(firstFrame, samples, ReadGains());
+                mixer.Render(firstFrame, samples, Volatile.Read(ref _gains).Value);
                 _ready.Enqueue(samples);
                 firstFrame += Frames;
             }
@@ -81,7 +74,7 @@ internal sealed class RealtimeModAudioStream : IDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
-    public unsafe void Pump()
+    public unsafe bool Pump()
     {
         AL.GetSource(_source, ALGetSourcei.BuffersProcessed, out int processed);
         while (processed-- > 0)
@@ -89,6 +82,11 @@ internal sealed class RealtimeModAudioStream : IDisposable
             int buffer = AL.SourceUnqueueBuffer(_source);
             if (buffer != 0) _available.Enqueue(buffer);
         }
+        AL.GetSource(_source, ALGetSourcei.SourceState, out int state);
+        bool wasPlaying = (ALSourceState)state == ALSourceState.Playing;
+        // A stopped source treats newly queued buffers as processed until it is rewound or started.
+        if ((ALSourceState)state == ALSourceState.Stopped && _available.Count == BufferCount)
+            AL.SourceRewind(_source);
         while (_available.Count > 0 && _ready.TryDequeue(out var samples))
         {
             int buffer = _available.Dequeue();
@@ -99,12 +97,12 @@ internal sealed class RealtimeModAudioStream : IDisposable
             _free.Writer.TryWrite(samples);
             _endFrame += Frames;
         }
-        AL.GetSource(_source, ALGetSourcei.SourceState, out int state);
-        if ((ALSourceState)state != ALSourceState.Playing && _available.Count <= BufferCount - 2)
+        if (!wasPlaying && _available.Count <= BufferCount - 2)
         {
             AL.SourcePlay(_source);
             _started = true;
         }
+        return wasPlaying;
     }
 
     public bool TryGetPosition(out double seconds)

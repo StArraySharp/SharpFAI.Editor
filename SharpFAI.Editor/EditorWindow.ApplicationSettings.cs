@@ -57,8 +57,15 @@ internal sealed unsafe partial class EditorWindow
     {
         renderer.ApplyVisualSettings(_applicationSettings);
         renderer.SkipAudio = _applicationSettings.SkipAudio;
-        renderer.SetPlaybackOutputVolumes(_applicationSettings.MasterVolume, _applicationSettings.MusicVolume,
-            _applicationSettings.HitsoundVolume);
+        ApplyPreviewAudioVolumes(renderer);
+    }
+
+    private void ApplyPreviewAudioVolumes(Player.Engine.LevelRenderer renderer)
+    {
+        int master = (_applicationSettings.MasterVolume * _auditionVolume + 50) / 100;
+        renderer.SetPlaybackOutputVolumes(master,
+            _auditionMode == AuditionMode.HitsoundsOnly ? 0 : _applicationSettings.MusicVolume,
+            _auditionMode == AuditionMode.MusicOnly ? 0 : _applicationSettings.HitsoundVolume);
     }
 
     private void DrawApplicationSettingsMenuItem()

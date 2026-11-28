@@ -41,6 +41,86 @@ public sealed class TimeSignatureTimelineTests
         });
     }
 
+    [TestCase(1.0, 0.0)]
+    [TestCase(0.5, -0.05)]
+    [TestCase(2.0, 0.05)]
+    public void MetronomeUsesLevelBpmAndMeterWithTheSameSamplesAfterASeek(double rate, double shift)
+    {
+        const int sampleRate = 48000;
+        var clock = new EditorBeatClock([-2, .2, 1.2], 120);
+        var meters = EditorTimeSignatures.Read(null).WithChange(2, new TimeSignature(3, 8), 240);
+        var metronome = new EditorMetronome(clock, meters);
+        double step = rate / sampleRate;
+        float[] whole = new float[(int)(2.3 / step)];
+        float[] block = new float[960];
+        metronome.Render(0, step, shift, whole);
+
+        int first = FrameAt(.2);
+        int regular = FrameAt(.7);
+        int meterChange = FrameAt(1.2);
+        int eighthNote = FrameAt(1.45);
+        int nextBar = FrameAt(1.95);
+        Assert.Multiple(() =>
+        {
+            Assert.That(whole.Take(first), Is.All.Zero);
+            Assert.That(whole[first..(first + 180)], Is.EqualTo(whole[meterChange..(meterChange + 180)]));
+            Assert.That(whole[regular..(regular + 180)], Is.EqualTo(whole[eighthNote..(eighthNote + 180)]));
+            Assert.That(whole[first..(first + 180)], Is.EqualTo(whole[nextBar..(nextBar + 180)]));
+            Assert.That(whole[first..(first + 180)].Max(), Is.GreaterThan(whole[regular..(regular + 180)].Max()));
+            Assert.That(whole[(eighthNote + 1440)..FrameAt(1.7)], Is.All.Zero);
+            metronome.Render(eighthNote - 200, step, shift, block);
+            Assert.That(block, Is.EqualTo(whole[(eighthNote - 200)..(eighthNote + 760)]));
+            metronome.Render(eighthNote + 80, step, shift, block);
+            Assert.That(block, Is.EqualTo(whole[(eighthNote + 80)..(eighthNote + 1040)]));
+        });
+
+        int FrameAt(double time) => (int)Math.Round((time - shift) / step);
+    }
+
+    [Test]
+    public void TimelineTempoStartsFromLevelBpmAndOnlyChangesWithinAnOverriddenSection()
+    {
+        double[] floors = [-2, .2, 1.2];
+        var meters = EditorTimeSignatures.Read(null)
+            .WithChange(2, new TimeSignature(6, 8), 180)
+            .WithChange(5, new TimeSignature(3, 4));
+        var timeline = new EditorBeatClock(floors, 120, meters);
+        var metronome = new EditorBeatClock(floors, 120);
+        var initialOverride = new EditorBeatClock(floors, 120, meters.WithChange(0, TimeSignature.Common, 240));
+        var floorClock = new EditorBeatClock(floors, [120, 120, 240], 120);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(timeline.TimeAt(2), Is.EqualTo(1.2).Within(1e-9));
+            Assert.That(timeline.TimeAt(5), Is.EqualTo(2.2).Within(1e-9));
+            Assert.That(timeline.TimeAt(6), Is.EqualTo(2.7).Within(1e-9));
+            Assert.That(timeline.BeatAt(2.2), Is.EqualTo(5).Within(1e-9));
+            Assert.That(metronome.TimeAt(5), Is.EqualTo(2.7).Within(1e-9));
+            Assert.That(floorClock.TimeAt(5), Is.EqualTo(1.95).Within(1e-9));
+            Assert.That(initialOverride.TimeAt(-1), Is.EqualTo(-.3).Within(1e-9));
+            Assert.That(initialOverride.TimeAt(1), Is.EqualTo(.45).Within(1e-9));
+        });
+    }
+
+    [Test]
+    public void InvalidOrMissingTempoOverridesLeaveLegacyMeterChangesUsable()
+    {
+        var meters = EditorTimeSignatures.Read(JArray.Parse("""
+            [
+              { "beat": 2, "numerator": 3, "denominator": 4 },
+              { "beat": 5, "numerator": 7, "denominator": 8, "bpm": -120 }
+            ]
+            """));
+        Assert.Multiple(() =>
+        {
+            Assert.That(meters.Changes[1].Signature, Is.EqualTo(new TimeSignature(3, 4)));
+            Assert.That(meters.Changes[2].Signature, Is.EqualTo(new TimeSignature(7, 8)));
+            Assert.That(meters.Changes.Select(change => change.TimelineBpm), Is.All.Null);
+            Assert.That(meters.WithChange(5, new TimeSignature(6, 8), double.NaN), Is.SameAs(meters));
+            Assert.That(meters.Write()!.OfType<JObject>().All(change => change["bpm"] is null), Is.True);
+        });
+    }
+
     [Test]
     public void DragScrollsTowardEitherEdgeAndStopsAtTheSongBounds()
     {
@@ -112,12 +192,13 @@ public sealed class TimeSignatureTimelineTests
         {
             var document = new EditorDocument();
             var previous = document.SnapshotForPlayback();
-            document.SetTimeSignature(0, new TimeSignature(3, 4));
-            document.SetTimeSignature(9, new TimeSignature(7, 8));
+            document.SetTimeSignature(0, TimeSignature.Common, 150.25);
+            document.SetTimeSignature(9, new TimeSignature(7, 8), 240);
             Assert.That(document.Modified, Is.True);
             Assert.That(document.PlaybackVersion, Is.Zero);
             document.Undo();
             Assert.That(document.TimeSignatures.Changes, Has.Count.EqualTo(1));
+            Assert.That(document.TimeSignatures.Changes[0].TimelineBpm, Is.EqualTo(150.25));
             document.Redo();
             Assert.That(document.TimeSignatures.Changes, Has.Count.EqualTo(2));
             Assert.That(document.PlaybackVersion, Is.Zero);

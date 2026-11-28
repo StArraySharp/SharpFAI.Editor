@@ -27,6 +27,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
     }
 
     private readonly List<ParticleDecorationTimeline.Sample> _particleSamples = [];
+    private readonly Dictionary<ImageDecorationTimeline.Item, PlanetDecorationTrail> _planetTrails = [];
+    private PlanetTrail.Sample[] _planetTrailSamples = [];
+    private ImageDecorationTimeline? _planetTrailTimeline;
+    private int _planetTrailFrame;
     private readonly OfficialFloorRenderer? _floorPipeline;
     private ObjectFloorRenderer? _floorObjects;
     private double _floorObjectTime;
@@ -84,6 +88,22 @@ internal sealed class ImageDecorationRenderer : IDisposable
             vec2 corner = _Corner * (1.0 + pixelFootprint);
             gl_Position = _Clip * vec4(corner, 0.0, 1.0);
             spriteUv = corner + 0.5;
+        }
+        """;
+
+    private const string PlanetTrailVertex = """
+        #version 330 core
+        layout(location = 0) in vec2 corner;
+        layout(location = 1) in mat4 clip;
+        layout(location = 5) in vec4 tint;
+        out vec2 vUv;
+        out vec4 vTint;
+
+        void main()
+        {
+            gl_Position = clip * vec4(corner, 0.0, 1.0);
+            vUv = corner + 0.5;
+            vTint = tint;
         }
         """;
 
@@ -193,6 +213,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
         """;
 
     private readonly int _program;
+    private int _planetTrailProgram;
+    private int _planetTrailTexture;
+    private int _planetTrailMaskMode;
+    private int _planetTrailViewport;
     private int _depthSpriteProgram;
     private SpriteUniforms? _depthSprite;
     private readonly int _layerProgram;
@@ -426,8 +450,12 @@ internal sealed class ImageDecorationRenderer : IDisposable
         Func<string, Vector2> planet, bool collectEditorQuads = false, Func<int, float>? floorOpacity = null,
         DecorationKinds visibleKinds = DecorationKinds.All, Func<float>? readVolume = null,
         bool forceFloorOutlines = false, bool animateSpeedIcons = true, SceneRenderView? scene = null,
-        bool prefetchUpcoming = true)
+        bool prefetchUpcoming = true, double planetTrailLifetime = 0)
     {
+        if (!ReferenceEquals(timeline, _planetTrailTimeline) || planetTrailLifetime <= 0)
+            ResetPlanetTrails();
+        _planetTrailTimeline = timeline;
+        _planetTrailFrame++;
         _visible.Clear();
         _painterOrder.Clear();
         _synced.Clear();
@@ -467,7 +495,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 ? authoredPose with { Opacity = authoredPose.Opacity * floorOpacity(item.Floor) } : authoredPose;
             if (item.IsPlayerBubble && !collectEditorQuads)
                 continue;
-            if (pose.Image == ObjectDecorationArt.PlanetKey)
+            bool isPlanet = pose.Image == ObjectDecorationArt.PlanetKey;
+            if (isPlanet)
                 pose = pose with { Image = ObjectDecorationArt.PlanetImageAt(time) };
             if (pose.ObjectFloor is { ColorMode: not TrackColorMode.Single } color)
             {
@@ -537,6 +566,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 }
                 continue;
             }
+            if (isPlanet && planetTrailLifetime > 0 && pose.Opacity > 0 && pose.Tint.W > 0 &&
+                pose.Masking != DecorationMasking.Mask)
+                AddPlanetTrail(item, pose, pixels, model, screen);
+
             // Floor meshes are in world units, so their unit transform covers more than a sprite quad.
             if (!Outside(pose.ObjectFloor is null ? clip : Matrix4.CreateScale(400f, 400f, 1f) * clip, screen))
             {
@@ -549,17 +582,21 @@ internal sealed class ImageDecorationRenderer : IDisposable
                         ? FloorObjects.BoundsFor(objectFloor, time, _editFloorIcons) * clip : clip;
             }
         }
+        foreach (var (item, trail) in _planetTrails)
+            if (trail.Frame != _planetTrailFrame) _planetTrails.Remove(item);
         _painterOrder.Sort();
         _synced.Sort(static (left, right) =>
         {
             int floor = right.Item.Floor.CompareTo(left.Item.Floor);
-            return floor == 0 ? left.Item.Index.CompareTo(right.Item.Index) : floor;
+            if (floor != 0) return floor;
+            int item = left.Item.Index.CompareTo(right.Item.Index);
+            return item != 0 ? item : left.ParticleOrder.CompareTo(right.ParticleOrder);
         });
         // A jump or runtime trigger may introduce images that have no authored prefetch deadline.
         // Start with the target frame's visible sprites before spending work on future activations.
         foreach (var decoration in _visible)
         {
-            if (decoration.Pose.ObjectFloor is not null)
+            if (decoration.ParticleOrder < 0 || decoration.Pose.ObjectFloor is not null)
                 continue;
             string name = decoration.Pose.Image;
             var stream = timeline.AnimationFrames.Contains(name) ? _animationTextures : _staticTextures;
@@ -569,11 +606,60 @@ internal sealed class ImageDecorationRenderer : IDisposable
         if (prefetchUpcoming)
             PrefetchTextures(timeline, time);
 
+        void AddPlanetTrail(ImageDecorationTimeline.Item item, ImageDecorationTimeline.Pose pose, Vector2 pixels,
+            Matrix4 model, bool screen)
+        {
+            // Camera-relative positions use a fixed-height coordinate space so their history follows
+            // the viewport without inheriting world camera pan or zoom.
+            Vector2 units = screen
+                ? new Vector2(500f * camera.ViewportWidth / Math.Max(1f, camera.ViewportHeight), 500f)
+                : Vector2.One;
+            if (units.X <= 0) return;
+            if (!_planetTrails.TryGetValue(item, out var trail))
+                _planetTrails[item] = trail = new PlanetDecorationTrail();
+            var samples = trail.Sample(item, pose, time, planetTrailLifetime, _planetTrailFrame,
+                model.Row3.Xy * units, units, ref _planetTrailSamples);
+            if (samples.IsEmpty) return;
+
+            float scale = Math.Min((model.Row0.Xy * units).Length / pixels.X, (model.Row1.Xy * units).Length / pixels.Y);
+            if (!float.IsFinite(scale) || scale <= 0) return;
+            var trailPose = pose with { Blend = DecorationBlendMode.None };
+            for (int i = 0; i < samples.Length; i++)
+            {
+                ref readonly var sample = ref samples[i];
+                if (sample.Size <= 0 || sample.Tint.W <= 0) continue;
+                Vector2 size = new Vector2(sample.Size * scale) / units;
+                Matrix4 particle = Matrix4.CreateScale(size.X, size.Y, 1f);
+                if (!screen && scene is { } sceneView)
+                {
+                    particle.Row0 = new Vector4(sceneView.Right * size.X, 0f);
+                    particle.Row1 = new Vector4(sceneView.Up * size.Y, 0f);
+                }
+                Vector2 center = sample.Center / units;
+                particle.Row3 = new Vector4(center.X, center.Y, 0, 1);
+                Matrix4 clip = Project(particle, trailPose, screen);
+                if (Outside(clip, screen)) continue;
+
+                Vector4 tint = sample.Tint;
+                tint.W *= pose.Tint.W;
+                var visible = new VisibleDecoration(item, trailPose with { Tint = tint }, clip)
+                    { ParticleOrder = i - samples.Length };
+                AddVisible(visible);
+                if (pose.SyncFloorDepth) _synced.Add(visible);
+            }
+        }
+
         Matrix4 Project(Matrix4 model, ImageDecorationTimeline.Pose pose, bool screen) => screen ? model
             : scene is { } sceneView ? sceneView.ProjectDecoration(model, pose.SyncFloorDepth ? 0 : pose.Depth) : model * view;
 
         bool Outside(Matrix4 clip, bool screen) => !screen && scene.HasValue
             ? SceneRenderView.OutsideClip(clip, new Vector3(.5f, .5f, 0)) : IsOutsideViewport(clip);
+    }
+
+    internal void ResetPlanetTrails()
+    {
+        _planetTrails.Clear();
+        _planetTrailTimeline = null;
     }
 
     internal bool StageVisibleTextures(ImageDecorationTimeline timeline, double time)
@@ -583,7 +669,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         foreach (var decoration in _visible)
         {
             string name = decoration.Pose.Image;
-            if (decoration.Pose.ObjectFloor is not null || !_stagingImages.Add(name) || _textures.ContainsKey(name))
+            if (decoration.ParticleOrder < 0 || decoration.Pose.ObjectFloor is not null ||
+                !_stagingImages.Add(name) || _textures.ContainsKey(name))
                 continue;
 
             var stream = timeline.AnimationFrames.Contains(name) ? _animationTextures : _staticTextures;
@@ -752,6 +839,37 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.UseProgram(0);
     }
 
+    private void DrawPlanetTrailBatch(int count, int mask, int maskMode, Vector2 viewport)
+    {
+        GL.ActiveTexture(TextureUnit.Texture0);
+        if (_planetTrailProgram == 0)
+        {
+            _planetTrailProgram = SpriteRenderer.LinkSources(PlanetTrailVertex, ShaderLibrary.Load("Particle.frag"));
+            _planetTrailMaskMode = GL.GetUniformLocation(_planetTrailProgram, "uParticleMaskMode");
+            _planetTrailViewport = GL.GetUniformLocation(_planetTrailProgram, "uParticleViewport");
+            GL.UseProgram(_planetTrailProgram);
+            GL.Uniform1(GL.GetUniformLocation(_planetTrailProgram, "uParticleTex"), 0);
+            GL.Uniform1(GL.GetUniformLocation(_planetTrailProgram, "uParticleMask"), 2);
+            _planetTrailTexture = SpriteRenderer.UploadPlanetTrailTexture();
+        }
+        GL.UseProgram(_planetTrailProgram);
+        GL.Uniform1(_planetTrailMaskMode, maskMode);
+        GL.Uniform2(_planetTrailViewport, viewport);
+        GL.BindTexture(TextureTarget.Texture2D, _planetTrailTexture);
+        GL.BindSampler(0, 0);
+        GL.ActiveTexture(TextureUnit.Texture2);
+        GL.BindTexture(TextureTarget.Texture2D, mask);
+        GL.BindSampler(2, 0);
+        GL.ActiveTexture(TextureUnit.Texture0);
+        GL.BindVertexArray(_batchVao);
+        _batchBuffer.Upload<SpriteInstance>(_batch.AsSpan(0, count));
+
+        // Match the RGB-only particle pass used for the gameplay planets.
+        GL.ColorMask(true, true, true, false);
+        GL.DrawArraysInstanced(PrimitiveType.TriangleStrip, 0, 4, count);
+        GL.ColorMask(true, true, true, true);
+    }
+
     public int SyncedCount => _synced.Count;
     public int SyncedFloor(int index) => _synced[index].Item.Floor;
 
@@ -796,6 +914,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
         int draws = 0;
         int batchCount = 0, textureCount = 0, batchMask = 0, batchMode = 0;
         int boundTextureCount = 0;
+        bool batchTrail = false;
         var scissors = new DecorationScissor();
         void DrawSprite(Box2i? scissor)
         {
@@ -818,8 +937,10 @@ internal sealed class ImageDecorationRenderer : IDisposable
         void Flush()
         {
             if (batchCount == 0) return;
+            if (batchTrail)
+                DrawPlanetTrailBatch(batchCount, batchMask, batchMode, viewport);
             // Isolated sprites are cheaper to submit without a buffer upload.
-            if (batchCount == 1)
+            else if (batchCount == 1)
             {
                 GL.UseProgram(_program);
                 GL.BindVertexArray(_vao);
@@ -852,6 +973,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
             }
             batchCount = 0;
             textureCount = 0;
+            batchTrail = false;
             draws++;
         }
         var decorations = CollectionsMarshal.AsSpan(synced ? _synced : _visible);
@@ -875,6 +997,21 @@ internal sealed class ImageDecorationRenderer : IDisposable
             int mask = IsMaskRecipient(pose) ? FindMask(item, pose) : 0;
             if (pose.Masking == DecorationMasking.VisibleInsideMask && mask == 0)
                 continue;
+
+            if (decoration.ParticleOrder < 0)
+            {
+                int mode = mask == 0 ? 0 : pose.Masking == DecorationMasking.VisibleOutsideMask ? 2 : 1;
+                if (!batchTrail || batchCount == _batch.Length || batchMask != mask || batchMode != mode)
+                    Flush();
+                batchTrail = true;
+                batchMask = mask;
+                batchMode = mode;
+                Vector4 trailTint = pose.Tint;
+                trailTint.W *= pose.Opacity;
+                _batch[batchCount++] = new SpriteInstance(clip, trailTint, default, 0);
+                continue;
+            }
+            if (batchTrail) Flush();
 
             if (pose.ObjectFloor is { } objectFloor)
             {
@@ -904,12 +1041,13 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 continue;
             }
 
+            Vector2 tile = item.Tile;
             var repeat = _frameState.Repeat(pose.Image);
             TextureBinding texture = TextureFor(timeline, pose, repeat);
             if (texture.Texture == 0)
                 continue;
             // For untiled sprites, apply the edge clamp in the texture sampler.
-            bool clampWithSampler = item.Tile == Vector2.One && repeat == (false, false);
+            bool clampWithSampler = tile == Vector2.One && repeat == (false, false);
             Box2i? scissor = null;
             if (clampWithSampler && timeline.AlphaBounds(pose.Image) is { } alpha)
             {
@@ -936,8 +1074,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
                 }
                 batchMask = mask;
                 batchMode = mode;
-                float samplingMode = clampWithSampler ? -1f : !timeline.LegacyMasks && item.Tile != Vector2.One ? 1f : 0f;
-                _batch[batchCount++] = new SpriteInstance(clip, tint, new Vector4(item.Tile.X, item.Tile.Y,
+                float samplingMode = clampWithSampler ? -1f : !timeline.LegacyMasks && tile != Vector2.One ? 1f : 0f;
+                _batch[batchCount++] = new SpriteInstance(clip, tint, new Vector4(tile.X, tile.Y,
                     samplingMode, pose.Smoothing ? 1f : 0f), slot);
                 continue;
             }
@@ -946,7 +1084,7 @@ internal sealed class ImageDecorationRenderer : IDisposable
             if (pose.Blend == DecorationBlendMode.None)
             {
                 GL.UseProgram(_program);
-                _sprite.Set(clip, tint, item.Tile, pose.Smoothing, viewport, !timeline.LegacyMasks, clampWithSampler);
+                _sprite.Set(clip, tint, tile, pose.Smoothing, viewport, !timeline.LegacyMasks, clampWithSampler);
                 BindMask(_sprite, pose.Masking, mask);
                 texture.Bind(0);
                 DrawSprite(scissor);
@@ -1477,6 +1615,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
         GL.DeleteProgram(_program);
+        if (_planetTrailTexture != 0) GL.DeleteTexture(_planetTrailTexture);
+        if (_planetTrailProgram != 0) GL.DeleteProgram(_planetTrailProgram);
         if (_depthSpriteProgram != 0) GL.DeleteProgram(_depthSpriteProgram);
         GL.DeleteProgram(_layerProgram);
         GL.DeleteProgram(_blendProgram);
@@ -1505,7 +1645,8 @@ internal sealed class ImageDecorationRenderer : IDisposable
         {
             var item = decoration.Item;
             var pose = decoration.Pose;
-            if (IsScreenRelative(pose) || pose.Masking == DecorationMasking.Mask || IsTransparent(pose)) continue;
+            if (decoration.ParticleOrder < 0 || IsScreenRelative(pose) ||
+                pose.Masking == DecorationMasking.Mask || IsTransparent(pose)) continue;
             int mask = IsMaskRecipient(pose) ? FindMask(item, pose) : 0;
             if (pose.Masking == DecorationMasking.VisibleInsideMask && mask == 0) continue;
             Matrix4 clip = decoration.Clip;

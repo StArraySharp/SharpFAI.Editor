@@ -102,12 +102,7 @@ public sealed unsafe class SpriteRenderer : IDisposable
             _planetTexture = ImageDecoder.Upload(pixels, planet.Width, planet.Height, generateMipmaps: true);
         }
 
-        // Particle texture ----
-        ImageDecoder.RgbaImage particle = ImageDecoder.Decode(EmbeddedAssets.Read("Resources.particle.png"));
-        {
-            ImageDecoder.FlipVertically(particle.Pixels, particle.Width, particle.Height);
-            _particleTexture = ImageDecoder.Upload(particle.Pixels, particle.Width, particle.Height, generateMipmaps: true);
-        }
+        _particleTexture = UploadPlanetTrailTexture();
 
         // Planet program ----
         (_planetVao, _planetVbo) = CreateQuad();
@@ -116,6 +111,13 @@ public sealed unsafe class SpriteRenderer : IDisposable
         // Particle program ----
         (_particleVao, _particleVbo, _particleInstanceVbo) = CreateInstancedQuad();
         BuildParticleProgram();
+    }
+
+    internal static int UploadPlanetTrailTexture()
+    {
+        var particle = ImageDecoder.Decode(EmbeddedAssets.Read("Resources.particle.png"));
+        ImageDecoder.FlipVertically(particle.Pixels, particle.Width, particle.Height);
+        return ImageDecoder.Upload(particle, generateMipmaps: true);
     }
 
     /// <summary>Compile the planet shader program.</summary>

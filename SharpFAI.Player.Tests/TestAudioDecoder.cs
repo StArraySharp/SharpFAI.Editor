@@ -79,11 +79,28 @@ public sealed class TestAudioDecoder
         {
             File.WriteAllBytes(path, source);
             Assert.That(AudioDecoder.Decode(path)?.Pcm, Is.EqualTo(audio!.Pcm));
+            AssertStreamMatches(path, audio!);
         }
         finally
         {
             File.Delete(path);
         }
+    }
+
+    [Test]
+    public void Mp3KeepsSamplePositionWhenSeekingAcrossCompressedCheckpoints()
+    {
+        using Stream input = typeof(TestAudioDecoder).Assembly.GetManifestResourceStream(
+            "SharpFAI.Player.Tests.Fixtures.Audio.stereo.mp3")!;
+        using var bytes = new MemoryStream();
+        input.CopyTo(bytes);
+        byte[] fixture = bytes.ToArray();
+        int audioOffset = fixture.AsSpan(0, 3).SequenceEqual("ID3"u8)
+            ? 10 + ((fixture[6] << 21) | (fixture[7] << 14) | (fixture[8] << 7) | fixture[9]) : 0;
+        using var repeated = new MemoryStream();
+        for (int i = 0; i < 48; i++)
+            repeated.Write(fixture.AsSpan(audioOffset));
+        Assert.That(DecodeAndCheckStream(repeated.ToArray(), ".mp3"), Is.Not.Null);
     }
 
     [TestCase(".aif")]
@@ -151,7 +168,7 @@ public sealed class TestAudioDecoder
         if ((soundSize & 1) != 0) writer.Write((byte)0);
         var bytes = stream.ToArray();
         BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(4), (uint)(bytes.Length - 8));
-        return AudioDecoder.Decode(bytes, Guid.NewGuid().ToString("N"), extension);
+        return DecodeAndCheckStream(bytes, extension);
     }
 
     private static short[] ReadPcm(DecodedAudio audio) => Enumerable.Range(0, audio.Pcm.Length / 2)
@@ -192,6 +209,61 @@ public sealed class TestAudioDecoder
         stream.Position = 4;
         writer.Write((int)(length - 8));
 
-        return AudioDecoder.Decode(stream.ToArray(), Guid.NewGuid().ToString("N"), ".wav");
+        return DecodeAndCheckStream(stream.ToArray(), ".wav");
+    }
+
+    private static DecodedAudio? DecodeAndCheckStream(byte[] bytes, string extension)
+    {
+        var audio = AudioDecoder.Decode(bytes, Guid.NewGuid().ToString("N"), extension);
+        string path = Path.Combine(Path.GetTempPath(), $"sharpfai-stream-{Guid.NewGuid():N}{extension}");
+        try
+        {
+            File.WriteAllBytes(path, bytes);
+            if (audio is null)
+                Assert.That(AudioDecoder.OpenStream(path), Is.Null);
+            else
+                AssertStreamMatches(path, audio);
+            return audio;
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static void AssertStreamMatches(string path, DecodedAudio decoded)
+    {
+        var streamed = AudioDecoder.OpenStream(path);
+        Assert.That(streamed, Is.Not.Null);
+        Assert.That(streamed!.IsStreamed, Is.True);
+        Assert.That(streamed.Duration, Is.EqualTo(decoded.Duration));
+        Assert.That(streamed.Channels, Is.EqualTo(decoded.Channels));
+        Assert.That(streamed.SampleRate, Is.EqualTo(decoded.SampleRate));
+
+        int channels = streamed.Channels;
+        var expected = ReadPcm(decoded);
+        using var reader = streamed.OpenReader();
+        using var independent = streamed.OpenReader();
+        var samples = new short[73 * channels];
+        long end = streamed.FrameCount;
+        foreach (long first in new[] { end / 2, 0, end - 1, end })
+        {
+            reader.Seek(first);
+            int count = reader.Read(samples);
+            Assert.That(count, Is.EqualTo(Math.Min(73, end - first)));
+            Assert.That(samples.AsSpan(0, count * channels).ToArray(),
+                Is.EqualTo(expected.AsSpan((int)first * channels, count * channels).ToArray()));
+            Assert.That(reader.Position, Is.EqualTo(first + count));
+        }
+        Assert.That(independent.Position, Is.Zero);
+        for (int first = 0; first < end;)
+        {
+            int count = independent.Read(samples);
+            Assert.That(count, Is.Positive);
+            Assert.That(samples.AsSpan(0, count * channels).ToArray(),
+                Is.EqualTo(expected.AsSpan(first * channels, count * channels).ToArray()));
+            first += count;
+        }
+        Assert.That(independent.Read(samples), Is.Zero);
     }
 }

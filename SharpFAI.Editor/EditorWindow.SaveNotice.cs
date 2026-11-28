@@ -32,8 +32,8 @@ internal sealed unsafe partial class EditorWindow
         ImVec2 min = WidgetDraw.V2(max.x - text.x - 2 * horizontalPadding,
             max.y - text.y - 2 * verticalPadding);
         ImDrawList* draw = ImGui.GetForegroundDrawList(viewport);
-        WidgetDraw.Panel(draw, min, max, WidgetDraw.WithAlpha(WidgetDraw.U32(30, 45, 53, 246), alpha));
-        WidgetDraw.Outline(draw, min, max, WidgetDraw.WithAlpha(WidgetDraw.U32(63, 124, 123), alpha));
+        WidgetDraw.Panel(draw, min, max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_PopupBg, alpha * .96f));
+        WidgetDraw.Outline(draw, min, max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark, alpha * .5f));
         ImDrawList.AddText(draw, WidgetDraw.V2(min.x + horizontalPadding, min.y + verticalPadding),
             WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, alpha), message);
     }

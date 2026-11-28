@@ -66,25 +66,9 @@ public sealed class PlanetTrail
     /// <summary>Threshold below which a move counts as "no move".</summary>
     private const float DuplicateEpsilonSquared = 0.25f;
 
-    // One history per planet: position, timestamp and the colour in effect at that moment
-    private Vector2[] _positionsRed = new Vector2[Capacity];
-    private Vector2[] _positionsBlue = new Vector2[Capacity];
-    private double[] _timesRed = new double[Capacity];
-    private double[] _timesBlue = new double[Capacity];
-    private Vector4[] _tintsRed = new Vector4[Capacity];
-    private Vector4[] _tintsBlue = new Vector4[Capacity];
-    private Vector2[] _positionsThird = new Vector2[Capacity];
-    private double[] _timesThird = new double[Capacity];
-    private Vector4[] _tintsThird = new Vector4[Capacity];
-
-    private int _headRed;
-    private int _headBlue;
-    private int _countRed;
-    private int _countBlue;
-    private int _headThird;
-    private int _countThird;
-
-    // Reused sample buffer so drawing allocates nothing per frame
+    private readonly History _blue = new(Capacity);
+    private readonly History _red = new(Capacity);
+    private readonly History _third = new(Capacity);
     private Sample[] _samples = new Sample[1024];
 
     /// <summary>Number of samples produced last frame.</summary>
@@ -93,12 +77,9 @@ public sealed class PlanetTrail
     /// <summary>Clear all history.</summary>
     public void Clear()
     {
-        _headRed = 0;
-        _headBlue = 0;
-        _countRed = 0;
-        _countBlue = 0;
-        _headThird = 0;
-        _countThird = 0;
+        _red.Clear();
+        _blue.Clear();
+        _third.Clear();
         SampleCount = 0;
     }
 
@@ -123,32 +104,16 @@ public sealed class PlanetTrail
         if (ActiveLifetime <= 0)
             return;
 
-        switch (id)
-        {
-            case 0:
-                Push(ref _positionsBlue, ref _timesBlue, ref _tintsBlue,
-                    ref _headBlue, ref _countBlue, position, tint, now, preserveHistory);
-                break;
-            case 1:
-                Push(ref _positionsRed, ref _timesRed, ref _tintsRed,
-                    ref _headRed, ref _countRed, position, tint, now, preserveHistory);
-                break;
-            default:
-                Push(ref _positionsThird, ref _timesThird, ref _tintsThird,
-                    ref _headThird, ref _countThird, position, tint, now, preserveHistory);
-                break;
-        }
+        Track(id).Record(position, tint, now, ActiveLifetime, preserveHistory);
     }
 
     internal void ResetPlanet(int id)
     {
-        switch (id)
-        {
-            case 0: _countBlue = 0; break;
-            case 1: _countRed = 0; break;
-            case 2: _countThird = 0; break;
-        }
+        if (id is >= 0 and <= 2)
+            Track(id).Clear();
     }
+
+    private History Track(int id) => id switch { 0 => _blue, 1 => _red, _ => _third };
 
     /// <summary>
     /// Resample the histories by arc length into drawable particles. The returned span stays valid
@@ -164,26 +129,60 @@ public sealed class PlanetTrail
             return [];
         }
 
-        // Expire every history, including planets that are no longer being recorded.
-        Trim(_timesRed, _headRed, now, ref _countRed);
-        Trim(_timesBlue, _headBlue, now, ref _countBlue);
-        Trim(_timesThird, _headThird, now, ref _countThird);
-        int needed = EstimateCount(_positionsRed, _headRed, _countRed)
-                   + EstimateCount(_positionsBlue, _headBlue, _countBlue)
-                   + EstimateCount(_positionsThird, _headThird, _countThird);
+        _red.Trim(now, ActiveLifetime);
+        _blue.Trim(now, ActiveLifetime);
+        _third.Trim(now, ActiveLifetime);
+        EnsureSampleCapacity(ref _samples, _red.Estimate() + _blue.Estimate() + _third.Estimate());
 
-        if (needed > _samples.Length)
-        {
-            _samples = new Sample[Math.Max(needed, _samples.Length * 2)];
-        }
-
-        int written = 0;
-        written += Resample(_positionsRed, _timesRed, _tintsRed, _headRed, _countRed, now, _samples, written, view, FireColorOverride);
-        written += Resample(_positionsBlue, _timesBlue, _tintsBlue, _headBlue, _countBlue, now, _samples, written, view, IceColorOverride);
-        written += Resample(_positionsThird, _timesThird, _tintsThird, _headThird, _countThird, now, _samples, written, view, null);
-
+        int written = _red.Resample(now, ActiveLifetime, _samples, 0, view, FireColorOverride);
+        written += _blue.Resample(now, ActiveLifetime, _samples, written, view, IceColorOverride);
+        written += _third.Resample(now, ActiveLifetime, _samples, written, view, null);
         SampleCount = written;
         return _samples.AsSpan(0, written);
+    }
+
+    private static void EnsureSampleCapacity(ref Sample[] samples, int needed)
+    {
+        if (needed > samples.Length)
+            samples = new Sample[Math.Max(needed, samples.Length * 2)];
+    }
+
+    internal sealed class History(int capacity)
+    {
+        private Vector2[] _positions = [];
+        private double[] _times = [];
+        private Vector4[] _tints = [];
+        private int _head, _count;
+
+        internal void Clear() => _count = 0;
+
+        internal void Record(Vector2 position, Vector4 tint, double now, double lifetime, bool preserveHistory)
+        {
+            if (_positions.Length == 0)
+            {
+                _positions = new Vector2[capacity];
+                _times = new double[capacity];
+                _tints = new Vector4[capacity];
+            }
+            Push(ref _positions, ref _times, ref _tints, ref _head, ref _count, position, tint, now, lifetime, preserveHistory);
+        }
+
+        internal void Trim(double now, double lifetime) =>
+            PlanetTrail.Trim(_times, _head, now, lifetime, ref _count);
+
+        internal int Estimate() => EstimateCount(_positions, _head, _count);
+
+        internal int Resample(double now, double lifetime, Sample[] output, int offset,
+            FloorRegion? view, Vector3? colorOverride) =>
+            PlanetTrail.Resample(_positions, _times, _tints, _head, _count, now,
+                lifetime, output, offset, view, colorOverride);
+
+        internal ReadOnlySpan<Sample> Build(double now, double lifetime, Vector3? colorOverride, ref Sample[] output)
+        {
+            Trim(now, lifetime);
+            EnsureSampleCapacity(ref output, Estimate());
+            return output.AsSpan(0, Resample(now, lifetime, output, 0, null, colorOverride));
+        }
     }
 
     /// <summary>Estimate how many samples a history yields.</summary>
@@ -211,9 +210,10 @@ public sealed class PlanetTrail
     /// Resample one history at equal arc-length intervals. Positions interpolate between neighbouring
     /// history points; the spacing is small enough that the polyline error is invisible.
     /// </summary>
-    private int Resample(
+    private static int Resample(
         Vector2[] positions, double[] times, Vector4[] tints,
-        int head, int count, double now, Sample[] output, int offset, FloorRegion? view, Vector3? colorOverride)
+        int head, int count, double now, double lifetime, Sample[] output, int offset, FloorRegion? view,
+        Vector3? colorOverride)
     {
         if (count < 2)
         {
@@ -249,7 +249,7 @@ public sealed class PlanetTrail
         int written = 0;
 
         double age = now - times[Index(head, count, count - 1, mask)];
-        float activity = (float)Math.Clamp(1.0 - age / ActiveLifetime, 0.0, 1.0) * MathF.Min(1f, totalLength / SpacingArc);
+        float activity = (float)Math.Clamp(1.0 - age / lifetime, 0.0, 1.0) * MathF.Min(1f, totalLength / SpacingArc);
         // Use the current palette for the whole trail so changing it does not discard history.
         Vector3 endColor = (colorOverride ?? Vector3.UnitX) * RampEndIntensity;
         for (int i = 0; i < points; i++)
@@ -301,9 +301,9 @@ public sealed class PlanetTrail
         (head - count + index) & mask;
 
     /// <summary>Push a point, updating only the timestamp when stationary.</summary>
-    private void Push(
+    private static void Push(
         ref Vector2[] positions, ref double[] times, ref Vector4[] tints,
-        ref int head, ref int count, Vector2 position, Vector4 tint, double now, bool preserveHistory)
+        ref int head, ref int count, Vector2 position, Vector4 tint, double now, double lifetime, bool preserveHistory)
     {
         if (count > 0)
         {
@@ -318,7 +318,7 @@ public sealed class PlanetTrail
 
         if (preserveHistory && count == positions.Length)
         {
-            Trim(times, head, now, ref count);
+            Trim(times, head, now, lifetime, ref count);
             if (count == positions.Length && positions.Length < MaximumHistoryCapacity)
             {
                 // Sub-frame sampling can fill the ring before any point expires.
@@ -352,13 +352,13 @@ public sealed class PlanetTrail
     }
 
     /// <summary>Drop history points past the lifetime.</summary>
-    private void Trim(double[] times, int head, double now, ref int count)
+    private static void Trim(double[] times, int head, double now, double lifetime, ref int count)
     {
         while (count > 0)
         {
             int start = (head - count) & (times.Length - 1);
 
-            if (now - times[start] <= ActiveLifetime)
+            if (now - times[start] <= lifetime)
             {
                 break;
             }

@@ -11,6 +11,8 @@ internal sealed unsafe class AudioMonitorWindow
     private static readonly int[] FrequencyTicks = [AudioMonitorAnalysis.MinFrequency, 100, 500, 2000, 10000];
     private AudioMonitorAnalysis? _analysis;
     private DecodedAudio? _source;
+    private AudioSampleWindow? _window;
+    private bool _readFailed;
     private long _lastSample;
     private double _position;
     private bool _wasPlaying;
@@ -26,10 +28,11 @@ internal sealed unsafe class AudioMonitorWindow
             return;
         }
 
-        if (music is not { Channels: 1 or 2, SampleRate: > AudioMonitorAnalysis.MinFrequency * 2, Pcm.Length: > 0 })
+        if (music is not { Channels: 1 or 2, SampleRate: > AudioMonitorAnalysis.MinFrequency * 2, FrameCount: > 0 })
             music = null;
         if (!ReferenceEquals(music, _source))
         {
+            ClearSource();
             _source = music;
             _lastSample = 0;
         }
@@ -37,7 +40,7 @@ internal sealed unsafe class AudioMonitorWindow
         ImGui.SetNextWindowSize(WidgetDraw.V2(560, 320), (int)ImGuiCond.ImGuiCond_FirstUseEver);
         if (ImGui.Begin(L.T("AudioMonitor") + "###audio-monitor", ref IsOpen) != 0)
         {
-            if (music is null)
+            if (music is null || _readFailed)
                 ImGui.TextWrapped(L.T("AudioMonitorNoMusic"));
             else
                 DrawContent(music, seconds, playing);
@@ -47,6 +50,9 @@ internal sealed unsafe class AudioMonitorWindow
 
     internal void ClearSource()
     {
+        _window?.Dispose();
+        _window = null;
+        _readFailed = false;
         _source = null;
         _lastSample = 0;
     }
@@ -58,7 +64,15 @@ internal sealed unsafe class AudioMonitorWindow
         if (_lastSample == 0 || playing != _wasPlaying ||
             seconds != _position && (!playing || elapsed >= .04 || Math.Abs(seconds - _position) > .2))
         {
-            analysis.Analyze(music, seconds);
+            try { analysis.Analyze(music, _window ??= new(music), seconds); }
+            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                _window?.Dispose();
+                _window = null;
+                _readFailed = true;
+                Console.Error.WriteLine($"[Audio] Monitor: {error.Message}");
+                return;
+            }
             _position = seconds;
             _lastSample = Stopwatch.GetTimestamp();
             _wasPlaying = playing;

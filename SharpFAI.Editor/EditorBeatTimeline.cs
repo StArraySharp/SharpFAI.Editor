@@ -1,3 +1,4 @@
+using System.Globalization;
 using Newtonsoft.Json.Linq;
 
 namespace SharpFAI.Editor;
@@ -12,8 +13,7 @@ internal sealed class EditorBeatClock
     public EditorBeatClock(ReadOnlySpan<double> floorTimes, ReadOnlySpan<double> floorBpms, double startingBpm)
     {
         int first = floorTimes.Length > 1 ? 1 : 0;
-        double start = !floorTimes.IsEmpty && double.IsFinite(floorTimes[first]) ? floorTimes[first] : 0;
-        _preroll = new Tempo(start, 0, Rate(startingBpm, 2));
+        _preroll = new Tempo(FirstBeatTime(floorTimes), 0, Rate(startingBpm, 2));
         var current = _preroll;
         List<Tempo> tempos = [current];
         for (int floor = first; floor < Math.Min(floorTimes.Length, floorBpms.Length); floor++)
@@ -28,6 +28,26 @@ internal sealed class EditorBeatClock
                 tempos[^1] = current;
             else
                 tempos.Add(current);
+        }
+        _tempos = tempos.ToArray();
+    }
+
+    public EditorBeatClock(ReadOnlySpan<double> floorTimes, double levelBpm, EditorTimeSignatures? timelineMeters = null)
+    {
+        _preroll = new Tempo(FirstBeatTime(floorTimes), 0, Rate(levelBpm, 2));
+        var current = _preroll;
+        List<Tempo> tempos = [current];
+        if (timelineMeters is not null)
+        {
+            foreach (var change in timelineMeters.Changes)
+            {
+                double rate = Rate(change.TimelineBpm ?? levelBpm, _preroll.BeatsPerSecond);
+                if (rate == current.BeatsPerSecond) continue;
+                double time = current.Time + (change.Beat - current.Beat) / current.BeatsPerSecond;
+                current = new Tempo(time, change.Beat, rate);
+                if (change.Beat == 0) tempos[0] = current;
+                else tempos.Add(current);
+            }
         }
         _tempos = tempos.ToArray();
     }
@@ -59,7 +79,13 @@ internal sealed class EditorBeatClock
     }
 
     private static double Rate(double bpm, double fallback) =>
-        double.IsFinite(bpm) && bpm > 1e-6 ? bpm / 60 : fallback;
+        EditorTimeSignatures.IsValidBpm(bpm) ? bpm / 60 : fallback;
+
+    private static double FirstBeatTime(ReadOnlySpan<double> floorTimes)
+    {
+        int first = floorTimes.Length > 1 ? 1 : 0;
+        return !floorTimes.IsEmpty && double.IsFinite(floorTimes[first]) ? floorTimes[first] : 0;
+    }
 }
 
 internal readonly record struct TimeSignature(int Numerator, int Denominator)
@@ -76,15 +102,15 @@ internal readonly record struct TimeSignature(int Numerator, int Denominator)
 
 internal sealed class EditorTimeSignatures
 {
-    internal readonly record struct Change(double Beat, TimeSignature Signature, double Measure);
+    internal readonly record struct Change(double Beat, TimeSignature Signature, double Measure, double? TimelineBpm);
     private const double Epsilon = 1e-7;
     private readonly Change[] _changes;
 
-    private EditorTimeSignatures(SortedDictionary<double, TimeSignature> source)
+    private EditorTimeSignatures(SortedDictionary<double, (TimeSignature Signature, double? TimelineBpm)> source)
     {
-        source.TryAdd(0, TimeSignature.Common);
+        source.TryAdd(0, (TimeSignature.Common, null));
         List<Change> changes = [];
-        foreach (var (beat, signature) in source)
+        foreach (var (beat, (signature, timelineBpm)) in source)
         {
             double measure = 1;
             if (changes.Count > 0)
@@ -93,30 +119,30 @@ internal sealed class EditorTimeSignatures
                 measure = previous.Measure + Math.Max(1,
                     Math.Ceiling((beat - previous.Beat) / previous.Signature.MeasureLength - Epsilon));
             }
-            changes.Add(new Change(beat, signature, measure));
+            changes.Add(new Change(beat, signature, measure, timelineBpm));
         }
         _changes = changes.ToArray();
     }
 
     public IReadOnlyList<Change> Changes => _changes;
 
+    public static bool IsValidBpm(double bpm) => double.IsFinite(bpm) && bpm > 1e-6;
+
     public static EditorTimeSignatures Read(JToken? data)
     {
-        SortedDictionary<double, TimeSignature> changes = [];
+        SortedDictionary<double, (TimeSignature, double?)> changes = [];
         if (data is JArray entries)
         {
             foreach (var item in entries.OfType<JObject>())
             {
-                if (item["beat"] is not JValue { Type: JTokenType.Float or JTokenType.Integer } beatValue ||
-                    !double.TryParse(beatValue.ToString(Newtonsoft.Json.Formatting.None),
-                        System.Globalization.CultureInfo.InvariantCulture, out double beat) ||
+                if (!TryReadDouble(item["beat"], out double beat) ||
                     !double.IsFinite(beat) || beat < 0 ||
                     !TryReadInt(item["numerator"], out int numerator) ||
                     !TryReadInt(item["denominator"], out int denominator))
                     continue;
                 TimeSignature signature = new(numerator, denominator);
                 if (signature.IsValid)
-                    changes[beat] = signature;
+                    changes[beat] = (signature, TryReadDouble(item["bpm"], out double bpm) && IsValidBpm(bpm) ? bpm : null);
             }
         }
         return new EditorTimeSignatures(changes);
@@ -124,27 +150,37 @@ internal sealed class EditorTimeSignatures
         static bool TryReadInt(JToken? item, out int value) =>
             int.TryParse(item is JValue { Type: JTokenType.Integer } number
                 ? number.ToString(Newtonsoft.Json.Formatting.None) : null, out value);
+
+        static bool TryReadDouble(JToken? item, out double value) =>
+            double.TryParse(item is JValue { Type: JTokenType.Float or JTokenType.Integer } number
+                ? number.ToString(Newtonsoft.Json.Formatting.None) : null, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
-    public EditorTimeSignatures WithChange(double beat, TimeSignature? signature)
+    public EditorTimeSignatures WithChange(double beat, TimeSignature? signature, double? timelineBpm = null)
     {
-        if (!double.IsFinite(beat) || beat < 0 || signature is { IsValid: false })
+        if (!double.IsFinite(beat) || beat < 0 || signature is { IsValid: false } ||
+            (timelineBpm is double bpm && !IsValidBpm(bpm)))
             return this;
-        SortedDictionary<double, TimeSignature> changes = [];
+        SortedDictionary<double, (TimeSignature, double?)> changes = [];
         foreach (var change in _changes)
             if (change.Beat != beat)
-                changes.Add(change.Beat, change.Signature);
+                changes.Add(change.Beat, (change.Signature, change.TimelineBpm));
         if (signature is { } value)
-            changes.Add(beat, value);
+            changes.Add(beat, (value, timelineBpm));
         return new EditorTimeSignatures(changes);
     }
 
-    public JArray? Write() => _changes.Length == 1 && _changes[0].Signature == TimeSignature.Common ? null :
-        new JArray(_changes.Select(change => new JObject
+    public JArray? Write() => _changes is [{ Signature: var first, TimelineBpm: null }] && first == TimeSignature.Common
+        ? null : new JArray(_changes.Select(change =>
         {
-            ["beat"] = change.Beat,
-            ["numerator"] = change.Signature.Numerator,
-            ["denominator"] = change.Signature.Denominator,
+            JObject value = new()
+            {
+                ["beat"] = change.Beat,
+                ["numerator"] = change.Signature.Numerator,
+                ["denominator"] = change.Signature.Denominator,
+            };
+            if (change.TimelineBpm is double bpm) value["bpm"] = bpm;
+            return value;
         }));
 
     public int IndexAt(double beat)

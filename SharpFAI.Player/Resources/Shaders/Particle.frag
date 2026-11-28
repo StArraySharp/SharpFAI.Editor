@@ -5,6 +5,9 @@ in vec4 vTint;
 
 uniform sampler2D uParticleTex;
 uniform bool uStraightAlpha;
+uniform sampler2D uParticleMask;
+uniform vec2 uParticleViewport;
+uniform int uParticleMaskMode;
 
 out vec4 FragColor;
 
@@ -23,6 +26,11 @@ void main()
     if (uStraightAlpha)
         texel.rgb *= texel.a;
     FragColor = vTint * texel * vTint.a;
+    if (uParticleMaskMode != 0)
+    {
+        float coverage = texture(uParticleMask, gl_FragCoord.xy / uParticleViewport).a;
+        FragColor *= uParticleMaskMode == 1 ? coverage : 1.0 - coverage;
+    }
 
     if (FragColor.a <= 0.0001 && FragColor.r + FragColor.g + FragColor.b <= 0.0001)
     {

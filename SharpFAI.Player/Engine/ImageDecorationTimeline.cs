@@ -174,6 +174,8 @@ internal sealed class ImageDecorationTimeline
         public bool IsText => source is AddTextDecoration;
         public bool IsObject => source is AddObjectDecoration;
         public bool IsPlayerBubble => source is AddObjectDecoration { ObjectType: "PlayerBubble" };
+        internal bool UsesDefaultPlanetTrailRamp => source is AddObjectDecoration
+            { ObjectType: "Planet", PlanetColorType: null or "DefaultRed" or "DefaultBlue" };
         public DecorationKinds Kind => source switch
         {
             AddTextDecoration => DecorationKinds.Text,
@@ -392,6 +394,33 @@ internal sealed class ImageDecorationTimeline
         }
 
         public Pose At(double time) => At(time, out _);
+
+        internal bool HasTrailCut(double previous, double time)
+        {
+            int count = ChangeCount;
+            if (count == 0 || time <= previous || _changes[count - 1].Motion.Timing.Start <= previous)
+                return false;
+
+            int first = 0, end = count;
+            while (first < end)
+            {
+                int middle = (first + end) / 2;
+                if (_changes[middle].Motion.Timing.Start <= previous) first = middle + 1;
+                else end = middle;
+            }
+            for (int i = first; i < count; i++)
+            {
+                var change = _changes[i];
+                var timing = change.Motion.Timing;
+                if (timing.Start > time) break;
+                if (change.HasRelativeTo || change.HasVisible && !change.Target.Visible ||
+                    timing.Duration <= 0 && (change.HasPositionX || change.HasPositionY ||
+                        change.HasPivotX || change.HasPivotY || change.HasParallaxOffsetX || change.HasParallaxOffsetY ||
+                        change.HasParallaxX || change.HasParallaxY))
+                    return true;
+            }
+            return false;
+        }
 
         internal void CollectStaticTextureUses(bool legacy, Dictionary<string, double> uses,
             Dictionary<(string Image, double Bucket), double> activations,

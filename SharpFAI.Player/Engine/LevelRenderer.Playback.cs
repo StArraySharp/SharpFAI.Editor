@@ -96,6 +96,7 @@ public sealed unsafe partial class LevelRenderer
         _filterClockPaused = true;
         PlayInput.Clear();
         StopModAudio();
+        ClearNativeAudioBuffering();
         _music?.Pause();
         _hitsound?.Pause();
     }
@@ -245,7 +246,7 @@ public sealed unsafe partial class LevelRenderer
         _playTime = target;
         _prepareSeekFrame = _imageDecorations is not null;
         _seekLeadStarted = 0;
-        if (WaitingForSeekFrame)
+        if (_isPlaying)
         {
             StopModAudio();
             _music?.Pause();
@@ -331,12 +332,12 @@ public sealed unsafe partial class LevelRenderer
         AudioClip? master = null;
         double masterShift = 0.0;
 
-        if (_musicEnabled && _music is { IsLoaded: true, IsPlaying: true })
+        if (_musicEnabled && _music is { IsLoaded: true, IsOutputPlaying: true })
         {
             master = _music;
             masterShift = AudioClockShift;
         }
-        else if (_hitsoundEnabled && _hitsound is { IsLoaded: true, IsPlaying: true })
+        else if (_hitsoundEnabled && _hitsound is { IsLoaded: true, IsOutputPlaying: true })
         {
             master = _hitsound;
             masterShift = HitsoundClockShift;

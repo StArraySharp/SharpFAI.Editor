@@ -41,6 +41,8 @@ public sealed unsafe partial class Timeline
 {
     internal const double MinimumViewLength = .005;
     private const float BeatBandStart = .53f;
+    internal float ExtraBeatHeight { get; set; }
+    private float BeatBandOffset => (RulerHeight - ExtraBeatHeight) * BeatBandStart;
     private static readonly double[] TickSteps =
         [.001, .002, .005, .01, .02, .05, .1, .25, .5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
     private readonly List<TimelineClip> _clips = [];
@@ -121,12 +123,6 @@ public sealed unsafe partial class Timeline
         ViewLength = span * (1.0 + padding * 2.0);
     }
 
-    /// <summary>Center the view on the playhead.</summary>
-    public void CenterOnPlayhead()
-    {
-        ViewStart = Playhead - ViewLength * 0.5;
-    }
-
     /// <summary>
     /// Draw the timeline. Returns true when the playhead moved this frame.
     /// </summary>
@@ -156,7 +152,8 @@ public sealed unsafe partial class Timeline
         ImDrawList* draw = ImGui.GetWindowDrawList();
         ImVec2 max = WidgetDraw.V2(origin.x + size.x, origin.y + size.y);
 
-        WidgetDraw.Panel(draw, in origin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_FrameBg), 4f);
+        float rounding = ImGui.GetStyle()->FrameRounding;
+        WidgetDraw.Panel(draw, in origin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_ChildBg), rounding);
 
         ImGui.PushID(id);
         ImGui.InvisibleButton("##timeline", in size);
@@ -231,9 +228,9 @@ public sealed unsafe partial class Timeline
         }
 
         ImDrawList.PushClipRect(draw, origin, max, 1);
-        DrawTracks(draw, in origin, in size);
+        DrawTracks(draw, in origin, in size, hovered ? mouse.y : float.NegativeInfinity);
         DrawWaveform(draw, origin, size.x);
-        DrawRuler(draw, in origin, in size, clock is null ? RulerHeight : RulerHeight * .51f);
+        DrawRuler(draw, in origin, in size, clock is null ? RulerHeight : (RulerHeight - ExtraBeatHeight) * .51f);
         if (clock is not null && signatures is not null)
         {
             DrawBeatGrid(draw, origin, size, clock, signatures);
@@ -317,7 +314,7 @@ public sealed unsafe partial class Timeline
         ImDrawList.PopClipRect(draw);
 
         ImVec2 outerOrigin = WidgetDraw.V2(origin.x - gutter, origin.y);
-        WidgetDraw.Outline(draw, in outerOrigin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 4f);
+        WidgetDraw.Outline(draw, in outerOrigin, in max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), rounding);
         return playheadMoved;
     }
 
@@ -342,28 +339,25 @@ public sealed unsafe partial class Timeline
         }
     }
 
-    private void DrawTracks(ImDrawList* draw, in ImVec2 origin, in ImVec2 size)
+    private void DrawTracks(ImDrawList* draw, in ImVec2 origin, in ImVec2 size, float hoveredY)
     {
-        uint separator = WidgetDraw.WithAlpha(WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 0.6f);
-
-        for (int i = 0; i <= TrackCount; i++)
+        uint separator = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Separator);
+        float right = origin.x + size.x;
+        for (int i = 0; i < TrackCount; i++)
         {
             float y = origin.y + RulerHeight + i * TrackHeight;
-            ImVec2 a = WidgetDraw.V2(origin.x, y);
-            ImVec2 b = WidgetDraw.V2(origin.x + size.x, y);
-            ImDrawList.AddLine(draw, in a, in b, separator, 1f);
+            bool hovered = hoveredY >= y && hoveredY < y + TrackHeight;
+            if (hovered || i % 2 == 0)
+                ImDrawList.AddRectFilled(draw, WidgetDraw.V2(origin.x, y), WidgetDraw.V2(right, y + TrackHeight),
+                    WidgetDraw.ThemeColor(hovered ? ImGuiCol.ImGuiCol_FrameBgHovered : ImGuiCol.ImGuiCol_FrameBg, .48f));
+            ImDrawList.AddLine(draw, WidgetDraw.V2(origin.x, y), WidgetDraw.V2(right, y), separator, 1f);
         }
-
-        // Divider between ruler and tracks
-        ImVec2 rulerA = WidgetDraw.V2(origin.x, origin.y + RulerHeight);
-        ImVec2 rulerB = WidgetDraw.V2(origin.x + size.x, origin.y + RulerHeight);
-        ImDrawList.AddLine(draw, in rulerA, in rulerB, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 1f);
     }
 
     private void DrawRuler(ImDrawList* draw, in ImVec2 origin, in ImVec2 size, float height)
     {
         (double step, int minorPerMajor) = ChooseTickStep(size.x);
-        uint tickColor = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, 0.45f);
+        uint tickColor = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, 0.62f);
 
         double first = Math.Floor(ViewStart / step);
         double last = Math.Floor((ViewStart + ViewLength) / step);
@@ -399,10 +393,10 @@ public sealed unsafe partial class Timeline
     {
         double startBeat = Math.Max(0, clock.BeatAt(ViewStart));
         double endBeat = clock.BeatAt(ViewStart + ViewLength);
-        if (endBeat < startBeat)
+        if (!double.IsFinite(startBeat) || !double.IsFinite(endBeat) || endBeat < startBeat)
             return;
 
-        float top = origin.y + RulerHeight * BeatBandStart;
+        float top = origin.y + BeatBandOffset;
         float bottom = origin.y + RulerHeight;
         uint bars = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .54f);
         uint beats = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .23f);
@@ -422,7 +416,8 @@ public sealed unsafe partial class Timeline
             double stride = Math.Max(1, Math.Ceiling(minimumSpacing / measureLength));
             double first = Math.Max(0, Math.Ceiling(lead / stride) * stride);
             if (change.Beat >= startBeat - 1e-7)
-                Mark(change.Beat, markers, top, change.Signature.ToString());
+                Mark(change.Beat, markers, top, change.TimelineBpm is double bpm
+                    ? $"{change.Signature} · {bpm:G8} BPM" : change.Signature.ToString());
             for (double measure = first; change.Beat + measure * measureLength <= end; measure += stride)
             {
                 if (measure == 0 && change.Beat >= startBeat - 1e-7)
@@ -455,10 +450,8 @@ public sealed unsafe partial class Timeline
     {
         float top = origin.y + RulerHeight;
         float middle = top + TrackHeight * .5f;
-        WidgetDraw.Panel(draw, WidgetDraw.V2(origin.x, top), WidgetDraw.V2(origin.x + size.x, top + TrackHeight),
-            WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_WindowBg, .5f));
         uint normal = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, .64f);
-        uint selected = WidgetDraw.U32(.37f, .87f, .81f);
+        uint selected = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark);
         if (rangeAnchor is int anchor && (uint)anchor < (uint)floorTimes.Length &&
             (uint)selectedFloor < (uint)floorTimes.Length)
         {
@@ -484,13 +477,16 @@ public sealed unsafe partial class Timeline
             else
             {
                 Diamond(x, normal);
-                string label = $"#{index}";
-                float labelWidth = ImGui.CalcTextSize(label).x;
-                double nextTime = next < floorTimes.Length ? Math.Min(floorTimes[next], end) : end;
-                if (x >= nextLabel && XAt(nextTime, origin.x, size.x) - x >= labelWidth + 13)
+                if (x >= nextLabel)
                 {
-                    ImDrawList.AddText(draw, WidgetDraw.V2(x + 7, middle - ImGui.GetTextLineHeight() * .5f), normal, label);
-                    nextLabel = x + labelWidth + 13;
+                    string label = $"#{index}";
+                    float labelWidth = ImGui.CalcTextSize(label).x;
+                    double nextTime = next < floorTimes.Length ? Math.Min(floorTimes[next], end) : end;
+                    if (XAt(nextTime, origin.x, size.x) - x >= labelWidth + 13)
+                    {
+                        ImDrawList.AddText(draw, WidgetDraw.V2(x + 7, middle - ImGui.GetTextLineHeight() * .5f), normal, label);
+                        nextLabel = x + labelWidth + 13;
+                    }
                 }
             }
             index = next;
@@ -636,123 +632,5 @@ public sealed unsafe partial class Timeline
         milliseconds = Math.Abs(milliseconds);
         return string.Create(CultureInfo.InvariantCulture,
             $"{sign}{Math.Floor(milliseconds / 60000):00}:{milliseconds % 60000 / 1000:00.000}");
-    }
-}
-
-/// <summary>
-/// </summary>
-public static unsafe class RangeSlider
-{
-    /// <summary>
-    /// Draw a dual-handle range slider.
-    /// </summary>
-    /// <param name="id">Unique identifier.</param>
-    /// <param name="min">Allowed minimum.</param>
-    /// <param name="max">Allowed maximum.</param>
-    /// <param name="low">Current low value.</param>
-    /// <param name="high">Current high value.</param>
-    /// <param name="format">Value format.</param>
-    /// <returns>True if either value changed this frame.</returns>
-    public static bool Draw(string id, float min, float max, ref float low, ref float high, string format = "0.##")
-    {
-        if (max <= min)
-        {
-            return false;
-        }
-
-        float height = ImGui.GetFrameHeight();
-        ImVec2 avail = ImGui.GetContentRegionAvail();
-        ImVec2 size = WidgetDraw.V2(avail.x, height);
-        ImVec2 origin = ImGui.GetCursorScreenPos();
-
-        ImGui.PushID(id);
-        ImGui.InvisibleButton("##range", in size);
-        bool hovered = ImGui.IsItemHovered() != 0;
-        bool active = ImGui.IsItemActive() != 0;
-        ImGui.PopID();
-
-        ImDrawList* draw = ImGui.GetWindowDrawList();
-        float trackY = origin.y + height * 0.5f;
-        float padding = 8f;
-        float trackMin = origin.x + padding;
-        float trackMax = origin.x + size.x - padding;
-
-        // Track
-        ImVec2 trackA = WidgetDraw.V2(trackMin, trackY - 2f);
-        ImVec2 trackB = WidgetDraw.V2(trackMax, trackY + 2f);
-        ImDrawList.AddRectFilled(draw, in trackA, in trackB, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_FrameBg), 2f);
-
-        low = Math.Clamp(low, min, max);
-        high = Math.Clamp(high, low, max);
-
-        float lowX = trackMin + (low - min) / (max - min) * (trackMax - trackMin);
-        float highX = trackMin + (high - min) / (max - min) * (trackMax - trackMin);
-
-        // Selected span
-        ImVec2 fillA = WidgetDraw.V2(lowX, trackY - 2f);
-        ImVec2 fillB = WidgetDraw.V2(highX, trackY + 2f);
-        ImDrawList.AddRectFilled(draw, in fillA, in fillB, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_SliderGrab, 0.85f), 2f);
-
-        bool changed = false;
-
-        // Drag whichever handle is closest to the mouse
-        if (hovered && (active || ImGui.IsMouseDown((int)ImGuiMouseButton.ImGuiMouseButton_Left) != 0))
-        {
-            ImVec2 mouse = ImGui.GetMousePos();
-            float value = min + Math.Clamp((mouse.x - trackMin) / (trackMax - trackMin), 0f, 1f) * (max - min);
-
-            if (MathF.Abs(mouse.x - lowX) <= MathF.Abs(mouse.x - highX))
-            {
-                float next = MathF.Min(value, high);
-                if (!next.Equals(low))
-                {
-                    low = next;
-                    changed = true;
-                }
-            }
-            else
-            {
-                float next = MathF.Max(value, low);
-                if (!next.Equals(high))
-                {
-                    high = next;
-                    changed = true;
-                }
-            }
-        }
-
-        // Handles
-        DrawHandle(draw, lowX, trackY, ImGui.IsMouseDown((int)ImGuiMouseButton.ImGuiMouseButton_Left) != 0 && MathF.Abs(ImGui.GetMousePos().x - lowX) < 6f);
-        DrawHandle(draw, highX, trackY, ImGui.IsMouseDown((int)ImGuiMouseButton.ImGuiMouseButton_Left) != 0 && MathF.Abs(ImGui.GetMousePos().x - highX) < 6f);
-
-        // Value labels
-        string text = $"{low.ToString(format)} ~ {high.ToString(format)}";
-        ImVec2 labelSize = ImGui.CalcTextSize(text, null, 0, -1f);
-        ImVec2 labelPos = WidgetDraw.V2(origin.x + (size.x - labelSize.x) * 0.5f, origin.y - labelSize.y - 2f);
-
-        if (labelPos.y > ImGui.GetWindowPos().y)
-        {
-            ImDrawList.AddText(draw, in labelPos, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text, 0.7f), text);
-        }
-
-        if (hovered)
-        {
-            WidgetDraw.ItemTooltip(text);
-        }
-
-        return changed;
-    }
-
-    private static void DrawHandle(ImDrawList* draw, float x, float y, bool active)
-    {
-        float radius = active ? 7f : 6f;
-        ImVec2 center = WidgetDraw.V2(x, y);
-
-        uint fill = active
-            ? WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_SliderGrabActive)
-            : WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_SliderGrab);
-
-        ImDrawList.AddCircleFilled(draw, in center, radius, fill, 16);
-        ImDrawList.AddCircle(draw, in center, radius, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 16, 1f);
     }
 }

@@ -225,7 +225,7 @@ public sealed unsafe partial class LevelRenderer
                 ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Image, token) : null), token);
         (string? musicPath, DecodedAudio? music, DecodedAudio? hitsound) = BuildAudio(level, path, floors, timeline,
             settings, (phase, milliseconds) => timings.Add((phase, milliseconds)), prepareMusic: prepareAssets
-                ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Music, token) : null);
+                ? file => PrepareModAsset(file, SharpFAI.ModApi.AssetKind.Music, token) : null, cancellation: token);
         music = ProcessModAudio(music, SharpFAI.ModApi.AudioBus.Music, token);
         hitsound = ProcessModAudio(hitsound, SharpFAI.ModApi.AudioBus.Hitsounds, token);
         MarkPhase("构建装饰与背景");
@@ -920,7 +920,11 @@ public sealed unsafe partial class LevelRenderer
         _music?.Dispose();
         _hitsound?.Dispose();
         _music = _hitsound = null;
+        ClearNativeAudioBuffering();
         _audioBackendReady = false;
+        _trackAudioWindow?.Dispose();
+        _trackAudioWindow = null;
+        _trackAudioFailed = false;
         _audioMusic = null;
         _audioHitsound = null;
         _audioMusicPath = null;

@@ -4,6 +4,7 @@ using Newtonsoft.Json.Linq;
 using OpenTK.Mathematics;
 using SharpFAI.Editor.Widgets;
 using SharpFAI.Player.Engine;
+using static SharpFAI.Editor.Widgets.EditorControls;
 
 namespace SharpFAI.Editor;
 
@@ -173,11 +174,32 @@ internal sealed unsafe partial class EditorWindow
             ImGui.SameLine();
     }
 
-    private static bool ToolbarCheckbox(string key, ref bool value)
+    private static void ContinueToolbarGroup(float width)
+    {
+        float spacing = ImGui.GetStyle()->ItemSpacing.x;
+        float right = ImGui.GetCursorScreenPos().x + ImGui.GetContentRegionAvail().x;
+        float x = ImGui.GetItemRectMax().x + spacing;
+        if (x + 1 + spacing + width > right) return;
+        ImGui.SameLine(0, 2 * spacing + 1);
+        float y = ImGui.GetCursorScreenPos().y;
+        float inset = ImGui.GetStyle()->FramePadding.y;
+        ImDrawList.AddLine(ImGui.GetWindowDrawList(),
+            WidgetDraw.V2(x, y + inset), WidgetDraw.V2(x, y + ImGui.GetFrameHeight() - inset),
+            WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Separator), 1);
+    }
+
+    private static bool ToolbarToggle(string key, ref bool value, bool newGroup = false)
     {
         string label = L.T(key);
-        ContinueToolbar(ImGui.CalcTextSize(label).x + ImGui.GetFrameHeight() + ImGui.GetStyle()->ItemInnerSpacing.x);
-        return Toggle(label, ref value);
+        if (newGroup) ContinueToolbarGroup(ButtonWidth(label));
+        else ContinueToolbar(ButtonWidth(label));
+        return EditorControls.Toggle(label, ref value);
+    }
+
+    private static void ToolbarReadout(string text, bool accent = false)
+    {
+        ContinueToolbar(ReadoutWidth(text));
+        Readout(text, accent);
     }
 
     private bool DrawArbitraryAngleInput(out bool valid)
@@ -205,17 +227,18 @@ internal sealed unsafe partial class EditorWindow
             WidgetDraw.ItemTooltip(L.T("SceneView3D"));
             ContinueToolbar(ButtonWidth(mode));
         }
-        if (ImGui.Button(mode, default) != 0)
+        bool tilesOnly = _tilesOnly;
+        if (EditorControls.Toggle(mode, ref tilesOnly))
         {
-            _tilesOnly = !_tilesOnly;
+            _tilesOnly = tilesOnly;
             ResetCanvasGesture();
             if (_tilesOnly && _inspectDecoration)
                 SelectFloor(_floor, false);
         }
         WidgetDraw.ItemTooltip(L.T("EditSceneModeHelp"));
-        ToolbarCheckbox("DirectionGuide", ref _directionGuide);
-        ToolbarCheckbox("LockPath", ref _pathLocked);
-        ToolbarCheckbox("Angle", ref _showArbitraryAngle);
+        ToolbarToggle("DirectionGuide", ref _directionGuide, newGroup: true);
+        ToolbarToggle("LockPath", ref _pathLocked);
+        ToolbarToggle("Angle", ref _showArbitraryAngle);
         if (_showArbitraryAngle)
         {
             ContinueToolbar(80 * _uiScale);
@@ -231,8 +254,8 @@ internal sealed unsafe partial class EditorWindow
                     InsertArbitraryAngle();
             }
         }
-        ContinueToolbar(ButtonWidth(L.T("CenterSelection")));
-        if (ImGui.Button(L.T("CenterSelection"), default) != 0)
+        ContinueToolbarGroup(IconButtonWidth);
+        if (Action("center-selection", ControlIcon.Center))
         {
             if (_inspectDecoration && _decoration is not null)
                 CenterOnDecoration(_decoration);
@@ -242,12 +265,10 @@ internal sealed unsafe partial class EditorWindow
                 _centerEditFloor = _floor;
             }
         }
-        string status = ready ? $"{_playback!.Camera.Zoom:P0}" : PlaybackLoadingStatus(_playback);
+        WidgetDraw.ItemTooltip(L.T("CenterSelection"));
+        ToolbarReadout(ready ? $"{_playback!.Camera.Zoom:P0}" : PlaybackLoadingStatus(_playback), accent: ready);
         if (ready && _documentLoadSeconds > 0)
-            status += " · " + L.F("LoadCompletedTime", _documentLoadSeconds);
-        ContinueToolbar(ImGui.CalcTextSize(status).x);
-        ImGui.AlignTextToFramePadding();
-        WidgetDraw.TextDisabled(status);
+            ToolbarReadout(L.F("LoadCompletedTime", _documentLoadSeconds));
     }
 
     private void DrawEditCanvas()
@@ -332,7 +353,7 @@ internal sealed unsafe partial class EditorWindow
         ImDrawList.PushClipRect(draw, origin, end, 1);
         float tileSize = renderer.TileSpacing;
 
-        uint accent = WidgetDraw.U32(61, 223, 206);
+        uint accent = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark);
         for (int i = 1; i < pending.Count; i++)
         {
             Vector2 from = pending[i - 1];
@@ -563,7 +584,7 @@ internal sealed unsafe partial class EditorWindow
         void DrawFloorOutline(int index, ReadOnlySpan<Vector2> outline)
         {
             bool primary = index == _floor;
-            uint color = primary ? accent : WidgetDraw.U32(116, 175, 255);
+            uint color = primary ? accent : WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_SliderGrab, .70f);
             float width = (primary ? 2.5f : 1.5f) * _uiScale;
             Stroke(outline, WidgetDraw.U32(13, 25, 37, 220), width + 2 * _uiScale);
             Stroke(outline, color, width);
@@ -762,10 +783,10 @@ internal sealed unsafe partial class EditorWindow
             }
             bool active = hot || ImGui.IsKeyDown(key) != 0;
             uint color = deletes ? (active ? WidgetDraw.U32(151, 59, 74) : WidgetDraw.U32(83, 44, 57)) :
-                active ? WidgetDraw.U32(29, 117, 117) : WidgetDraw.U32(31, 34, 49, 240);
+                WidgetDraw.ThemeColor(active ? ImGuiCol.ImGuiCol_ButtonActive : ImGuiCol.ImGuiCol_Button, .96f);
             WidgetDraw.Panel(draw, min, max, color, 4);
-            WidgetDraw.Outline(draw, min, max, WidgetDraw.U32(111, 119, 140), 4);
-            WidgetDraw.TextCentered(draw, min, max, WidgetDraw.U32(242, 243, 248), label);
+            WidgetDraw.Outline(draw, min, max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Border), 4);
+            WidgetDraw.TextCentered(draw, min, max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_Text), label);
         }
     }
 
@@ -773,8 +794,8 @@ internal sealed unsafe partial class EditorWindow
     {
         ImVec2 min = WidgetDraw.V2(point.x - 9, point.y - 9);
         ImVec2 max = WidgetDraw.V2(point.x + 9, point.y + 9);
-        uint accent = selected ? WidgetDraw.U32(70, 235, 220) : WidgetDraw.U32(186, 145, 225);
-        WidgetDraw.Panel(draw, min, max, WidgetDraw.U32(35, 31, 51), 4);
+        uint accent = selected ? WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark) : WidgetDraw.U32(186, 145, 225);
+        WidgetDraw.Panel(draw, min, max, WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_ChildBg), 4);
         WidgetDraw.Outline(draw, min, max, accent, 4);
         ImDrawList.AddCircleFilled(draw, point, 3, accent);
         if (selected)

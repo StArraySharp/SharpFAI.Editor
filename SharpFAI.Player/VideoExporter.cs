@@ -476,116 +476,71 @@ internal static class VideoExporter
         if (realtimeMix is not null)
         {
             var pcm = processMix?.Invoke(realtimeMix) ?? realtimeMix;
-            using var writer = BeginWav(path, pcm.Pcm.Length, pcm.SampleRate, pcm.Channels);
-            writer.Write(pcm.Pcm);
+            byte[] bytes = pcm.Pcm;
+            using var realtimeWriter = BeginWav(path, bytes.Length, pcm.SampleRate, pcm.Channels);
+            realtimeWriter.Write(bytes);
             return;
         }
-        // 混音统一到 48 kHz 立体声：两条轨采样率可能不同，重采样在这里一次做完
-        // Mix at 48 kHz stereo: the two tracks may differ in rate, so resample once here
-        const int Rate = 48000;
-        const int Channels = 2;
+        const int Rate = 48000, Channels = 2, BlockFrames = 4096;
+        int sampleCount = Math.Max(1, checked((int)Math.Ceiling(Math.Max(totalSeconds, 0.0) * Rate)));
+        int dataBytes = checked(sampleCount * Channels * sizeof(short));
+        using var writer = BeginWav(path, dataBytes, Rate, Channels);
+        using var musicWindow = music is { Channels: > 0 } && musicVolume > 0 ? new AudioSampleWindow(music) : null;
+        using var hitsoundWindow = hitsound is { Channels: > 0 } && hitsoundVolume > 0 ? new AudioSampleWindow(hitsound) : null;
+        var mix = new float[BlockFrames * Channels];
+        var block = new byte[BlockFrames * Channels * sizeof(short)];
+        byte[]? fullMix = processMix is null ? null : new byte[dataBytes];
 
-        int sampleCount = (int)Math.Ceiling(Math.Max(totalSeconds, 0.0) * Rate);
-        sampleCount = Math.Max(sampleCount, 1);
+        for (int first = 0; first < sampleCount;)
+        {
+            int frames = Math.Min(BlockFrames, sampleCount - first);
+            var samples = mix.AsSpan(0, frames * Channels);
+            samples.Clear();
+            if (musicWindow is not null)
+                Accumulate(music!, musicWindow, musicVolume, samples, Rate, Channels, playbackRate, musicStart, first);
+            if (hitsoundWindow is not null)
+                Accumulate(hitsound!, hitsoundWindow, hitsoundVolume, samples, Rate, Channels,
+                    hitsoundRate ?? playbackRate, hitsoundStart, first);
 
-        float[] mix = new float[sampleCount * Channels];
+            var bytes = block.AsSpan(0, samples.Length * sizeof(short));
+            for (int i = 0; i < samples.Length; i++)
+                BinaryPrimitives.WriteInt16LittleEndian(bytes[(i * sizeof(short))..],
+                    (short)MathF.Round(Math.Clamp(samples[i], -1f, 1f) * 32767f));
+            if (fullMix is null) writer.Write(bytes);
+            else bytes.CopyTo(fullMix.AsSpan(first * Channels * sizeof(short)));
+            first += frames;
+        }
 
-        Accumulate(music, musicVolume, mix, Rate, Channels, playbackRate, musicStart);
-        Accumulate(hitsound, hitsoundVolume, mix, Rate, Channels, hitsoundRate ?? playbackRate, hitsoundStart);
-
-        WriteWav(path, mix, Rate, Channels, processMix);
+        if (fullMix is not null)
+            writer.Write(processMix!(new DecodedAudio { Pcm = fullMix, SampleRate = Rate, Channels = Channels }).Pcm);
     }
 
-    /// <summary>把一条音轨线性重采样后叠加进混音缓冲。</summary>
-    private static void Accumulate(
-        DecodedAudio? source,
-        float volume,
-        float[] destination,
-        int rate,
-        int channels,
-        double playbackRate,
-        double start)
+    private static void Accumulate(DecodedAudio source, AudioSampleWindow window, float volume, Span<float> destination,
+        int rate, int channels, double playbackRate, double start, int first)
     {
-        if (source is null || source.Pcm.Length == 0 || volume <= 0f)
+        int sourceChannels = source.Channels;
+        long sourceFrames = source.FrameCount;
+        double step = (double)source.SampleRate / rate * playbackRate;
+        double position = start * source.SampleRate + first * step;
+
+        for (int frame = 0; frame < destination.Length / channels && position < sourceFrames; frame++, position += step)
         {
-            return;
-        }
-
-        int sourceRate = Math.Max(source.SampleRate, 1);
-        int sourceChannels = Math.Max(source.Channels, 1);
-        int sourceFrames = source.Pcm.Length / (sourceChannels * sizeof(short));
-        int destinationFrames = destination.Length / channels;
-
-        if (sourceFrames == 0)
-        {
-            return;
-        }
-
-        // 用「源帧位置」做线性插值，避免整段重采样产生额外分配
-        // Linear-interpolate on the source frame position, with no intermediate resample buffer
-        double step = (double)sourceRate / rate * playbackRate;
-        double sourcePosition = start * sourceRate;
-
-        ReadOnlySpan<short> samples = MemoryMarshal.Cast<byte, short>(source.Pcm);
-
-        for (int frame = 0; frame < destinationFrames && sourcePosition < sourceFrames; frame++)
-        {
-            int index = (int)sourcePosition;
-
-            if (index >= sourceFrames)
-            {
-                break;
-            }
-
-            int next = Math.Min(index + 1, sourceFrames - 1);
-            float fraction = (float)(sourcePosition - index);
-
+            if (position < 0) continue;
+            long index = (long)position;
+            var input = window.Read(index, 2);
+            if (input.IsEmpty) break;
+            int next = input.Length >= sourceChannels * 2 ? sourceChannels : 0;
+            float fraction = (float)(position - index);
             for (int channel = 0; channel < channels; channel++)
             {
                 int sourceChannel = Math.Min(channel, sourceChannels - 1);
-
-                float a = samples[index * sourceChannels + sourceChannel] / 32768f;
-                float b = samples[next * sourceChannels + sourceChannel] / 32768f;
-                float value = a + (b - a) * fraction;
-
-                destination[frame * channels + channel] += value * volume;
+                float a = input[sourceChannel] / 32768f;
+                float b = input[next + sourceChannel] / 32768f;
+                destination[frame * channels + channel] += (a + (b - a) * fraction) * volume;
             }
-
-            sourcePosition += step;
         }
     }
 
-    /// <summary>写 16 位 PCM WAV。</summary>
-    private static void WriteWav(string path, float[] mix, int rate, int channels,
-        Func<DecodedAudio, DecodedAudio>? processMix)
-    {
-        int frameCount = mix.Length / channels;
-        int dataBytes = frameCount * channels * sizeof(short);
-        using var writer = BeginWav(path, dataBytes, rate, channels);
-
-        if (processMix is not null)
-        {
-            var pcm = new byte[dataBytes];
-            for (int index = 0; index < mix.Length; index++)
-                BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(index * sizeof(short)), Quantize(mix[index]));
-            writer.Write(processMix(new DecodedAudio { Pcm = pcm, SampleRate = rate, Channels = channels }).Pcm);
-            return;
-        }
-
-        Span<byte> block = stackalloc byte[8192];
-        const int samplesPerBlock = 8192 / sizeof(short);
-        for (int first = 0; first < mix.Length; first += samplesPerBlock)
-        {
-            int count = Math.Min(samplesPerBlock, mix.Length - first);
-            for (int i = 0; i < count; i++)
-            {
-                BinaryPrimitives.WriteInt16LittleEndian(block[(i * sizeof(short))..], Quantize(mix[first + i]));
-            }
-            writer.Write(block[..(count * sizeof(short))]);
-        }
-
-        static short Quantize(float value) => (short)MathF.Round(Math.Clamp(value, -1f, 1f) * 32767f);
-    }
 
     private static BinaryWriter BeginWav(string path, int dataBytes, int rate, int channels)
     {

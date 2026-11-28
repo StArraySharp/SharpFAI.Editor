@@ -4,7 +4,6 @@ namespace SharpFAI.Editor.Widgets;
 
 public sealed unsafe partial class Timeline
 {
-    private static readonly uint WaveformColor = WidgetDraw.U32(127, 174, 188);
     private TimelineWaveform? _waveform;
     private TimelineWaveform.Peak[] _waveformColumns = [];
     private (double Start, double Length, int Columns)? _waveformViewport;
@@ -37,21 +36,24 @@ public sealed unsafe partial class Timeline
         }
 
         // Use the beat band of the ruler so the range can be dragged directly over the music.
-        float halfHeight = RulerHeight * (1 - BeatBandStart) * .5f;
+        float halfHeight = (RulerHeight - BeatBandOffset) * .5f;
         float middle = origin.y + RulerHeight - halfHeight;
         float amplitude = Math.Max(0, halfHeight - 2);
         ImDrawList.AddLine(draw, WidgetDraw.V2(origin.x, middle), WidgetDraw.V2(origin.x + width, middle),
-            WidgetDraw.WithAlpha(WaveformColor, .18f));
-        uint color = WidgetDraw.WithAlpha(WaveformColor, .6f);
+            WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_PlotLines, .18f));
+        uint color = WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_PlotLines, .60f);
         float pixelWidth = width / columns;
+        float scale = amplitude / 32768f;
         for (int i = 0; i < columns; i++)
         {
             var peak = _waveformColumns[i];
             if (peak.Min > peak.Max || peak is { Min: 0, Max: 0 }) continue;
-            float x = origin.x + (i + .5f) * pixelWidth;
-            float upper = middle - peak.Max * (amplitude / 32768f);
-            float lower = middle - peak.Min * (amplitude / 32768f);
-            ImDrawList.AddLine(draw, WidgetDraw.V2(x, upper), WidgetDraw.V2(x, Math.Max(upper + 1, lower)), color);
+            float left = origin.x + i * pixelWidth;
+            float right = origin.x + (i + 1) * pixelWidth;
+            float upper = middle - peak.Max * scale;
+            float lower = middle - peak.Min * scale;
+            ImDrawList.AddRectFilled(draw, WidgetDraw.V2(left, upper),
+                WidgetDraw.V2(right, Math.Max(upper + 1, lower)), color);
         }
     }
 }

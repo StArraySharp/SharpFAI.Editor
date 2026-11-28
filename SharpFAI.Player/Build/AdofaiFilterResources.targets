@@ -60,6 +60,10 @@
                     item.SetMetadata("CopyRelativePath", "Resources/Shaders/Filters/" + relative.Substring("Shaders/".Length));
                 else if (relative.StartsWith("Textures/", StringComparison.Ordinal) && key.EndsWith(".png", StringComparison.Ordinal))
                     item.SetMetadata("CopyRelativePath", "Resources/Filters/" + relative.Substring("Textures/".Length));
+                else if (relative.StartsWith("EventIcons/", StringComparison.Ordinal) &&
+                    Regex.IsMatch(relative, @"\AEventIcons/[a-z0-9]+\.png\z") &&
+                    key == "Resources.LevelEditor.LevelEvents." + relative.Substring("EventIcons/".Length))
+                    item.SetMetadata("CopyRelativePath", "Resources/LevelEditor/LevelEvents/" + relative.Substring("EventIcons/".Length));
                 else
                 {
                     Log.LogError("Unsupported prepared game asset in {0}: {1}", manifest, line);

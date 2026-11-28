@@ -108,7 +108,12 @@ public static unsafe class WidgetDraw
     }
 
     /// <summary>Disabled-colored text.</summary>
-    public static void TextDisabled(string text) => ImGui.TextUnformatted(text);
+    public static void TextDisabled(string text)
+    {
+        ImGui.PushStyleColor((int)ImGuiCol.ImGuiCol_Text, *ImGui.GetStyleColorVec4((int)ImGuiCol.ImGuiCol_TextDisabled));
+        ImGui.TextUnformatted(text);
+        ImGui.PopStyleColor();
+    }
 
     /// <summary>Set the alpha of a packed color.</summary>
     public static uint SetAlpha(uint packed, float alpha)

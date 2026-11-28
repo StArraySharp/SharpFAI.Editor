@@ -11,7 +11,7 @@ internal sealed unsafe partial class EditorWindow
     // Keep the prototype out of the editor until its controls and rendering are ready.
     private static readonly bool SceneViewAvailable = false;
     private const int SceneTileLimit = 4096;
-    private static readonly uint SceneAccent = WidgetDraw.U32(74, 225, 207);
+    private static uint SceneAccent => WidgetDraw.ThemeColor(ImGuiCol.ImGuiCol_CheckMark);
     private static readonly uint[] SceneAxisColors =
         [WidgetDraw.U32(236, 108, 118), WidgetDraw.U32(123, 207, 142), WidgetDraw.U32(106, 163, 244)];
     private static readonly string[] SceneAxisLabels = ["X", "Y", "Z"];
@@ -61,20 +61,21 @@ internal sealed unsafe partial class EditorWindow
                     return;
                 }
                 WidgetDraw.ItemTooltip(L.T("SceneView2D"));
-                ImGui.SameLine();
             }
-            if (ImGui.Button(L.T(_sceneCamera.Orthographic ? "SceneOrthographic" : "ScenePerspective"), default) != 0)
+            string projectionLabel = L.T(_sceneCamera.Orthographic ? "SceneOrthographic" : "ScenePerspective");
+            if (editing) ContinueToolbar(ButtonWidth(projectionLabel));
+            if (ImGui.Button(projectionLabel, default) != 0)
                 _sceneCamera.Orthographic = !_sceneCamera.Orthographic;
             WidgetDraw.ItemTooltip(L.T("SceneProjectionHelp"));
-            ImGui.SameLine();
             if (editing)
             {
-                if (ImGui.Button(L.T("CenterSelection") + "  F##scene-focus", default) != 0) _sceneFocus = true;
+                ContinueToolbar(EditorControls.IconButtonWidth);
+                if (EditorControls.Action("scene-focus", EditorControls.ControlIcon.Center)) _sceneFocus = true;
+                WidgetDraw.ItemTooltip(L.T("CenterSelection") + " · F");
             }
             else
-                Toggle(L.T("SceneFollowPlanets"), ref _sceneFollowPlayback);
-            ImGui.SameLine();
-            WidgetDraw.TextDisabled("?");
+                ToolbarToggle("SceneFollowPlanets", ref _sceneFollowPlayback);
+            ToolbarReadout("?");
             WidgetDraw.ItemTooltip(L.T(editing ? "SceneNavigationHelp" : "ScenePlaybackNavigationHelp"));
         }
 

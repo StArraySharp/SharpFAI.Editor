@@ -56,6 +56,7 @@ public sealed unsafe partial class LevelRenderer
     private void ResetTrail()
     {
         _trail.Clear();
+        _decorationRenderer?.ResetPlanetTrails();
         _previousCurrentIndex = -1;
         _previousPlayTime = _playTime;
         _offlineTrailTime = double.NaN;
@@ -185,8 +186,10 @@ public sealed unsafe partial class LevelRenderer
             return;
         }
 
-        UpdatePlayback(delta);
-        SyncAudio();
+        if (SyncAudio())
+            UpdatePlayback(delta);
+        else
+            PlayInput.Clear();
     }
 
     /// <summary>Submit the draw calls.</summary>
@@ -590,7 +593,8 @@ public sealed unsafe partial class LevelRenderer
                 sprites.Prepare(decorations, _playTime, _camera, TileSpacing,
                     AuthoredZoom(_camera.ViewportHeight, _settings.CameraZoom ?? 100f), DecorationFloor, DecorationPlanet,
                     CollectDecorationQuads, DecorationFloorOpacity, _visualSettings.VisibleDecorations,
-                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive, _sceneRenderView, prefetchUpcoming);
+                    ReadTrackVolume, ForceFloorIconOutlines, _runtimeTrackActive, _sceneRenderView, prefetchUpcoming,
+                    planetTrailLifetime: _trail.ActiveLifetime);
                 return sprites;
             }
         }

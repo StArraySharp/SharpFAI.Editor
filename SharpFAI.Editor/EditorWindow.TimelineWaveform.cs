@@ -6,7 +6,7 @@ namespace SharpFAI.Editor;
 internal sealed partial class EditorWindow
 {
     private DecodedAudio? _timelineWaveformSource;
-    private Task<TimelineWaveform>? _timelineWaveformBuild;
+    private Task<TimelineWaveform?>? _timelineWaveformBuild;
     private CancellationTokenSource? _timelineWaveformCancellation;
 
     private void UpdateTimelineWaveform()
@@ -14,7 +14,7 @@ internal sealed partial class EditorWindow
         var music = _displayedRevision?.Document == _document
             ? HasCurrentPlayback ? _playback!.AudioSources.Music : _timelineWaveformSource
             : null;
-        if (music is not { Channels: 1 or 2, SampleRate: > 0, Pcm.Length: > 0 }) music = null;
+        if (music is not { Channels: 1 or 2, SampleRate: > 0, FrameCount: > 0 }) music = null;
         if (!ReferenceEquals(music, _timelineWaveformSource))
         {
             CancelTimelineWaveform();
@@ -25,7 +25,15 @@ internal sealed partial class EditorWindow
         {
             _timelineWaveformCancellation = new CancellationTokenSource();
             var token = _timelineWaveformCancellation.Token;
-            _timelineWaveformBuild = Task.Run(() => TimelineWaveform.Build(music, token), token);
+            _timelineWaveformBuild = Task.Run(() =>
+            {
+                try { return TimelineWaveform.Build(music, token); }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"[Audio] Waveform: {error.Message}");
+                    return null;
+                }
+            }, token);
         }
         if (_timelineWaveformBuild is { IsCompletedSuccessfully: true } completed)
             _chartTimeline.Waveform = completed.Result;

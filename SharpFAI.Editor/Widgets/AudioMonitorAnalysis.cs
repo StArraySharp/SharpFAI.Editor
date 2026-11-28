@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Thrust.Audio;
 
 namespace SharpFAI.Editor.Widgets;
@@ -38,17 +37,23 @@ internal sealed class AudioMonitorAnalysis
 
     internal void Analyze(DecodedAudio audio, double seconds)
     {
-        var pcm = MemoryMarshal.Cast<byte, short>(audio.Pcm);
-        int frameCount = pcm.Length / audio.Channels;
-        int center = (int)Math.Clamp(Math.Round(seconds * audio.SampleRate), 0, frameCount);
-        int first = center - SampleCount / 2;
+        using var window = new AudioSampleWindow(audio);
+        Analyze(audio, window, seconds);
+    }
+
+    internal void Analyze(DecodedAudio audio, AudioSampleWindow window, double seconds)
+    {
+        long center = (long)Math.Clamp(Math.Round(seconds * audio.SampleRate), 0, audio.FrameCount);
+        long first = center - SampleCount / 2;
+        int padding = (int)Math.Max(0, -first);
+        var pcm = window.Read(Math.Max(0, first), SampleCount - padding);
         Array.Clear(_levels);
         for (int channel = 0; channel < audio.Channels; channel++)
         {
             for (int i = 0; i < SampleCount; i++)
             {
-                int frame = first + i;
-                float value = (uint)frame < (uint)frameCount ? pcm[frame * audio.Channels + channel] / 32768f : 0;
+                int sample = (i - padding) * audio.Channels + channel;
+                float value = (uint)sample < (uint)pcm.Length ? pcm[sample] / 32768f : 0;
                 _fft[_bitReversal[i]] = value * _window[i];
             }
 

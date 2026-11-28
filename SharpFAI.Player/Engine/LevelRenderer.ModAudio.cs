@@ -10,42 +10,55 @@ public sealed partial class LevelRenderer
     private RealtimeModAudioStream? _modAudio;
     private int _modAudioGeneration = -1;
     private int _modAudioFailureGeneration = -1;
+    private MetronomeSamples? _editorMetronome;
 
-    private bool SyncModAudio()
+    internal void SetEditorMetronome(MetronomeSamples? metronome)
+    {
+        if (_editorMetronome == metronome) return;
+        _editorMetronome = metronome;
+        if (metronome is not null) _modAudioFailureGeneration = -1;
+        _audioNeedsResync = true;
+        StopModAudio();
+    }
+
+    // Null leaves output to the native tracks; otherwise the result says whether the chart can advance.
+    private bool? SyncModAudio()
     {
         var mods = Mods;
-        if (mods is null) return false;
-        var effects = mods.Entries<RealtimeAudioHook>(ModTarget);
-        int generation = mods.Generation;
+        var effects = mods?.Entries<RealtimeAudioHook>(ModTarget) ?? [];
+        var metronome = _editorMetronome;
+        int generation = mods?.Generation ?? 0;
         if (_modAudioGeneration != generation || _audioNeedsResync || _progressScrubbing || !_isPlaying)
             StopModAudio();
         _modAudioGeneration = generation;
-        if (!_audioBackendReady || _settings.SkipAudio || effects.Count == 0 || generation == _modAudioFailureGeneration)
-            return false;
+        if (!_audioBackendReady || _settings.SkipAudio || (effects.Count == 0 && metronome is null) || generation == _modAudioFailureGeneration)
+            return null;
         if (!_isPlaying || _progressScrubbing) return true;
 
         _music?.Pause();
         _hitsound?.Pause();
         var gains = new ModMixGains(_musicEnabled ? PlaybackMusicGain : 0,
-            _hitsoundEnabled ? _hitsoundVolume * _hitsoundOutputGain : 0);
+            _hitsoundEnabled ? _hitsoundVolume * _hitsoundOutputGain : 0, _playbackOutputGain);
         try
         {
             _modAudio ??= new(effects, new(_audioMusic, _audioHitsound, _pitch, 1,
-                AudioClockShift, HitsoundClockShift / _pitch), _playTime / _pitch, gains);
+                AudioClockShift, HitsoundClockShift / _pitch, metronome), _playTime / _pitch, gains);
             if (_modAudio.Failed)
                 throw new InvalidOperationException("The realtime audio worker stopped.");
             _modAudio.SetGains(gains);
-            _modAudio.Pump();
+            bool alreadyPlaying = _modAudio.Pump();
             _audioNeedsResync = false;
-            return true;
+            return metronome is null || alreadyPlaying;
         }
         catch (Exception error)
         {
-            mods.Report("audio.process", error.GetBaseException().Message);
+            string message = error.GetBaseException().Message;
+            if (mods is null) Console.Error.WriteLine($"[Audio] {message}");
+            else mods.Report("audio.process", message);
             _modAudioFailureGeneration = generation;
             StopModAudio();
             _audioNeedsResync = true;
-            return false;
+            return null;
         }
     }
 
