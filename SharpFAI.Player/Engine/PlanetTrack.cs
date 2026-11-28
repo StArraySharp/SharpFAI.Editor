@@ -27,17 +27,24 @@ internal readonly record struct PlanetTrackFloor(
     public bool HasHold => HoldLength >= 0;
 
     public static PlanetTrackFloor[] Resolve(IReadOnlyList<FloorTimingCalculator.FloorData> timing,
-        IReadOnlyList<PlaybackEvent> events)
+        IReadOnlyList<PlaybackEvent> events, int firstFloor = 0, PlanetTrackFloor[]? previous = null)
     {
         ILookup<int, PlaybackEvent> byFloor = events
-            .Where(item => item.IsActive && item is ScaleRadius or HoldTrack)
+            .Where(item => item.Floor >= firstFloor && item.IsActive && item is ScaleRadius or HoldTrack)
             .ToLookup(item => item.Floor);
-        PlanetTrackFloor[] result = new PlanetTrackFloor[timing.Count];
+        PlanetTrackFloor[] result = new PlanetTrackFloor[firstFloor + timing.Count];
         float radius = 1f;
         int pivot = 0, orbit = 1, third = 2;
-        for (int i = 0; i < result.Length; i++)
+        if (firstFloor > 0)
         {
-            FloorTimingCalculator.FloorData data = timing[i];
+            Array.Copy(previous!, result, firstFloor);
+            var last = result[firstFloor - 1];
+            radius = last.Radius;
+            (pivot, orbit, third) = (last.Pivot, last.Orbit, last.Third);
+        }
+        for (int i = firstFloor; i < result.Length; i++)
+        {
+            FloorTimingCalculator.FloorData data = timing[i - firstFloor];
             int count = data.NumPlanets;
             if (i > 0)
             {

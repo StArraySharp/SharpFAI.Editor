@@ -115,12 +115,12 @@ public sealed unsafe partial class LevelRenderer
         };
     }
 
-    private static EditorLayers ChangedActions(JArray before, JArray after)
+    private static (EditorLayers Layers, int FirstTimingFloor) ChangedActions(JArray before, JArray after)
     {
         int length = Math.Min(before.Count, after.Count);
         int first = 0;
         while (first < length && SameAction(before[first], after[first])) first++;
-        if (first == before.Count && first == after.Count) return EditorLayers.None;
+        if (first == before.Count && first == after.Count) return (EditorLayers.None, int.MaxValue);
         int oldEnd = before.Count - 1, newEnd = after.Count - 1;
         while (oldEnd >= first && newEnd >= first && SameAction(before[oldEnd], after[newEnd]))
         {
@@ -128,11 +128,20 @@ public sealed unsafe partial class LevelRenderer
             newEnd--;
         }
         EditorLayers result = EditorLayers.Bindings;
-        for (int i = first; i <= oldEnd; i++) result |= EditorActionLayers(before[i]);
-        for (int i = first; i <= newEnd; i++) result |= EditorActionLayers(after[i]);
+        int firstTimingFloor = int.MaxValue;
+        for (int i = first; i <= oldEnd; i++) Include(before[i]);
+        for (int i = first; i <= newEnd; i++) Include(after[i]);
         // Insertion/removal shifts the source slots even for events outside the changed range.
         if (first != before.Count && before.Count != after.Count) result |= TimedLayers;
-        return result;
+        return (result, firstTimingFloor);
+
+        void Include(JToken item)
+        {
+            var layers = EditorActionLayers(item);
+            result |= layers;
+            if ((layers & EditorLayers.Timing) != 0)
+                firstTimingFloor = Math.Min(firstTimingFloor, EditorActionFloor(item));
+        }
 
         static bool SameAction(JToken before, JToken after) =>
             TwirlEventToken.TryGetFloor(before, out int floor)
@@ -140,7 +149,10 @@ public sealed unsafe partial class LevelRenderer
                 : JToken.DeepEquals(before, after);
     }
 
-    internal static EditorLayers PlanEditorRevision(Level before, Level? after, JObject settings,
+    private static int EditorActionFloor(JToken action) => TwirlEventToken.TryGetFloor(action, out int floor) ? floor
+        : action is JObject value ? (int?)value["floor"] ?? 0 : 0;
+
+    internal static (EditorLayers Layers, int FirstTimingFloor) PlanEditorRevision(Level before, Level? after, JObject settings,
         EditorEventAppend[]? appendedEvents = null)
     {
         var old = (JObject)before.root["settings"]!;
@@ -149,16 +161,28 @@ public sealed unsafe partial class LevelRenderer
             if (!JToken.DeepEquals(property.Value, old[property.Name])) layers |= EditorSettingLayers(property.Name);
         foreach (var property in old.Properties())
             if (!settings.ContainsKey(property.Name)) layers |= EditorSettingLayers(property.Name);
+        bool canReuseTiming = layers == EditorLayers.None;
+        int firstTimingFloor = int.MaxValue;
         if (appendedEvents is not null)
         {
             foreach (var append in appendedEvents)
-                layers |= EditorLayers.Bindings | (append.Decoration ? EditorLayers.Decoration : EditorActionLayers(append.Value));
+            {
+                var added = append.Decoration ? EditorLayers.Decoration : EditorActionLayers(append.Value);
+                layers |= EditorLayers.Bindings | added;
+                if ((added & EditorLayers.Timing) != 0)
+                    firstTimingFloor = Math.Min(firstTimingFloor, EditorActionFloor(append.Value));
+            }
         }
         else if (after is not null)
         {
             if (!JToken.DeepEquals(before.root["angleData"], after.root["angleData"]))
+            {
+                canReuseTiming = false;
                 layers |= EditorLayers.Timing | EditorLayers.Track | EditorLayers.Bindings;
-            layers |= ChangedActions(before.actions, after.actions);
+            }
+            var (changed, first) = ChangedActions(before.actions, after.actions);
+            layers |= changed;
+            firstTimingFloor = first;
             if (!JToken.DeepEquals(before.root["decorations"], after.root["decorations"]))
                 layers |= EditorLayers.Decoration | EditorLayers.Bindings;
         }
@@ -168,7 +192,7 @@ public sealed unsafe partial class LevelRenderer
         layers &= ~EditorLayers.LegacyDecorations;
         if (layers.HasFlag(EditorLayers.Timing)) layers |= TimedLayers | EditorLayers.Manual | EditorLayers.Audio;
         if (layers.HasFlag(EditorLayers.Track)) layers |= EditorLayers.Camera;
-        return layers;
+        return (layers, canReuseTiming && firstTimingFloor != int.MaxValue ? Math.Max(0, firstTimingFloor) : 0);
     }
 
     internal bool BeginEditorRevision(Level? snapshot, JObject settingsJson, EditorChartPatch? patch = null)
@@ -192,7 +216,7 @@ public sealed unsafe partial class LevelRenderer
         var previousSettings = _settings;
         bool trackChanged = patch?.TrackChanged == true;
         EditorLayers immediate = snapshot is null && patch is null
-            ? PlanEditorRevision(level, null, settingsJson) : EditorLayers.Bindings;
+            ? PlanEditorRevision(level, null, settingsJson).Layers : EditorLayers.Bindings;
         if (!HasModIncrements && (immediate & ~(EditorLayers.Mixer | EditorLayers.CameraState)) == 0)
             _editorRevisionReady = Build(snapshot, immediate, CancellationToken.None);
         else
@@ -203,16 +227,23 @@ public sealed unsafe partial class LevelRenderer
             {
                 token.ThrowIfCancellationRequested();
                 Level? next = snapshot;
-                var settingsLayers = PlanEditorRevision(level, null, settingsJson);
+                var settingsLayers = PlanEditorRevision(level, null, settingsJson).Layers;
                 bool compatibleBindings = (settingsLayers & EditorLayers.Bindings) == 0;
                 var appends = patch?.AppendedEvents;
-                var appendLayers = appends is not null ? PlanEditorRevision(level, null, settingsJson, appends) : EditorLayers.None;
-                // Independent effect layers consume the new bound events and the current
-                // timing. Keep the full JSON tree untouched until the revision commits.
-                if (appends is not null && compatibleBindings && !level.EventsDeserialized &&
-                    (appendLayers & (EditorLayers.Track | EditorLayers.Timing | EditorLayers.Audio)) == 0)
+                var (appendLayers, appendFloor) = appends is not null
+                    ? PlanEditorRevision(level, null, settingsJson, appends) : (EditorLayers.None, 0);
+                if (appends is not null && compatibleBindings && !level.EventsDeserialized)
                 {
-                    return Build(null, appendLayers, token, appendedEvents: appends, patchOnCommit: patch);
+                    bool effectsOnly = (appendLayers & (EditorLayers.Track | EditorLayers.Timing | EditorLayers.Audio)) == 0;
+                    // All timing consumers can read the existing path and settings plus the staged events.
+                    // Leave the committed JSON untouched until the worker succeeds and the revision is accepted.
+                    bool timingOnly = settingsLayers == EditorLayers.None && !HasModIncrements &&
+                        (appendLayers & EditorLayers.Timing) != 0 &&
+                        Array.TrueForAll(appends, static append => !append.Decoration &&
+                            (EditorActionLayers(append.Value) & EditorLayers.Timing) != 0);
+                    if (effectsOnly || timingOnly)
+                        return Build(null, appendLayers, token, appendedEvents: appends, patchOnCommit: patch,
+                            firstChangedFloor: timingOnly ? appendFloor : 0);
                 }
                 bool anglesOnly = trackChanged && compatibleBindings && patch!.PreservesBindings && !HasModIncrements;
                 if (patch is not null)
@@ -240,9 +271,10 @@ public sealed unsafe partial class LevelRenderer
                 // already identify the change, so a token-by-token diff adds no information.
                 if (!trackChanged)
                 {
-                    var planned = appends is not null ? appendLayers :
-                        next is null ? immediate : PlanEditorRevision(level, next, settingsJson);
-                    return Build(next, planned, token, appendedEvents: compatibleBindings ? appends : null);
+                    var (planned, firstChangedFloor) = appends is not null ? (appendLayers, appendFloor) :
+                        next is null ? (immediate, 0) : PlanEditorRevision(level, next, settingsJson);
+                    return Build(next, planned, token, appendedEvents: compatibleBindings ? appends : null,
+                        firstChangedFloor: HasModIncrements ? 0 : firstChangedFloor);
                 }
                 var layers = settingsLayers | EditorLayers.Track | EditorLayers.Timing | EditorLayers.Bindings |
                     TimedLayers | EditorLayers.Manual | EditorLayers.Audio;
@@ -254,7 +286,7 @@ public sealed unsafe partial class LevelRenderer
 
         EditorRevisionUpdate Build(Level? next, EditorLayers layers, CancellationToken token,
             bool relocateBindings = false, bool preserveBindings = false, EditorEventAppend[]? appendedEvents = null,
-            EditorChartPatch? patchOnCommit = null, bool anglesOnly = false)
+            EditorChartPatch? patchOnCommit = null, bool anglesOnly = false, int firstChangedFloor = 0)
         {
             bool Has(EditorLayers layer) => (layers & layer) != 0;
             var model = next ?? level;
@@ -264,15 +296,25 @@ public sealed unsafe partial class LevelRenderer
                 model = level.CreateSnapshot(path);
             if (!anglesOnly && !ReferenceEquals(model, level)) WriteEditorSettings(model, settingsJson);
             var view = ReferenceEquals(model, level) ? LevelPlaybackSettings.Read(settingsJson) : LevelPlaybackSettings.Read(model);
-            var coreEvents = Has(EditorLayers.Track | EditorLayers.Timing)
-                ? FloorCoreEvents.Read(anglesOnly ? level.actions : model.actions, model.angles.Count + 1, token) : null;
+            FloorCoreEvents? coreEvents = null;
+            if (Has(EditorLayers.Track | EditorLayers.Timing))
+            {
+                var stagedActions = patchOnCommit is not null && appendedEvents is not null
+                    ? appendedEvents.Where(static item => !item.Decoration).Select(static item => item.Value).ToArray()
+                    : null;
+                coreEvents = FloorCoreEvents.Read(anglesOnly ? level.actions : model.actions,
+                    model.angles.Count + 1, token, stagedActions);
+            }
             var events = preserveBindings ? previousEvents :
                 relocateBindings ? PlaybackEventBinder.RelocateEditorEvents(level, model, previousEvents, token) :
                 appendedEvents is not null ? PlaybackEventBinder.AppendEditorEvents(previousEvents, appendedEvents, settingsJson) :
                 Has(EditorLayers.Bindings) ? PlaybackEventBinder.BindForEditor(model, token) : previousEvents;
             var settings = view with { SkipAudio = previousSettings.SkipAudio };
             var nextFloors = Has(EditorLayers.Track) ? CreatePlaybackFloors(model, settings, coreEvents!) : floors;
-            var timeline = Has(EditorLayers.Timing) ? BuildTimeline(model, nextFloors, events, coreEvents, editor: true) : previousTimeline;
+            var timeline = Has(EditorLayers.Timing)
+                ? BuildTimeline(model, nextFloors, events, coreEvents, editor: true,
+                    previous: firstChangedFloor > 0 ? previousTimeline : null, firstChangedFloor: firstChangedFloor)
+                : previousTimeline;
             if (Has(EditorLayers.Rate)) timeline = timeline with { Pitch = ReadPlaybackPitch(settingsJson) };
             var update = new EditorRevisionUpdate(anglesOnly ? level : model, settingsJson, settings, layers, events, timeline)
             {

@@ -366,6 +366,7 @@ public sealed unsafe partial class LevelRenderer : IDisposable
         public double[] EntryTimes { get; init; } = [];
         public double[] FloorBpms { get; init; } = [];
         public IReadOnlyDictionary<int, FloorTimingCalculator.SpeedContext>? SpeedContexts { get; init; }
+        public FloorTimingCalculator.TimingCheckpoints? TimingCheckpoints { get; init; }
         public double[] SweepStart { get; init; } = [];
         public double[] SweepDelta { get; init; } = [];
         public PlanetTrackFloor[] PlanetTrack { get; init; } = [];

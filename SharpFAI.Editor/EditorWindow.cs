@@ -401,7 +401,7 @@ internal sealed unsafe partial class EditorWindow : GameWindow
         ImGui.DockBuilderSetNodeSize(dock, viewport->WorkSize);
         uint canvas = dock;
         float footerHeight = Math.Max(PlaybackColumnHeight, TimelineContentHeight +
-            3 * ImGui.GetFrameHeightWithSpacing() + EventTileSide) + 2 * FooterInset;
+            3 * ImGui.GetFrameHeightWithSpacing() + EventTileSide) + 2 * PanelInset;
         float footerRatio = Math.Clamp(footerHeight / Math.Max(1, viewport->WorkSize.y), .18f, .60f);
         uint footer = ImGui.DockBuilderSplitNode(canvas, ImGuiDir.ImGuiDir_Down, footerRatio, null, &canvas);
         _footerDock = footer;

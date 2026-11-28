@@ -39,7 +39,7 @@ public sealed unsafe partial class LevelRenderer
     /// The music, the hitsound and every visual share this single clock, so they cannot drift apart.
     /// </summary>
     internal static PlaybackTimeline BuildTimeline(Level level, List<Floor> floors, IReadOnlyList<PlaybackEvent>? events = null,
-        FloorCoreEvents? coreEvents = null, bool editor = false)
+        FloorCoreEvents? coreEvents = null, bool editor = false, PlaybackTimeline? previous = null, int firstChangedFloor = 0)
     {
         if (floors.Count == 0)
         {
@@ -48,17 +48,26 @@ public sealed unsafe partial class LevelRenderer
 
         // The chart clock includes the countdown and the actual initial sweep. The same timing
         // data carries Pause / Hold extra beats for the later sweeps.
-        Dictionary<int, FloorTimingCalculator.SpeedContext>? speedContexts = editor ? [] : null;
-        List<FloorTimingCalculator.FloorData> timing = speedContexts is not null
-            ? FloorTimingCalculator.Calculate(level, coreEvents, speedContexts) : coreEvents is null
-            ? FloorTimingCalculator.Calculate(level) : FloorTimingCalculator.Calculate(level, coreEvents);
-        events ??= PlaybackEventBinder.BindForPlayback(level);
-        PlanetTrackFloor[] planetTrack = PlanetTrackFloor.Resolve(timing, events);
-        Dictionary<int, (EventEnums.AngleCorrectionDirection Direction, int Ticks)> pauseOptions = [];
-        foreach (PauseAngleEvent pause in events.OfType<PauseAngleEvent>().Where(pause => pause.IsActive))
+        if (previous?.EntryTimes.Length != floors.Count) previous = null;
+        var editorTiming = editor
+            ? FloorTimingCalculator.CalculateForEditor(level, coreEvents, previous?.TimingCheckpoints, firstChangedFloor) : null;
+        var timing = editorTiming?.Floors ?? (coreEvents is null
+            ? FloorTimingCalculator.Calculate(level) : FloorTimingCalculator.Calculate(level, coreEvents));
+        int firstFloor = editorTiming?.FirstFloor ?? 0;
+        var speedContexts = editorTiming?.SpeedContexts;
+        if (speedContexts is not null && CopyBefore(previous?.SpeedContexts, firstFloor) is { } mergedSpeedContexts)
         {
-            var previous = pauseOptions.GetValueOrDefault(pause.Floor, (EventEnums.AngleCorrectionDirection.Backward, 0));
-            pauseOptions[pause.Floor] = (pause.Enabled("angleCorrectionDir", pause.AngleCorrectionDir) ?? previous.Item1,
+            foreach (var (floor, context) in speedContexts) mergedSpeedContexts.Add(floor, context);
+            speedContexts = mergedSpeedContexts;
+        }
+        events ??= PlaybackEventBinder.BindForPlayback(level);
+        PlanetTrackFloor[] planetTrack = PlanetTrackFloor.Resolve(timing, events, firstFloor, previous?.PlanetTrack);
+        Dictionary<int, (EventEnums.AngleCorrectionDirection Direction, int Ticks)> pauseOptions = [];
+        foreach (PauseAngleEvent pause in events.OfType<PauseAngleEvent>())
+        {
+            if (!pause.IsActive || pause.Floor < firstFloor) continue;
+            var prior = pauseOptions.GetValueOrDefault(pause.Floor, (EventEnums.AngleCorrectionDirection.Backward, 0));
+            pauseOptions[pause.Floor] = (pause.Enabled("angleCorrectionDir", pause.AngleCorrectionDir) ?? prior.Item1,
                 pause.Enabled("countdownTicks", pause.CountdownTicks) ?? 0);
         }
 
@@ -80,14 +89,20 @@ public sealed unsafe partial class LevelRenderer
 
         double[] entryTimes = new double[floors.Count];
         double[] floorBpms = new double[floors.Count];
+        if (firstFloor > 0)
+        {
+            Array.Copy(previous!.EntryTimes, entryTimes, firstFloor);
+            Array.Copy(previous.FloorBpms, floorBpms, firstFloor);
+        }
         double chartTime = 0.0;
-        for (int i = 0; i < floors.Count; i++)
+        for (int i = firstFloor; i < floors.Count; i++)
         {
             double floorBpm = floors[i].bpm;
-            if (i < timing.Count)
+            int local = i - firstFloor;
+            if (local < timing.Count)
             {
-                chartTime = timing[i].EntryTime;
-                floorBpm = bpm * timing[i].Speed;
+                chartTime = timing[local].EntryTime;
+                floorBpm = bpm * timing[local].Speed;
             }
             floorBpms[i] = double.IsFinite(floorBpm) && floorBpm > 1e-6 ? floorBpm : bpm;
 
@@ -101,10 +116,15 @@ public sealed unsafe partial class LevelRenderer
         // to "towards the next": 180 degrees on a straight run, 180 plus the turn at a corner.
         double[] sweepStart = new double[floors.Count];
         double[] sweepDelta = new double[floors.Count];
+        if (firstFloor > 0)
+        {
+            Array.Copy(previous!.SweepStart, sweepStart, firstFloor);
+            Array.Copy(previous.SweepDelta, sweepDelta, firstFloor);
+        }
 
         // Pause and Hold stretch a tile's window, but the planet's angular speed must not drop: it
         // takes extra whole turns instead of turning slower.
-        for (int i = 1; i < floors.Count; i++)
+        for (int i = Math.Max(1, firstFloor); i < floors.Count; i++)
         {
             // Our basis is (cos, sin), so clockwise is negative
             double direction = floors[i].isCW ? -1.0 : 1.0;
@@ -131,31 +151,33 @@ public sealed unsafe partial class LevelRenderer
             }
 
             // Turn the extra window from Pause / Hold into extra rotation, keeping angular speed constant
-            swept += ExtraSweepDegrees(timing, i);
+            int local = i - firstFloor;
+            if (local < timing.Count) swept += ExtraSweepDegrees(timing[local]);
 
             sweepStart[i] = from;
             sweepDelta[i] = swept * direction;
         }
 
-        Dictionary<int, PauseAngleCorrection>? pauseAngles = null;
-        Dictionary<int, double>? pauseLocks = null;
-        Dictionary<int, PauseStartTiming>? pauseStarts = null;
+        var pauseAngles = CopyBefore(previous?.PauseAngles, firstFloor);
+        var pauseLocks = CopyBefore(previous?.PauseLocks, firstFloor);
+        var pauseStarts = CopyBefore(previous?.PauseStarts, firstFloor);
         foreach (var (i, (correction, ticks)) in pauseOptions)
         {
-            if (i <= 0 || i >= floors.Count - 1 || i >= timing.Count || floors[i].isMidspin
-                || !(timing[i].ExtraBeats > 0.0))
+            int local = i - firstFloor;
+            if (i <= 0 || i >= floors.Count - 1 || local >= timing.Count || floors[i].isMidspin
+                || !(timing[local].ExtraBeats > 0.0))
                 continue;
 
             double direction = floors[i].isCW ? -1.0 : 1.0;
             double beat = 60.0 / floorBpms[i];
-            double pauseBeats = timing[i].ExtraBeats;
+            double pauseBeats = timing[local].ExtraBeats;
             int leadBeats = ticks > 1 && pauseBeats >= ticks ? ticks : 4;
             (pauseStarts ??= [])[i] = new(entryTimes[i] + pauseBeats * beat, beat, leadBeats);
             double inputLock = (pauseBeats + .2) * beat;
             if (entryTimes[i + 1] - entryTimes[i] - inputLock >= .05)
                 (pauseLocks ??= [])[i] = inputLock;
 
-            double pauseSweep = timing[i].ExtraBeats * 180.0 * direction;
+            double pauseSweep = pauseBeats * 180.0 * direction;
             // The three-planet sweep is already anchored at the exit.
             if (planetTrack[i].Count != 3)
                 sweepStart[i] -= pauseSweep;
@@ -167,7 +189,7 @@ public sealed unsafe partial class LevelRenderer
                 (pauseAngles ??= [])[i] = new PauseAngleCorrection(offset, 60.0 / floorBpms[i]);
         }
 
-        if (floors.Count > 1)
+        if (firstFloor == 0 && floors.Count > 1)
         {
             // The opening sweep ends pointing from the start marker to floor 1. Only its visible
             // part is evaluated because the file clock starts at zero.
@@ -197,6 +219,7 @@ public sealed unsafe partial class LevelRenderer
             EntryTimes = entryTimes,
             FloorBpms = floorBpms,
             SpeedContexts = speedContexts,
+            TimingCheckpoints = editorTiming?.Checkpoints,
             SweepStart = sweepStart,
             SweepDelta = sweepDelta,
             PlanetTrack = planetTrack,
@@ -210,6 +233,15 @@ public sealed unsafe partial class LevelRenderer
             Pitch = pitch,
             SnapBpm = bpm,
         };
+    }
+
+    private static Dictionary<int, T>? CopyBefore<T>(IReadOnlyDictionary<int, T>? previous, int firstFloor)
+    {
+        if (previous is null || firstFloor == 0) return null;
+        Dictionary<int, T>? result = null;
+        foreach (var (floor, value) in previous)
+            if (floor < firstFloor) (result ??= [])[floor] = value;
+        return result;
     }
 
     internal static double ReadPlaybackPitch(Newtonsoft.Json.Linq.JObject? settings)
@@ -270,14 +302,8 @@ public sealed unsafe partial class LevelRenderer
     /// Rotation a tile gains from its Pause / Hold extra window; without it the longer window would
     /// read as a slower planet.
     /// </summary>
-    private static double ExtraSweepDegrees(List<FloorTimingCalculator.FloorData> timing, int index)
+    private static double ExtraSweepDegrees(FloorTimingCalculator.FloorData data)
     {
-        if (index <= 0 || index >= timing.Count)
-        {
-            return 0.0;
-        }
-
-        FloorTimingCalculator.FloorData data = timing[index];
         double extraBeats = data.ExtraBeats;
 
         if (data.HoldLength > 0)

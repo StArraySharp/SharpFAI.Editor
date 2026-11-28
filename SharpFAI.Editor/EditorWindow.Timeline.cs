@@ -32,7 +32,7 @@ internal sealed unsafe partial class EditorWindow
     private float TimelineHeight(int trackCount) => TimelineRulerHeight + TimelineFloorHeight * trackCount;
     private bool HasTimelineSnapshot => _timelineDocument == _document && _timelineTiming is not null;
 
-    private float DrawChartTimeline(LevelRenderer? renderer, bool editing, int trackCount)
+    private float DrawChartTimeline(LevelRenderer? renderer, bool editing, int trackCount, float contentBottom)
     {
         if (!_showTimeline)
         {
@@ -51,7 +51,7 @@ internal sealed unsafe partial class EditorWindow
         {
             EndTimelineRangePreview();
             var origin = ImGui.GetCursorScreenPos();
-            float extra = AvailableTimelineHeight(trackCount);
+            float extra = AvailableTimelineHeight(trackCount, contentBottom);
             var size = WidgetDraw.V2(Math.Max(1, ImGui.GetContentRegionAvail().x), TimelineHeight(trackCount) + extra);
             var end = WidgetDraw.V2(origin.x + size.x, origin.y + size.y);
             var draw = ImGui.GetWindowDrawList();
@@ -110,7 +110,7 @@ internal sealed unsafe partial class EditorWindow
         ImGui.BeginDisabled((byte)(ready ? 0 : 1));
         DrawTimelineRangeControls(duration, editing, timing.EntryTimes, canSeek);
         ImGui.EndDisabled();
-        float extraHeight = AvailableTimelineHeight(trackCount);
+        float extraHeight = AvailableTimelineHeight(trackCount, contentBottom);
         if (_chartTimeline.Waveform is not null)
         {
             _chartTimeline.ExtraBeatHeight = extraHeight;
@@ -144,12 +144,8 @@ internal sealed unsafe partial class EditorWindow
         return extraHeight;
     }
 
-    private float AvailableTimelineHeight(int trackCount)
-    {
-        ImGuiStyle* style = ImGui.GetStyle();
-        return MathF.Floor(Math.Max(0,
-            ImGui.GetContentRegionAvail().y - TimelineHeight(trackCount) - style->CellPadding.y - style->ItemSpacing.y));
-    }
+    private float AvailableTimelineHeight(int trackCount, float contentBottom) =>
+        Math.Max(0, contentBottom - ImGui.GetCursorScreenPos().y - TimelineHeight(trackCount));
 
     private void UpdateTimelineSnapshot(LevelRenderer renderer, LevelRenderer.PlaybackTimeline timing, bool editing)
     {

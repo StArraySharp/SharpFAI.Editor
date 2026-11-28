@@ -253,11 +253,11 @@ internal sealed unsafe partial class EditorWindow
                     if (_displayedRevision == target) goto PlaybackReady;
 
                     bool tileEdit = _document.HasOnlyTileEditsSince(current.Version);
+                    bool eventAppend = _document.HasOnlyEventAppendsSince(current.Version);
                     bool nearEnd = _document.LastFloor - _floor < 64;
-                    bool tailEdit = nearEnd && (tileEdit || _document.HasOnlyEventAppendsSince(current.Version));
                     double delay = 0.12;
-                    if (editing && tileEdit && _document.IsLargeChart && !nearEnd) delay = 0.25;
-                    else if (editing && (tailEdit || tileEdit && !_document.IsLargeChart)) delay = 0.035;
+                    if (editing && eventAppend) delay = _document.IsLargeChart && !nearEnd ? 0.065 : 0.035;
+                    else if (editing && tileEdit) delay = _document.IsLargeChart && !nearEnd ? 0.25 : 0.035;
                     if (!effectsFailed && !_startPlayback && !_document.CanReusePlaybackChart(current.Version) &&
                         now - _lastPreviewEdit < delay) return;
 

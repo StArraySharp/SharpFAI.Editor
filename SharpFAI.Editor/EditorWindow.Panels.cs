@@ -24,9 +24,9 @@ internal sealed unsafe partial class EditorWindow
 
     private void DrawSettings()
     {
-        if (!_showSettings)
+        if (!_showSettings || !BeginFramedSidePanel(SettingsWindow, ref _showSettings))
             return;
-        if (BeginPanel(SettingsWindow, ref _showSettings) && ImGui.BeginTabBar("##settings-tabs",
+        if (ImGui.BeginTabBar("##settings-tabs",
                 (int)ImGuiTabBarFlags.ImGuiTabBarFlags_FittingPolicyScroll) != 0)
         {
             foreach (string tab in _catalog.SettingsTabs)
@@ -59,7 +59,7 @@ internal sealed unsafe partial class EditorWindow
             }
             ImGui.EndTabBar();
         }
-        ImGui.End();
+        EndFramedSidePanel();
     }
 
     private void DrawDecorations()
@@ -71,7 +71,7 @@ internal sealed unsafe partial class EditorWindow
             ImGui.SetNextWindowFocus();
             _focusDecorations = false;
         }
-        if (BeginPanel(DecorationsWindow, ref _showDecorations))
+        if (BeginFramedSidePanel(DecorationsWindow, ref _showDecorations))
         {
             ImGui.SetNextItemWidth(-1);
             if (EditText("##decoration-search", L.T("SearchDecorations"), _decorationFilter, true) is { } filter)
@@ -215,8 +215,8 @@ internal sealed unsafe partial class EditorWindow
                 }
             }
             ImGui.EndChild();
+            EndFramedSidePanel();
         }
-        ImGui.End();
 
         static bool RowAction(string id, string label, ControlIcon icon, bool menu, bool selected = false, bool enabled = true)
         {
@@ -323,7 +323,7 @@ internal sealed unsafe partial class EditorWindow
     {
         if (!_showInspector)
             return;
-        if (BeginPanel(InspectorWindow, ref _showInspector))
+        if (BeginFramedSidePanel(InspectorWindow, ref _showInspector))
         {
             if (_inspectDecoration && _decoration is { Parent: not null } decoration)
             {
@@ -384,8 +384,8 @@ internal sealed unsafe partial class EditorWindow
                 }
                 ImGui.EndChild();
             }
+            EndFramedSidePanel();
         }
-        ImGui.End();
     }
 
     private void DrawSelectionStatistics()
@@ -514,9 +514,9 @@ internal sealed unsafe partial class EditorWindow
     private float? _footerContentHeight;
     private float? _appliedFooterContentHeight;
     private int PlaybackColumnRows => _showTimeline ? 8 : 5;
-    private float PlaybackColumnHeight => PlaybackColumnRows * CompactPlaybackRowHeight + 2 * FooterCellInset;
-    private static float FooterInset => ImGui.GetStyle()->WindowPadding.x;
-    private static float FooterCellInset => ImGui.GetStyle()->CellPadding.x;
+    private float PlaybackColumnHeight => PlaybackColumnRows * CompactPlaybackRowHeight + 2 * PanelContentInset;
+    private static float PanelInset => ImGui.GetStyle()->WindowPadding.x;
+    private static float PanelContentInset => ImGui.GetStyle()->CellPadding.x;
     private static float CompactPlaybackRowHeight =>
         ImGui.GetTextLineHeight() + 2 * CompactPlaybackPadding + CompactPlaybackSpacing;
     private static float CompactPlaybackPadding => MathF.Floor(Math.Min(ImGui.GetStyle()->FramePadding.y, ImGui.GetFontSize() * .23f));
@@ -531,11 +531,8 @@ internal sealed unsafe partial class EditorWindow
         const ImGuiTableFlags layoutFlags = ImGuiTableFlags.ImGuiTableFlags_BordersOuter |
             ImGuiTableFlags.ImGuiTableFlags_BordersInnerV |
             ImGuiTableFlags.ImGuiTableFlags_NoSavedSettings;
-        float inset = FooterInset;
-        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_WindowPadding, WidgetDraw.V2(inset, inset));
-        bool visible = BeginPanel(PaletteWindow, ref open);
-        ImGui.PopStyleVar();
-        if (visible)
+        float inset = PanelInset;
+        if (BeginInsetPanel(PaletteWindow, ref open))
         {
             ImVec2 available = ImGui.GetContentRegionAvail();
             float transportWidth = Math.Max(102 * _uiScale, Math.Max(
@@ -545,7 +542,8 @@ internal sealed unsafe partial class EditorWindow
                 transportWidth = Math.Max(transportWidth, Math.Max(ActionWidth(L.T("Metronome")),
                     Math.Max(ActionWidth(L.T("TimelineFit")),
                         Math.Max(ActionWidth(L.T("TimelineLoopRange")), ActionWidth(L.T("TimelineStopLoop"))))));
-            float cellInset = FooterCellInset;
+            float cellInset = PanelContentInset;
+            float contentBottom = ImGui.GetCursorScreenPos().y + available.y - cellInset;
             ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_CellPadding, WidgetDraw.V2(cellInset, cellInset));
             if (ImGui.BeginTable("##event-footer", 2, (int)layoutFlags,
                     WidgetDraw.V2(0, Math.Max(0, available.y))) != 0)
@@ -556,9 +554,9 @@ internal sealed unsafe partial class EditorWindow
                 ImGui.TableNextColumn();
                 // Measure the compact rows so stretching the controls doesn't grow the dock again.
                 float transportBottom = ImGui.GetCursorPosY() + PlaybackColumnRows * CompactPlaybackRowHeight;
-                DrawPlaybackColumn();
+                DrawPlaybackColumn(contentBottom);
                 ImGui.TableNextColumn();
-                float contentHeightAdjustment = DrawPaletteContents(out bool timelineReady);
+                float contentHeightAdjustment = DrawPaletteContents(contentBottom, out bool timelineReady);
                 float eventsBottom = ImGui.GetCursorPosY() + contentHeightAdjustment;
                 ImGui.EndTable();
 
@@ -582,7 +580,7 @@ internal sealed unsafe partial class EditorWindow
             _showPalette = _showTimeline = false;
     }
 
-    private float DrawPaletteContents(out bool timelineReady)
+    private float DrawPaletteContents(float contentBottom, out bool timelineReady)
     {
         var timelineRenderer = _showTimeline && HasCurrentPlayback &&
             _playback is { EditorTiming: not null } renderer && double.IsFinite(renderer.Duration)
@@ -597,31 +595,37 @@ internal sealed unsafe partial class EditorWindow
             timelineRenderer = null;
             if (HasTimelineSnapshot) trackCount = 1 + _timelineEventTracks.Length;
         }
-        float extraTimelineHeight = DrawChartTimeline(timelineRenderer, _playbackView == PlaybackView.Edit, trackCount);
+        float extraTimelineHeight = DrawChartTimeline(timelineRenderer, _playbackView == PlaybackView.Edit, trackCount, contentBottom);
         timelineReady = timelineRenderer is not null;
         return eventHeightAdjustment - extraTimelineHeight;
     }
 
-    private void DrawPlaybackColumn()
+    private void DrawPlaybackColumn(float contentBottom)
     {
         ImGuiStyle* style = ImGui.GetStyle();
         float padding = CompactPlaybackPadding;
         float spacing = CompactPlaybackSpacing;
+        float top = ImGui.GetCursorPosY();
         if (_showTimeline)
         {
             int rows = PlaybackColumnRows;
-            float spareHeight = Math.Max(0, ImGui.GetContentRegionAvail().y - style->CellPadding.y -
-                rows * CompactPlaybackRowHeight);
+            float spareHeight = Math.Max(0, contentBottom - ImGui.GetCursorScreenPos().y -
+                (rows * CompactPlaybackRowHeight - spacing));
             float extraPadding = MathF.Floor(Math.Min(3 * _uiScale, spareHeight / (2 * rows)));
             padding += extraPadding;
-            spacing += MathF.Floor((spareHeight - 2 * rows * extraPadding) / rows);
+            spacing += (spareHeight - 2 * rows * extraPadding) / (rows - 1);
         }
+        float rowPitch = ImGui.GetTextLineHeight() + 2 * padding + spacing;
+        int row = 0;
+        void NextRow() => ImGui.SetCursorPosY(MathF.Round(top + ++row * rowPitch));
+
         ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_FramePadding,
             WidgetDraw.V2(style->FramePadding.x, padding));
         ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_ItemSpacing,
             WidgetDraw.V2(style->ItemSpacing.x, spacing));
         if (Action("restart", ControlIcon.Restart, stretch: true)) SelectFloor(0, true);
         WidgetDraw.ItemTooltip(L.T("GoToStart"));
+        NextRow();
         string play = L.T(PlaybackCanPause ? "Pause" : "Play");
         if (Action("transport-play", PlaybackCanPause ? ControlIcon.Pause : ControlIcon.Play, play,
                 emphasized: true, stretch: true))
@@ -632,24 +636,28 @@ internal sealed unsafe partial class EditorWindow
         }
         WidgetDraw.ItemTooltip(L.T("PlayTooltip"));
 
+        NextRow();
         bool manual = _manualPlay;
         if (EditorControls.Toggle(L.T("Manual"), ref manual, stretch: true)) SetManualPlayMode(manual);
         WidgetDraw.ItemTooltip(L.T("ManualTooltip"));
 
+        NextRow();
         bool noFail = _noFail;
         if (EditorControls.Toggle(L.T("NoFail"), ref noFail, stretch: true)) SetNoFail(noFail);
         WidgetDraw.ItemTooltip("Alt+N");
 
+        NextRow();
         ImGui.SetNextItemWidth(Math.Max(1, ImGui.GetContentRegionAvail().x - IconButtonWidth - style->ItemSpacing.x));
         DrawPlaybackSpeed();
         ImGui.SameLine();
         DrawQuickAudition();
-        if (_showTimeline) DrawTimelinePlaybackButtons();
+        if (_showTimeline) DrawTimelinePlaybackButtons(top + (row + 1) * rowPitch, rowPitch);
         ImGui.PopStyleVar(2);
     }
 
-    private void DrawTimelinePlaybackButtons()
+    private void DrawTimelinePlaybackButtons(float top, float rowPitch)
     {
+        ImGui.SetCursorPosY(MathF.Round(top));
         if (Action("timeline-metronome", ControlIcon.Metronome, L.T("Metronome"), emphasized: _metronomeEnabled, stretch: true))
         {
             _metronomeEnabled = !_metronomeEnabled;
@@ -658,6 +666,7 @@ internal sealed unsafe partial class EditorWindow
         }
         WidgetDraw.ItemTooltip(L.T(_metronomeEnabled ? "MetronomeOn" : "MetronomeOff"));
 
+        ImGui.SetCursorPosY(MathF.Round(top + rowPitch));
         ImGui.BeginDisabled((byte)(HasTimelineSnapshot ? 0 : 1));
         if (Action("timeline-fit-song", ControlIcon.Fit, L.T("TimelineFit"), stretch: true))
         {
@@ -666,6 +675,7 @@ internal sealed unsafe partial class EditorWindow
         }
         ImGui.EndDisabled();
 
+        ImGui.SetCursorPosY(MathF.Round(top + 2 * rowPitch));
         bool hasRange = HasTimelineSnapshot && _chartTimeline.PlaybackRange is { IsValid: true };
         bool canLoop = hasRange && HasCurrentPlayback && _playbackView != PlaybackView.Manual;
         bool looping = _loopingSelection is not null;
@@ -1049,6 +1059,42 @@ internal sealed unsafe partial class EditorWindow
     private static bool Toggle(string label, ref bool value) => ImGui.Checkbox(label, ref value) != 0;
 
     private static bool BeginPanel(string title, ref bool open) => ImGui.Begin(title, ref open) != 0;
+
+    private static bool BeginInsetPanel(string title, ref bool open)
+    {
+        float inset = PanelInset;
+        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_WindowPadding, WidgetDraw.V2(inset, inset));
+        bool visible = BeginPanel(title, ref open);
+        ImGui.PopStyleVar();
+        return visible;
+    }
+
+    private static bool BeginFramedSidePanel(string title, ref bool open)
+    {
+        if (!BeginInsetPanel(title, ref open))
+        {
+            ImGui.End();
+            return false;
+        }
+
+        float inset = PanelContentInset;
+        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_WindowPadding, WidgetDraw.V2(inset, inset));
+        ImGui.PushStyleVar((int)ImGuiStyleVar.ImGuiStyleVar_ChildRounding, 0f);
+        ImGui.PushStyleColor((int)ImGuiCol.ImGuiCol_ChildBg, default(ImVec4));
+        ImGui.PushStyleColor((int)ImGuiCol.ImGuiCol_Border,
+            *ImGui.GetStyleColorVec4((int)ImGuiCol.ImGuiCol_TableBorderStrong));
+        bool visible = ImGui.BeginChild("##panel-body", default, (int)ImGuiChildFlags.ImGuiChildFlags_Borders) != 0;
+        ImGui.PopStyleColor(2);
+        ImGui.PopStyleVar(2);
+        if (!visible) EndFramedSidePanel();
+        return visible;
+    }
+
+    private static void EndFramedSidePanel()
+    {
+        ImGui.EndChild();
+        ImGui.End();
+    }
 
     private static string? EditText(string id, string hint, string value, bool live, int extraFlags = 0)
     {

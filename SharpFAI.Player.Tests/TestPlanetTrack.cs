@@ -148,6 +148,122 @@ public class TestPlanetTrack
             Is.EqualTo(level.DeserializeEvents().Select(e => (e.EventType, e.Floor))));
     }
 
+    [Test]
+    public void StagedTimingAppendsMatchRebuildingTheChart()
+    {
+        Level level = Chart(
+            """{"floor":1,"eventType":"SetSpeed","speedType":"Bpm","beatsPerMinute":150}""",
+            """{"floor":2,"eventType":"Twirl"}""")
+            .CreateSnapshot(null, action => TwirlEventToken.Pack(action) ?? action.DeepClone());
+        JObject[] actions =
+        [
+            JObject.Parse("""{"floor":1,"eventType":"SetSpeed","speedType":"Multiplier","bpmMultiplier":2}"""),
+            JObject.Parse("""{"floor":2,"eventType":"Twirl"}"""),
+            JObject.Parse("""{"floor":3,"eventType":"Pause","duration":0.5,"angleCorrectionDir":"Forward"}"""),
+            JObject.Parse("""{"floor":4,"eventType":"Hold","duration":2,"active":false}"""),
+            JObject.Parse("""{"floor":4,"eventType":"MultiPlanet","planets":"ThreePlanets"}"""),
+        ];
+        var appended = actions.Select((value, index) =>
+            new LevelRenderer.EditorEventAppend(level.actions.Count + index, false, value)).ToArray();
+        var committed = PlaybackEventBinder.BindForEditor(level);
+        var staged = PlaybackEventBinder.AppendEditorEvents(committed, appended, (JObject)level.root["settings"]!);
+        var stagedCore = FloorCoreEvents.Read(level.actions, level.angles.Count + 1, default, actions);
+        var stagedFloors = level.CreatePlaybackFloors(stagedCore);
+        var stagedTimeline = LevelRenderer.BuildTimeline(level, stagedFloors, staged, stagedCore, editor: true);
+
+        var rebuilt = level.CreateSnapshot();
+        foreach (var action in actions) rebuilt.actions.Add(action.DeepClone());
+        var rebuiltCore = FloorCoreEvents.Read(rebuilt);
+        var rebuiltFloors = rebuilt.CreatePlaybackFloors(rebuiltCore);
+        var rebuiltTimeline = LevelRenderer.BuildTimeline(rebuilt, rebuiltFloors,
+            PlaybackEventBinder.BindForEditor(rebuilt), rebuiltCore, editor: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(stagedTimeline.EntryTimes, Is.EqualTo(rebuiltTimeline.EntryTimes));
+            Assert.That(stagedTimeline.FloorBpms, Is.EqualTo(rebuiltTimeline.FloorBpms));
+            Assert.That(stagedTimeline.SweepDelta, Is.EqualTo(rebuiltTimeline.SweepDelta));
+            Assert.That(stagedTimeline.PauseStarts, Is.EqualTo(rebuiltTimeline.PauseStarts));
+            Assert.That(stagedFloors.Select(f => (f.isCW, f.icon, f.iconAngle)),
+                Is.EqualTo(rebuiltFloors.Select(f => (f.isCW, f.icon, f.iconAngle))));
+            Assert.That(level.actions, Has.Count.EqualTo(2));
+            Assert.That(actions.All(action => action.Parent is null), Is.True);
+        });
+    }
+
+    [TestCase(1)]
+    [TestCase(128)]
+    [TestCase(129)]
+    [TestCase(257)]
+    [TestCase(390)]
+    public void IncrementalTimingMatchesAFullBuildAcrossCheckpointBoundaries(int editedFloor)
+    {
+        var angles = new JArray(Enumerable.Range(0, 401).Select(i => i is 127 or 128 or 255 or 256 ? 999 : (i * 45) % 360));
+        var level = ChartWithAngles(angles,
+            """{"floor":12,"eventType":"Twirl"}""",
+            """{"floor":127,"eventType":"SetSpeed","speedType":"Bpm","beatsPerMinute":190,"angleOffset":75}""",
+            """{"floor":128,"eventType":"MultiPlanet","planets":"ThreePlanets"}""",
+            """{"floor":162,"eventType":"Pause","duration":1,"angleCorrectionDir":"Forward"}""",
+            """{"floor":235,"eventType":"ScaleRadius","scale":150}""",
+            """{"floor":256,"eventType":"SetSpeed","speedType":"Multiplier","bpmMultiplier":1.5,"angleOffset":45}""",
+            """{"floor":288,"eventType":"Hold","duration":2}""");
+        var previous = Build(level);
+        var edited = level.CreateSnapshot();
+        edited.actions.Add(new JObject { ["floor"] = editedFloor, ["eventType"] = "MultiPlanet", ["planets"] = "TwoPlanets" });
+        edited.actions.Add(new JObject { ["floor"] = editedFloor, ["eventType"] = "SetSpeed",
+            ["speedType"] = "Bpm", ["beatsPerMinute"] = 243, ["angleOffset"] = 22.5 });
+        var settings = (JObject)edited.root["settings"]!;
+        var (_, firstChanged) = LevelRenderer.PlanEditorRevision(level, edited, settings);
+        Assert.That(firstChanged, Is.EqualTo(editedFloor));
+        var updated = Build(edited, previous, firstChanged);
+        ExpectSame(updated, Build(edited));
+        ExpectSame(Build(level, updated, firstChanged), previous);
+
+        var checkpointRun = FloorTimingCalculator.CalculateForEditor(edited, FloorCoreEvents.Read(edited),
+            previous.TimingCheckpoints, firstChanged);
+        Assert.That(checkpointRun.FirstFloor, Is.EqualTo(((editedFloor - 1) / 128) * 128));
+        Assert.That(checkpointRun.Floors.Count, Is.EqualTo(edited.angles.Count + 1 - checkpointRun.FirstFloor));
+
+        LevelRenderer.PlaybackTimeline Build(Level chart, LevelRenderer.PlaybackTimeline? prior = null, int first = 0)
+        {
+            var core = FloorCoreEvents.Read(chart);
+            return LevelRenderer.BuildTimeline(chart, chart.CreatePlaybackFloors(core),
+                PlaybackEventBinder.BindForEditor(chart), core, editor: true, previous: prior, firstChangedFloor: first);
+        }
+
+        static void ExpectSame(LevelRenderer.PlaybackTimeline actual, LevelRenderer.PlaybackTimeline expected)
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(actual.EntryTimes, Is.EqualTo(expected.EntryTimes));
+                Assert.That(actual.FloorBpms, Is.EqualTo(expected.FloorBpms));
+                Assert.That(actual.SpeedContexts, Is.EqualTo(expected.SpeedContexts));
+                Assert.That(actual.PlanetTrack, Is.EqualTo(expected.PlanetTrack));
+                Assert.That(actual.SweepStart, Is.EqualTo(expected.SweepStart));
+                Assert.That(actual.SweepDelta, Is.EqualTo(expected.SweepDelta));
+                Assert.That(actual.PauseStarts, Is.EqualTo(expected.PauseStarts));
+                Assert.That(actual.PauseAngles, Is.EqualTo(expected.PauseAngles));
+                Assert.That(actual.PauseLocks, Is.EqualTo(expected.PauseLocks));
+            });
+        }
+    }
+
+    [Test]
+    public void AChangedAngleOrBpmInvalidatesAllTimingCheckpoints()
+    {
+        var before = Chart("""{"floor":3,"eventType":"Pause","duration":1}""");
+        var after = before.CreateSnapshot();
+        ((JObject)after.actions[0]!)["duration"] = 2;
+        var settings = (JObject)after.root["settings"]!;
+        Assert.That(LevelRenderer.PlanEditorRevision(before, after, settings).FirstTimingFloor, Is.EqualTo(3));
+
+        settings["bpm"] = 200;
+        Assert.That(LevelRenderer.PlanEditorRevision(before, after, settings).FirstTimingFloor, Is.Zero);
+        settings["bpm"] = 120;
+        after.angleData[1] = 90;
+        Assert.That(LevelRenderer.PlanEditorRevision(before, after, settings).FirstTimingFloor, Is.Zero);
+    }
+
     [TestCase("Forward", 90)]
     [TestCase("Backward", -90)]
     [TestCase("None", 0)]
